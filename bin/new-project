@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# new-project — empty directory to a working, pipeline-equipped project
+#
+#   bin/new-project <path> [--name "Display Name"] [--domain example.com]
+#                          [--pack <name>]... [--no-git] [--allow-unsanitized]
+#
+# Creates the directory, writes pipeline.config.sh from your answers, installs
+# the pipeline (agents, skills, hooks, commands, harness), scaffolds the
+# workspace, generates a project CLAUDE.md, initialises git, and opens the
+# first work order.
+#
+# Writes only inside <path>. The pipeline repo is never modified.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+TARGET="" NAME="" DOMAIN="" DO_GIT=1 ALLOW_UNSANITIZED=0; PACKS_WANTED=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name)   NAME="$2"; shift 2;;
+    --domain) DOMAIN="$2"; shift 2;;
+    --pack)   PACKS_WANTED+=("$2"); shift 2;;
+    --no-git) DO_GIT=0; shift;;
+    --allow-unsanitized) ALLOW_UNSANITIZED=1; shift;;
+    -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0;;
+    -*) echo "new-project: unknown flag $1" >&2; exit 1;;
+    *)  TARGET="$1"; shift;;
+  esac
+done
+[ -n "$TARGET" ] || { sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1; }
+
+if [ -e "$TARGET" ] && [ -n "$(ls -A "$TARGET" 2>/dev/null)" ]; then
+  echo "new-project: $TARGET exists and is not empty." >&2
+  echo "             Use bin/install.sh to add the pipeline to an existing project." >&2
+  exit 1
+fi
+
+mkdir -p "$TARGET"
+TARGET="$(cd "$TARGET" && pwd)"
+BASE="$(basename "$TARGET")"
+slugify() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g' -e 's/^-//' -e 's/-$//'; }
+render_claude_md() { # dest — renders core/templates/project/CLAUDE.md with the binding + stack section
+  local dest="$1"
+  cp "$SRC/core/templates/project/CLAUDE.md" "$dest"
+  ( set -a; . "$TARGET/pipeline.config.sh"; set +a
+    for v in PROJECT_NAME PROJECT_SLUG PROJECT_DOMAIN GITHUB_REPO PROJECT_ROOT PIPELINE_ROOT WORKSPACE_DIR DOCS_DIR WORKORDERS_DIR BUGS_DIR TESTING_DIR SESSIONS_DIR API_APP ADMIN_APP PORTAL_APP DEV_APP WEB_APP SDK_PKG DB_NAME CLI_NAME; do
+      VAR="$v" VAL="${!v-}" perl -pi -e 's/\{\{\Q$ENV{VAR}\E\}\}/$ENV{VAL}/g' "$dest"
+    done )
+  python3 - "$dest" "$STACK_SECTION" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("{{STACK_SECTION}}", sys.argv[2]))
+PYEOF
+}
+[ -n "$NAME" ]   || NAME="$BASE"
+SLUG="$(slugify "$NAME")"
+[ -n "$DOMAIN" ] || DOMAIN="${SLUG}.local"
+DOMAIN_RE="$(echo "$DOMAIN" | sed 's/\./\\./g')"
+
+echo "Creating $NAME"
+echo "  path   : $TARGET"
+echo "  slug   : $SLUG"
+echo "  domain : $DOMAIN"
+echo
+
+# --- 1. Project binding ----------------------------------------------------
+sed -e "s|^export PROJECT_NAME=.*|export PROJECT_NAME=\"$NAME\"|" \
+    -e "s|^export PROJECT_SLUG=.*|export PROJECT_SLUG=\"$SLUG\"|" \
+    -e "s|^export PROJECT_DOMAIN=.*|export PROJECT_DOMAIN=\"$DOMAIN\"|" \
+    -e "s|^export PROJECT_DOMAIN_RE=.*|export PROJECT_DOMAIN_RE=\"$DOMAIN_RE\"|" \
+    -e "s|^export PROJECT_ROOT=.*|export PROJECT_ROOT=\"$TARGET\"|" \
+    -e "s|^export DB_NAME=.*|export DB_NAME=\"${SLUG//-/_}_dev\"|" \
+    "$SRC/pipeline.config.example.sh" > "$TARGET/pipeline.config.sh"
+echo "  wrote pipeline.config.sh"
+
+# --- 2. Install the pipeline ----------------------------------------------
+"$SRC/bin/install.sh" "$TARGET" | sed 's/^/  /'
+
+# --- 3. Knowledge packs ----------------------------------------------------
+PIPELINE_ROOT_VAL="$(. "$TARGET/pipeline.config.sh"; echo "$PIPELINE_ROOT")"
+DEST="$TARGET/$PIPELINE_ROOT_VAL"
+if [ ${#PACKS_WANTED[@]} -gt 0 ]; then
+  mkdir -p "$DEST/packs"
+  for p in "${PACKS_WANTED[@]}"; do
+    if [ -d "$SRC/packs/$p" ]; then
+      rc=0; "$SRC/bin/sanitize" "$SRC/packs/$p" --quiet >/dev/null 2>&1 || rc=$?
+      if [ "$rc" -eq 2 ]; then
+        if [ "$ALLOW_UNSANITIZED" -eq 0 ]; then
+          echo "  REFUSED: pack '$p' fails sanitization (secrets, PII, or internal references)." >&2
+          echo "           Run: $SRC/bin/sanitize $SRC/packs/$p --report /tmp/$p-report.md" >&2
+          echo "           Pass --allow-unsanitized only for a private, local install." >&2
+          continue
+        fi
+      fi
+      cp -R "$SRC/packs/$p" "$DEST/packs/"
+      echo "  pack installed: $p ($(du -sh "$DEST/packs/$p" | cut -f1))"
+    else
+      echo "  WARNING: no pack named '$p' — available: $(ls "$SRC/packs" 2>/dev/null | tr '\n' ' ')" >&2
+    fi
+  done
+  cp -p "$SRC/bin/pack" "$DEST/bin/pack"; chmod +x "$DEST/bin/pack"
+  ( cd "$DEST" && ./bin/pack index >/dev/null 2>&1 ) || true
+else
+  echo "  no packs installed (add later: cp -R $SRC/packs/<name> $DEST/packs/)"
+fi
+
+# --- 4. Project CLAUDE.md --------------------------------------------------
+STACK_SECTION="$("$SRC/bin/detect-stack" "$TARGET" --json 2>/dev/null | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+if d.get("empty"):
+    print("- **Stack:** _(empty project — fill in once code exists, or re-run detect-stack)_")
+    print("- **Run locally:** _(the command)_")
+    print("- **Run tests:** _(the command)_")
+else:
+    print("- **Stack:** " + ", ".join(d["languages"] + d["frameworks"]) + (" (" + d["package_manager"] + ")" if d["package_manager"] else ""))
+    c=d.get("commands",{})
+    print("- **Run locally:** `" + c.get("run","_(the command)_") + "`")
+    print("- **Run tests:** `" + c.get("test","_(the command)_") + "`")
+    if c.get("build"): print("- **Build:** `" + c["build"] + "`")
+    print("- **Rule sets installed:** " + ", ".join(d["rule_sets"]))
+' 2>/dev/null || echo "- **Stack:** _(fill in)_")"
+render_claude_md "$TARGET/CLAUDE.md"
+echo "  wrote CLAUDE.md"
+
+# --- 5. Repo hygiene + first commit ---------------------------------------
+cat > "$TARGET/.gitignore" <<'GIEOF'
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Machine-specific pipeline binding
+pipeline.config.sh
+GIEOF
+
+if [ "$DO_GIT" -eq 1 ] && command -v git >/dev/null 2>&1; then
+  ( cd "$TARGET" && git init -q && git add -A \
+    && git commit -q -m "Initialise $NAME with AICodePipeline" ) && echo "  git initialised"
+fi
+
+echo
+echo "Done."
+echo
+echo "  export PATH=\"$TARGET/$PIPELINE_ROOT_VAL/bin:\$PATH\""
+echo "  cd $TARGET"
+echo "  wo new \"<your first work order>\""
+echo
+echo "Fill in the 'Project specifics' section of CLAUDE.md before your first"
+echo "session — agents read it to locate your code."

@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""
+detect-stack — inspect a project directory and report what it is built with.
+
+    bin/detect-stack <dir> [--json]
+
+Prints languages, frameworks, package manager, and the run/test/build commands
+it could find. Used by bin/install.sh and bin/new-project to choose which rule
+sets to install and to fill in the project's CLAUDE.md. Read-only.
+"""
+import json, os, re, sys
+
+MARKERS = [  # (language, marker files, extensions)
+    ("typescript", ["tsconfig.json", "tsconfig.base.json"], [".ts", ".tsx"]),
+    ("javascript", ["package.json", "jsconfig.json"], [".js", ".jsx", ".mjs"]),
+    ("python", ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile", "poetry.lock"], [".py"]),
+    ("golang", ["go.mod"], [".go"]),
+    ("rust", ["Cargo.toml"], [".rs"]),
+    ("java", ["pom.xml", "build.gradle", "build.gradle.kts"], [".java"]),
+    ("kotlin", [], [".kt", ".kts"]),
+    ("ruby", ["Gemfile", "Rakefile"], [".rb"]),
+    ("php", ["composer.json"], [".php"]),
+    ("csharp", [], [".cs", ".csproj", ".sln"]),
+    ("fsharp", [], [".fs", ".fsproj"]),
+    ("swift", ["Package.swift"], [".swift"]),
+    ("dart", ["pubspec.yaml"], [".dart"]),
+    ("cpp", ["CMakeLists.txt"], [".cpp", ".cc", ".hpp"]),
+    ("perl", [], [".pl", ".pm"]),
+]
+FRAMEWORKS = [  # (framework, rule dir or None, marker files, package.json deps)
+    ("nextjs", None, ["next.config.js", "next.config.mjs", "next.config.ts"], ["next"]),
+    ("react", "react", [], ["react"]),
+    ("react-native", "react-native", ["app.json"], ["react-native", "expo"]),
+    ("vue", "vue", ["vue.config.js", "vite.config.ts"], ["vue"]),
+    ("nuxt", "nuxt", ["nuxt.config.ts", "nuxt.config.js"], ["nuxt"]),
+    ("angular", "angular", ["angular.json"], ["@angular/core"]),
+    ("svelte", None, ["svelte.config.js"], ["svelte"]),
+    ("nestjs", None, ["nest-cli.json"], ["@nestjs/core"]),
+    ("express", None, [], ["express"]),
+    ("django", None, ["manage.py"], []),
+    ("fastapi", None, [], []),
+    ("rails", None, ["config/routes.rb"], []),
+    ("laravel", None, ["artisan"], []),
+    ("spring", None, [], []),
+    ("flutter", "dart", ["pubspec.yaml"], []),
+]
+SKIP = {"node_modules", ".git", "vendor", "dist", "build", ".next", "__pycache__", ".venv", "venv", "target"}
+
+def exists(root, name):
+    return os.path.exists(os.path.join(root, name))
+
+def ext_counts(root, limit=4000):
+    counts, seen = {}, 0
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if d not in SKIP and not d.startswith(".")]
+        for fn in fns:
+            e = os.path.splitext(fn)[1].lower()
+            if e: counts[e] = counts.get(e, 0) + 1
+            seen += 1
+            if seen >= limit: return counts
+    return counts
+
+def read_json(root, name):
+    try:
+        with open(os.path.join(root, name)) as f: return json.load(f)
+    except Exception: return {}
+
+def detect(root):
+    exts = ext_counts(root)
+    pkg = read_json(root, "package.json")
+    deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+    langs = []
+    for lang, markers, es in MARKERS:
+        score = sum(2 for m in markers if exists(root, m)) + sum(exts.get(e, 0) > 0 for e in es)
+        if score: langs.append((score, sum(exts.get(e, 0) for e in es), lang))
+    langs.sort(reverse=True)
+    languages = [l for _, _, l in langs]
+    if "typescript" in languages and "javascript" in languages:
+        languages.remove("javascript")
+    frameworks, rule_dirs = [], []
+    for fw, rule, markers, pdeps in FRAMEWORKS:
+        hit = any(exists(root, m) for m in markers) or any(d in deps for d in pdeps)
+        if fw == "fastapi" and "python" in languages:
+            hit = hit or _grep(root, r"from fastapi import", [".py"])
+        if fw == "spring" and "java" in languages:
+            hit = hit or exists(root, "src/main/resources/application.properties") or exists(root, "src/main/resources/application.yml")
+        if hit:
+            frameworks.append(fw)
+            if rule and rule not in rule_dirs: rule_dirs.append(rule)
+    for l in languages:
+        if l == "javascript": l = "typescript"
+        if l not in rule_dirs: rule_dirs.append(l)
+    ui = any(f in frameworks for f in ("nextjs", "react", "react-native", "vue", "nuxt", "angular", "svelte", "flutter")) \
+         or any(exts.get(e, 0) for e in (".tsx", ".jsx", ".vue", ".svelte"))
+    if ui:
+        for extra in ("ui", "web"):
+            if extra not in rule_dirs: rule_dirs.append(extra)
+    pm = ("pnpm" if exists(root, "pnpm-lock.yaml") else "yarn" if exists(root, "yarn.lock")
+          else "bun" if exists(root, "bun.lockb") else "npm" if pkg else
+          "poetry" if exists(root, "poetry.lock") else "pip" if "python" in languages else
+          "cargo" if "rust" in languages else "go" if "golang" in languages else
+          "bundler" if "ruby" in languages else "composer" if "php" in languages else "")
+    scripts = pkg.get("scripts", {})
+    def npm(s): return f"{pm} run {s}" if pm in ("npm", "pnpm", "yarn", "bun") else ""
+    primary = languages[0] if languages else ""
+    BY_LANG = {  # per-language defaults, chosen by the PRIMARY language only
+        "python": {"run": "python manage.py runserver" if "django" in frameworks else "uvicorn main:app --reload" if "fastapi" in frameworks else "",
+                   "test": "pytest", "lint": "ruff check ."},
+        "golang": {"run": "go run .", "test": "go test ./...", "build": "go build ./...", "lint": "golangci-lint run"},
+        "rust":   {"run": "cargo run", "test": "cargo test", "build": "cargo build", "lint": "cargo clippy"},
+        "ruby":   {"run": "bundle exec rails server" if "rails" in frameworks else "", "test": "bundle exec rspec", "lint": "bundle exec rubocop"},
+        "php":    {"run": "php artisan serve" if "laravel" in frameworks else "", "test": "vendor/bin/phpunit", "lint": ""},
+        "java":   {"run": "./mvnw spring-boot:run" if "spring" in frameworks else "", "test": "./mvnw test" if exists(root, "mvnw") else "./gradlew test", "build": "./mvnw package" if exists(root, "mvnw") else "./gradlew build"},
+        "swift":  {"run": "swift run", "test": "swift test", "build": "swift build"},
+        "dart":   {"run": "flutter run" if "flutter" in frameworks else "dart run", "test": "flutter test" if "flutter" in frameworks else "dart test"},
+    }
+    lang_defaults = BY_LANG.get(primary, {})
+    commands = {
+        "run":   npm("dev") if "dev" in scripts else npm("start") if "start" in scripts else lang_defaults.get("run", ""),
+        "test":  npm("test") if "test" in scripts else lang_defaults.get("test", ""),
+        "build": npm("build") if "build" in scripts else lang_defaults.get("build", ""),
+        "lint":  npm("lint") if "lint" in scripts else lang_defaults.get("lint", ""),
+    }
+    monorepo = bool(pkg.get("workspaces")) or exists(root, "pnpm-workspace.yaml") or exists(root, "turbo.json") or exists(root, "nx.json")
+    return {"languages": languages, "frameworks": frameworks, "package_manager": pm,
+            "rule_sets": ["common"] + rule_dirs, "commands": {k: v for k, v in commands.items() if v},
+            "monorepo": monorepo, "empty": not exts}
+
+def _grep(root, pat, exts):
+    rx = re.compile(pat)
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if d not in SKIP and not d.startswith(".")]
+        for fn in fns:
+            if os.path.splitext(fn)[1] in exts:
+                try:
+                    with open(os.path.join(dp, fn), errors="ignore") as f:
+                        if rx.search(f.read(20000)): return True
+                except OSError: pass
+    return False
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    root = args[0] if args else "."
+    if not os.path.isdir(root): print(f"detect-stack: {root} is not a directory", file=sys.stderr); return 3
+    r = detect(root)
+    if "--json" in sys.argv: print(json.dumps(r, indent=2)); return 0
+    if r["empty"]: print("empty project (no source files yet)"); return 0
+    print(f"languages : {', '.join(r['languages']) or '-'}")
+    print(f"frameworks: {', '.join(r['frameworks']) or '-'}")
+    print(f"package   : {r['package_manager'] or '-'}{'  (monorepo)' if r['monorepo'] else ''}")
+    print(f"rule sets : {', '.join(r['rule_sets'])}")
+    for k, v in r["commands"].items(): print(f"{k:10}: {v}")
+    return 0
+
+if __name__ == "__main__": sys.exit(main())

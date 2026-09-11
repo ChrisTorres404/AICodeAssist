@@ -1,0 +1,488 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# wo — work order lifecycle driver
+#
+# Implements the rules in core/methodology/MANDATORY-WO-METHODOLOGY.md:
+#   * every work order is a FOLDER, never a loose .md
+#   * four documents are required at creation
+#   * a closeout may not be produced before a verification exists
+#
+#   wo new "<title>" [--size trivial|small|standard|large] [--series N]
+#                    [--priority P0|P1|P2|P3] [--sdk] [--ui]
+#   wo list [--open|--closed]
+#   wo show <number>                 print the work order's primary document
+#   wo status <number>               which documents exist, which are missing
+#   wo start <number>                mark in progress
+#   wo block <number> "<reason>"     mark blocked
+#   wo note <number> "<text>"        append a dated session note
+#   wo verify <number> [--run <suite.sh>]   create the VERIFICATION document;
+#                                    with --run, execute the suite and record
+#                                    EXECUTED — PASS/FAIL from its exit code
+#   wo close <number>
+#   wo promote <number> [--pack <name>] [--allow-unsanitized]
+#   wo stats                         cycle time, evidence rate, drift
+#
+# Working with others (needs the gh CLI, authenticated):
+#   wo publish <number>              open a GitHub issue carrying the work order
+#   wo sync <number>                 push the current spec and status to the issue
+#   wo import <issue-number>         create a work order from an existing issue
+# The folder stays the local record; the issue is the shared view. verify --run
+# comments the result on the issue; close closes it.
+#
+# Size sets the ceremony:  trivial = one document + verification
+#                          small    = SPEC + verification
+#                          standard = SPEC, CHECKLIST, TASK-BREAKDOWN, Prompt (default)
+#                          large    = standard + sdk and ui implementation docs
+# Every size requires VERIFICATION before close. That never relaxes.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+PIPELINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEMPLATES="$PIPELINE_ROOT/core/templates/workorders"
+
+# Resolve where work orders live: pipeline.config.sh in cwd or any parent.
+find_config() {
+  local d="$PWD"
+  while [ "$d" != "/" ]; do
+    [ -f "$d/pipeline.config.sh" ] && { echo "$d/pipeline.config.sh"; return 0; }
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+CONFIG="$(find_config || true)"
+if [ -n "$CONFIG" ]; then
+  # shellcheck disable=SC1090
+  . "$CONFIG"
+  PROJECT_ROOT="${PROJECT_ROOT:-$(dirname "$CONFIG")}"
+  WO_DIR="$PROJECT_ROOT/${WORKORDERS_DIR:?WORKORDERS_DIR not set in pipeline.config.sh}"
+else
+  # No binding file: fall back to the git root and the default layout, so the
+  # pipeline works as a plugin without an install step.
+  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  WORKORDERS_DIR="${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}"
+  WO_DIR="$PROJECT_ROOT/$WORKORDERS_DIR"
+fi
+PACKS_DIR="${PACKS_DIR:-$PIPELINE_ROOT/packs}"
+PROJECT_SLUG="${PROJECT_SLUG:-$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g')}"
+
+die() { echo "wo: $*" >&2; exit 1; }
+slugify() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g' -e 's/^-//' -e 's/-$//'; }
+
+meta_get() { # dir key -> value
+  [ -f "$1/.wo-meta" ] && sed -n "s/^$2=//p" "$1/.wo-meta" | head -1 || true
+}
+meta_set() { # dir key value
+  local f="$1/.wo-meta"; touch "$f"
+  if grep -q "^$2=" "$f"; then
+    perl -pi -e "s/^\Q$2\E=.*/$2=$3/" "$f"
+  else
+    printf '%s=%s\n' "$2" "$3" >> "$f"
+  fi
+}
+primary_doc() { # dir number -> path of SPEC or MAIN document
+  if [ -f "$1/WO-$2-SPEC.md" ]; then echo "$1/WO-$2-SPEC.md"; return; fi
+  for f in "$1"/WO-$2-*.md; do
+    case "$(basename "$f")" in *-CHECKLIST*|*-TASK-BREAKDOWN*|*-Prompt*|*-VERIFICATION*|*-CLOSEOUT*|*-sdk-*|*-ui-*) ;; *) echo "$f"; return;; esac
+  done
+}
+required_docs() { # size -> space-separated doc keys
+  case "${1:-standard}" in
+    trivial)  echo "MAIN";;
+    small)    echo "SPEC";;
+    large)    echo "SPEC CHECKLIST TASK-BREAKDOWN Prompt sdk-implementation ui-implementation";;
+    *)        echo "SPEC CHECKLIST TASK-BREAKDOWN Prompt";;
+  esac
+}
+has_doc() { # dir number key
+  if [ "$3" = "MAIN" ]; then
+    ls "$1" 2>/dev/null | grep -v -- "-\(SPEC\|CHECKLIST\|TASK-BREAKDOWN\|Prompt\|VERIFICATION\|CLOSEOUT\|sdk-implementation\|ui-implementation\)" | grep -qi -- "^WO-$2-.*\.md$"
+  else
+    ls "$1" 2>/dev/null | grep -qi -- "WO-$2-$3"
+  fi
+}
+
+wo_folder() { # number -> path, or empty
+  find "$WO_DIR" -maxdepth 1 -type d -name "WO-$1-*" -print -quit 2>/dev/null
+}
+
+next_number() { # [series]
+  local series="${1:-}" max=0 n
+  for d in "$WO_DIR"/WO-*; do
+    [ -d "$d" ] || continue
+    n="$(basename "$d")"; n="${n#WO-}"; n="${n%%-*}"
+    case "$n" in ''|*[!0-9]*) continue;; esac
+    if [ -n "$series" ]; then
+      [ "${n:0:${#series}}" = "$series" ] || continue
+    fi
+    [ "$((10#$n))" -gt "$max" ] && max="$((10#$n))"
+  done
+  if [ "$max" -eq 0 ] && [ -n "$series" ]; then
+    printf '%04d' "$((10#$series))"
+  else
+    printf '%04d' "$((max + 1))"
+  fi
+}
+
+render() { # template dest number title priority
+  sed -e "s/WO-XXXX/WO-$3/g" \
+      -e "s/\[Title\]/$4/g" \
+      -e "s/YYYY-MM-DD/$(date +%F)/g" \
+      -e "s/^\*\*Priority:\*\* .*/**Priority:** $5/" \
+      "$1" > "$2"
+}
+
+cmd_new() {
+  local title="" series="" priority="P2" want_sdk=0 want_ui=0 size="standard"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --size)     size="$2"; shift 2;;
+      --series)   series="$2"; shift 2;;
+      --priority) priority="$2"; shift 2;;
+      --sdk)      want_sdk=1; shift;;
+      --ui)       want_ui=1; shift;;
+      -*)         die "unknown flag $1";;
+      *)          title="$1"; shift;;
+    esac
+  done
+  case "$size" in trivial|small|standard|large) ;; *) die "size must be trivial, small, standard, or large";; esac
+  [ -n "$title" ] || die 'usage: wo new "<title>" [--size S] [--series N] [--priority P0|P1|P2|P3] [--sdk] [--ui]'
+  mkdir -p "$WO_DIR"
+  local num; num="$(next_number "$series")"
+  local dir="$WO_DIR/WO-$num-$(slugify "$title")"
+  [ -e "$dir" ] && die "$dir already exists"
+  mkdir -p "$dir"
+
+  printf 'size=%s\ntitle=%s\npriority=%s\ncreated=%s\nowner=%s\n' "$size" "$title" "$priority" "$(date +%F)" "$(git config user.name 2>/dev/null || whoami)" > "$dir/.wo-meta"
+  for k in $(required_docs "$size"); do
+    case "$k" in
+      MAIN)               render "$TEMPLATES/WO-TEMPLATE-MAIN.md"               "$dir/WO-$num-$(slugify "$title").md" "$num" "$title" "$priority";;
+      SPEC)               render "$TEMPLATES/WO-TEMPLATE-SPEC.md"               "$dir/WO-$num-SPEC.md"           "$num" "$title" "$priority";;
+      CHECKLIST)          render "$TEMPLATES/WO-TEMPLATE-CHECKLIST.md"          "$dir/WO-$num-CHECKLIST.md"      "$num" "$title" "$priority";;
+      TASK-BREAKDOWN)     render "$TEMPLATES/WO-TEMPLATE-TASK-BREAKDOWN.md"     "$dir/WO-$num-TASK-BREAKDOWN.md" "$num" "$title" "$priority";;
+      Prompt)             render "$TEMPLATES/WO-TEMPLATE-PROMPT.md"             "$dir/WO-$num-Prompt.md"         "$num" "$title" "$priority";;
+      sdk-implementation) render "$TEMPLATES/WO-TEMPLATE-SDK-IMPLEMENTATION.md" "$dir/WO-$num-sdk-implementation.md" "$num" "$title" "$priority";;
+      ui-implementation)  render "$TEMPLATES/WO-TEMPLATE-UI-IMPLEMENTATION.md"  "$dir/WO-$num-ui-implementation.md"  "$num" "$title" "$priority";;
+    esac
+  done
+  [ "$want_sdk" -eq 1 ] && [ ! -f "$dir/WO-$num-sdk-implementation.md" ] && render "$TEMPLATES/WO-TEMPLATE-SDK-IMPLEMENTATION.md" "$dir/WO-$num-sdk-implementation.md" "$num" "$title" "$priority"
+  [ "$want_ui"  -eq 1 ] && [ ! -f "$dir/WO-$num-ui-implementation.md" ]  && render "$TEMPLATES/WO-TEMPLATE-UI-IMPLEMENTATION.md"  "$dir/WO-$num-ui-implementation.md"  "$num" "$title" "$priority"
+
+  echo "WO-$num created ($size): $dir"
+  ls "$dir" | sed 's/^/    /'
+  echo
+  echo "Next: fill in the SPEC before writing code. Closeout is blocked until"
+  echo "      WO-$num-VERIFICATION.md exists with real execution evidence."
+}
+
+doc_state() { # dir number -> prints markers
+  local d="$1" n="$2" out=""
+  for k in SPEC CHECKLIST TASK-BREAKDOWN Prompt VERIFICATION CLOSEOUT; do
+    if ls "$d" 2>/dev/null | grep -qi -- "WO-$n-$k"; then out="$out${k:0:1}"; else out="$out."; fi
+  done
+  echo "$out"
+}
+
+cmd_list() {
+  local filter="${1:-}"
+  printf "%-8s %-6s %-12s %-8s %s\n" "WO" "DOCS" "STATE" "SIZE" "TITLE"
+  for d in "$WO_DIR"/WO-*; do
+    [ -d "$d" ] || continue
+    local b n st state size
+    b="$(basename "$d")"; n="${b#WO-}"; n="${n%%-*}"
+    st="$(doc_state "$d" "$n")"; size="$(meta_get "$d" size)"; size="${size:-standard}"
+    case "$st" in *C) state="closed";; *) state="$(meta_get "$d" status)"; state="${state:-open}";; esac
+    case "$filter" in
+      --open)   [ "$state" = "open" ]   || continue;;
+      --closed) [ "$state" = "closed" ] || continue;;
+    esac
+    printf "%-8s %-6s %-12s %-8s %s\n" "WO-$n" "$st" "$state" "$size" "${b#WO-$n-}"
+  done
+}
+
+cmd_status() {
+  local n="$1"; [ -n "$n" ] || die "usage: wo status <number>"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
+  echo "WO-$n  $d"
+  echo
+  local missing=0 size; size="$(meta_get "$d" size)"; size="${size:-standard}"
+  echo "  size: $size"
+  for k in $(required_docs "$size"); do
+    if has_doc "$d" "$n" "$k"; then echo "  [x] $k (required)"; else echo "  [ ] $k (required) — MISSING"; missing=1; fi
+  done
+  for k in VERIFICATION CLOSEOUT; do
+    has_doc "$d" "$n" "$k" && echo "  [x] $k" || echo "  [ ] $k"
+  done
+  echo
+  [ "$missing" -eq 1 ] && echo "  INCOMPLETE — required documents are missing." || echo "  Required documents present."
+}
+
+cmd_close() {
+  local n="$1"; [ -n "$n" ] || die "usage: wo close <number>"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
+  ls "$d" | grep -qi -- "WO-$n-VERIFICATION" \
+    || die "refusing to close WO-$n: no WO-$n-VERIFICATION.md.
+    The methodology forbids a closeout without executed-test evidence.
+    Create the verification report first."
+  local out="$d/WO-$n-CLOSEOUT.md"
+  [ -e "$out" ] && die "$out already exists"
+  local title; title="$(basename "$d")"; title="${title#WO-$n-}"
+  render "$TEMPLATES/WO-TEMPLATE-CLOSEOUT.md" "$out" "$n" "$title" "P2"
+  echo "WO-$n closeout drafted: $out"
+  echo "Fill it in from the verification report — do not claim results that were not executed."
+  echo "When it is worth carrying to the next project:  wo promote $n"
+  local inum; inum="$(meta_get "$d" issue_number)"
+  if [ -n "$inum" ] && command -v gh >/dev/null 2>&1; then
+    REPO="$(gh_repo)"; [ -n "$REPO" ] && gh issue close "$inum" --repo "$REPO" --comment "Closed with executed verification. Closeout: \`$(basename "$out")\` in the repository." >/dev/null 2>&1 && echo "Issue #$inum closed."
+  fi
+}
+
+gh_repo() { # -> owner/name or empty
+  if [ -n "${GITHUB_REPO:-}" ] && [ "$GITHUB_REPO" != "owner/repo" ]; then echo "$GITHUB_REPO"; return; fi
+  ( cd "$PROJECT_ROOT" && gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null ) || true
+}
+gh_ready() {
+  command -v gh >/dev/null 2>&1 || die "the gh CLI is required for GitHub commands (https://cli.github.com), and must be authenticated: gh auth login"
+  REPO="$(gh_repo)"; [ -n "$REPO" ] || die "no GitHub repository: set GITHUB_REPO in pipeline.config.sh or run inside a repo with a GitHub remote"
+}
+gh_labels() { # ensure the labels exist (idempotent)
+  for l in "work-order:#0E8A16" "bug:#D73A4A" "size:trivial:#C5DEF5" "size:small:#C5DEF5" "size:standard:#C5DEF5" "size:large:#C5DEF5" "P0:#B60205" "P1:#D93F0B" "P2:#FBCA04" "P3:#0E8A16"; do
+    gh label create "${l%%:#*}" --color "${l##*#}" --repo "$REPO" --force >/dev/null 2>&1 || true
+  done
+}
+issue_body() { # dir number -> markdown body for the issue
+  local d="$1" n="$2" pd; pd="$(primary_doc "$d" "$n")"
+  {
+    printf '<!-- AICodePipeline work order WO-%s — the folder in the repository is the record; this issue is the shared view. -->\n\n' "$n"
+    printf '**Work order:** `WO-%s`  \n**Size:** %s  \n**Priority:** %s  \n**Owner:** %s  \n**Documents:** `%s`\n\n---\n\n' \
+      "$n" "$(meta_get "$d" size)" "$(meta_get "$d" priority)" "$(meta_get "$d" owner)" "$(doc_state "$d" "$n")"
+    [ -n "$pd" ] && cat "$pd"
+  }
+}
+
+cmd_publish() {
+  local n="${1:-}"; [ -n "$n" ] || die "usage: wo publish <number>"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
+  gh_ready
+  local existing; existing="$(meta_get "$d" issue)"
+  [ -n "$existing" ] && die "WO-$n is already published: $existing  (use: wo sync $n)"
+  gh_labels
+  local title size prio body url num
+  title="$(meta_get "$d" title)"; title="${title:-$(basename "$d")}"; size="$(meta_get "$d" size)"; prio="$(meta_get "$d" priority)"
+  body="$(mktemp)"; issue_body "$d" "$n" > "$body"
+  url="$(gh issue create --repo "$REPO" --title "WO-$n: $title" --body-file "$body" --label work-order --label "size:${size:-standard}" ${prio:+--label "$prio"} 2>&1 | tail -1)"
+  rm -f "$body"
+  case "$url" in https://*) ;; *) die "gh issue create failed: $url";; esac
+  num="${url##*/}"
+  meta_set "$d" issue "$url"; meta_set "$d" issue_number "$num"
+  cmd_note "$n" "Published as $url" >/dev/null
+  echo "WO-$n published: $url"
+}
+
+cmd_sync() {
+  local n="${1:-}"; [ -n "$n" ] || die "usage: wo sync <number>"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
+  gh_ready
+  local num; num="$(meta_get "$d" issue_number)"; [ -n "$num" ] || die "WO-$n is not published (wo publish $n)"
+  local body; body="$(mktemp)"; issue_body "$d" "$n" > "$body"
+  gh issue edit "$num" --repo "$REPO" --body-file "$body" >/dev/null
+  rm -f "$body"
+  local st status; st="$(doc_state "$d" "$n")"; status="$(meta_get "$d" status)"; status="${status:-open}"
+  gh issue comment "$num" --repo "$REPO" --body "$(printf 'Sync %s — status **%s**, documents `%s`%s' "$(date '+%Y-%m-%d %H:%M')" "$status" "$st" "$( [ "$status" = blocked ] && printf ', blocked: %s' "$(meta_get "$d" blocked_reason)" )")" >/dev/null
+  echo "WO-$n synced to issue #$num"
+}
+
+cmd_import() {
+  local num="${1:-}"; [ -n "$num" ] || die "usage: wo import <issue-number> [--size S]"
+  shift; local size="standard"; while [ $# -gt 0 ]; do case "$1" in --size) size="$2"; shift 2;; *) shift;; esac; done
+  gh_ready
+  local title body url
+  title="$(gh issue view "$num" --repo "$REPO" --json title -q .title)"; [ -n "$title" ] || die "issue #$num not found in $REPO"
+  body="$(gh issue view "$num" --repo "$REPO" --json body -q .body)"; url="$(gh issue view "$num" --repo "$REPO" --json url -q .url)"
+  title="${title#WO-[0-9]*: }"
+  cmd_new "$title" --size "$size" --series "$num" | head -1
+  local d; d="$(wo_folder "$(printf '%04d' "$((10#$num))")")"
+  [ -n "$d" ] || die "import created no folder"
+  meta_set "$d" issue "$url"; meta_set "$d" issue_number "$num"
+  local pd; pd="$(primary_doc "$d" "$(printf '%04d' "$((10#$num))")")"
+  [ -n "$body" ] && printf '\n---\n\n## From issue #%s\n\n%s\n' "$num" "$body" >> "$pd"
+  echo "Imported issue #$num as $(basename "$d") (numbered from the issue so the two match)"
+}
+
+cmd_show() {
+  local n="${1:-}"; [ -n "$n" ] || die "usage: wo show <number>"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
+  [ -f "$d/.wo-meta" ] && { sed 's/^/  /' "$d/.wo-meta"; echo; }
+  local pd; pd="$(primary_doc "$d" "$n")"; [ -n "$pd" ] && cat "$pd" || echo "(no primary document)"
+}
+
+cmd_start() {
+  local n="${1:-}"; [ -n "$n" ] || die "usage: wo start <number>"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
+  meta_set "$d" status in-progress; meta_set "$d" started "$(date +%F)"
+  echo "WO-$n: in progress (started $(date +%F))"
+}
+
+cmd_block() {
+  local n="${1:-}" reason="${2:-}"; [ -n "$n" ] && [ -n "$reason" ] || die 'usage: wo block <number> "<reason>"'
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
+  meta_set "$d" status blocked; meta_set "$d" blocked_reason "$reason"
+  cmd_note "$n" "BLOCKED: $reason" >/dev/null
+  echo "WO-$n: blocked — $reason"
+}
+
+cmd_note() {
+  local n="${1:-}" text="${2:-}"; [ -n "$n" ] && [ -n "$text" ] || die 'usage: wo note <number> "<text>"'
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
+  local pd; pd="$(primary_doc "$d" "$n")"; [ -n "$pd" ] || die "WO-$n has no primary document to note in"
+  grep -q '^## Session Notes' "$pd" || printf '\n---\n\n## Session Notes\n\n' >> "$pd"
+  printf -- '- %s — %s\n' "$(date '+%Y-%m-%d %H:%M')" "$text" >> "$pd"
+  echo "WO-$n: note added to $(basename "$pd")"
+}
+
+cmd_verify() {
+  local n="" suite="" force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in --run) suite="$2"; shift 2;; --force) force=1; shift;; -*) die "unknown flag $1";; *) n="$1"; shift;; esac
+  done
+  [ -n "$n" ] || die "usage: wo verify <number> [--run <suite.sh>] [--force]"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
+  local out="$d/WO-$n-VERIFICATION.md" title; title="$(meta_get "$d" title)"; title="${title:-$(basename "$d")}"
+  if [ ! -f "$out" ] || [ "$force" -eq 1 ]; then
+    render "$TEMPLATES/../testing/TEST-TEMPLATE-VERIFICATION.md" "$out" "$n" "$title" "P2"
+    printf '\n---\n\n## Execution Record\n\n**Overall status:** NOT EXECUTED — PLAN ONLY\n\n' >> "$out"
+    echo "WO-$n verification document created: $out"
+  fi
+  [ -z "$suite" ] && { echo "Status is NOT EXECUTED — PLAN ONLY until you run something:  wo verify $n --run <suite.sh>"; return 0; }
+  [ -f "$suite" ] || die "suite not found: $suite"
+  local stamp log rc status
+  stamp="$(date +%Y%m%d-%H%M%S)-$$"; log="$d/WO-$n-VERIFICATION-$stamp.log"
+  echo "Running: $suite"
+  set +e; bash "$suite" >"$log" 2>&1; rc=$?; set -e
+  if [ "$rc" -eq 0 ]; then status="EXECUTED — PASS"; else status="EXECUTED — FAIL"; fi
+  {
+    printf '\n### Run %s\n\n' "$stamp"
+    printf -- '- **Status:** %s\n- **Command:** `bash %s`\n- **Exit code:** %s\n- **Log:** `%s`\n\n' "$status" "$suite" "$rc" "$(basename "$log")"
+    printf '```\n'; tail -60 "$log"; printf '```\n'
+  } >> "$out"
+  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp)/" "$out"
+  echo "$status (exit $rc) — recorded in $(basename "$out"), full log in $(basename "$log")"
+  local inum; inum="$(meta_get "$d" issue_number)"
+  if [ -n "$inum" ] && command -v gh >/dev/null 2>&1; then
+    REPO="$(gh_repo)"; [ -n "$REPO" ] && gh issue comment "$inum" --repo "$REPO" --body "$(printf '**Verification %s** — `bash %s` exit %s\n\n```\n%s\n```' "$status" "$suite" "$rc" "$(tail -20 "$log")")" >/dev/null 2>&1 && echo "Result posted to issue #$inum"
+  fi
+  [ "$rc" -eq 0 ] || return 1
+}
+
+cmd_stats() {
+  local total=0 closed=0 evidenced=0 drift=0 open=0 inprog=0 blocked=0 days=0 nd=0
+  local sizes_t=0 sizes_s=0 sizes_st=0 sizes_l=0; local -a drift_list=()
+  for d in "$WO_DIR"/WO-*; do
+    [ -d "$d" ] || continue
+    total=$((total+1)); local b n; b="$(basename "$d")"; n="${b#WO-}"; n="${n%%-*}"
+    case "$(meta_get "$d" size)" in trivial) sizes_t=$((sizes_t+1));; small) sizes_s=$((sizes_s+1));; large) sizes_l=$((sizes_l+1));; *) sizes_st=$((sizes_st+1));; esac
+    if ls "$d" | grep -qi -- "WO-$n-CLOSEOUT"; then
+      closed=$((closed+1))
+      if ls "$d" | grep -qi -- "WO-$n-VERIFICATION" && cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*(PASS|FAIL)"; then
+        evidenced=$((evidenced+1))
+      else
+        drift=$((drift+1)); drift_list+=("WO-$n")
+      fi
+      local c; c="$(meta_get "$d" created)"
+      if [ -n "$c" ]; then
+        local cs ce; cs="$(date -j -f %Y-%m-%d "$c" +%s 2>/dev/null || date -d "$c" +%s 2>/dev/null || echo 0)"
+        ce="$(stat -f %m "$d"/WO-$n-CLOSEOUT.md 2>/dev/null || stat -c %Y "$d"/WO-$n-CLOSEOUT.md 2>/dev/null || echo 0)"
+        [ "$cs" -gt 0 ] && [ "$ce" -gt 0 ] && { days=$((days + (ce-cs)/86400)); nd=$((nd+1)); }
+      fi
+    else
+      case "$(meta_get "$d" status)" in in-progress) inprog=$((inprog+1));; blocked) blocked=$((blocked+1));; *) open=$((open+1));; esac
+    fi
+  done
+  echo "Work orders in $WO_DIR"
+  echo
+  printf '  %-34s %s\n' "total" "$total"
+  printf '  %-34s %s (open %s, in progress %s, blocked %s)\n' "not closed" "$((open+inprog+blocked))" "$open" "$inprog" "$blocked"
+  printf '  %-34s %s\n' "closed" "$closed"
+  [ "$closed" -gt 0 ] && printf '  %-34s %s of %s (%s%%)\n' "closed with executed evidence" "$evidenced" "$closed" "$((evidenced*100/closed))"
+  [ "$drift" -gt 0 ] && printf '  %-34s %s  %s\n' "closed WITHOUT evidence (drift)" "$drift" "${drift_list[*]}"
+  [ "$nd" -gt 0 ] && printf '  %-34s %s days\n' "mean open-to-closeout" "$((days/nd))"
+  printf '  %-34s trivial %s, small %s, standard %s, large %s\n' "by size" "$sizes_t" "$sizes_s" "$sizes_st" "$sizes_l"
+}
+
+cmd_promote() {
+  local n="" pack="" allow=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --pack) pack="$2"; shift 2;;
+      --allow-unsanitized) allow=1; shift;;
+      -*) die "unknown flag $1";;
+      *) n="$1"; shift;;
+    esac
+  done
+  [ -n "$n" ] || die "usage: wo promote <number> [--pack <name>] [--allow-unsanitized]"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
+  ls "$d" | grep -qi -- "WO-$n-VERIFICATION" || die "refusing to promote WO-$n: not verified. Precedent without evidence is folklore."
+  pack="${pack:-$PROJECT_SLUG}"
+  local pdir="$PACKS_DIR/$pack" tree="workorders/$PROJECT_SLUG"
+  [ -x "$PIPELINE_ROOT/bin/sanitize" ] || die "bin/sanitize is missing from $PIPELINE_ROOT/bin — refusing to promote unscanned work. Re-run install.sh."
+  if true; then
+    rc=0; "$PIPELINE_ROOT/bin/sanitize" "$d" --quiet >/dev/null 2>&1 || rc=$?
+    if [ "$rc" -eq 2 ]; then
+      if [ "$allow" -eq 0 ]; then
+        die "refusing to promote WO-$n: it fails sanitization (secrets, PII, or host paths).
+    $PIPELINE_ROOT/bin/sanitize \"$d\"   shows what. Fix, or pass --allow-unsanitized for a private pack."
+      fi
+    fi
+  fi
+  mkdir -p "$pdir/$tree"
+  local b; b="$(basename "$d")"
+  rm -rf "$pdir/$tree/$b"; cp -R "$d" "$pdir/$tree/$b"
+  # --- catalog entry: deterministic extraction from the documents ---
+  local cat="$pdir/CATALOG.md" spec close title problem solution pitfalls files
+  spec="$d/WO-$n-SPEC.md"
+  if [ ! -f "$spec" ]; then
+    spec=""
+    for f in "$d"/WO-$n-*.md; do
+      case "$(basename "$f")" in *-CHECKLIST*|*-TASK-BREAKDOWN*|*-Prompt*|*-VERIFICATION*|*-CLOSEOUT*|*-sdk-*|*-ui-*) ;; *) spec="$f"; break;; esac
+    done
+  fi
+  close="$d/WO-$n-CLOSEOUT.md"; [ -f "$close" ] || close=""
+  title="$(meta_get "$d" title)"; [ -n "$title" ] || title="${b#WO-$n-}"
+  section() { awk -v h="$2" 'BEGIN{p=0} /^## /{p=($0 ~ h)} p&&!/^## /{print}' "$1" | sed -e '/^\s*$/d' -e '/^---*$/d' | head -${3:-6}; }
+  problem="$( [ -f "$spec" ] && section "$spec" "Problem" 6 || true)"
+  solution="$( [ -f "$spec" ] && section "$spec" "Solution" 6 || true)"
+  pitfalls="$( [ -f "$close" ] && section "$close" "(Lessons|Pitfalls|Gotchas|What Went Wrong)" 10 || true)"
+  files="$( [ -f "$close" ] && grep -oE '\`[^\`]+\.[a-z]{1,4}\`' "$close" | sort -u | head -12 | tr '\n' ' ' || true)"
+  [ -f "$cat" ] || printf '# Pack catalog: %s\n\nOne entry per promoted work order. Generated by `wo promote`; edit the **Pitfalls** lines by hand — they are the most valuable part.\n\n' "$pack" > "$cat"
+  {
+    printf '## WO-%s — %s\n\n' "$n" "$title"
+    printf -- '- **Folder:** `%s/%s`\n' "$tree" "$b"
+    printf -- '- **Promoted:** %s from project `%s`\n' "$(date +%F)" "$PROJECT_SLUG"
+    [ -n "$problem"  ] && { printf -- '- **Problem:**\n'; printf '%s\n' "$problem"  | sed 's/^/    /'; }
+    [ -n "$solution" ] && { printf -- '- **Solution:**\n'; printf '%s\n' "$solution" | sed 's/^/    /'; }
+    [ -n "$files"    ] && printf -- '- **Files:** %s\n' "$files"
+    printf -- '- **Pitfalls:**\n'
+    if [ -n "$pitfalls" ]; then printf '%s\n' "$pitfalls" | sed 's/^/    /'; else printf '    _(none recorded — add what would have saved you time)_\n'; fi
+    printf '\n'
+  } >> "$cat"
+  echo "WO-$n promoted to pack '$pack': $pdir/$tree/$b"
+  echo "Catalog entry appended: $cat"
+  echo "Edit the Pitfalls lines now, while you still remember."
+}
+
+case "${1:-}" in
+  new)     shift; cmd_new "$@";;
+  show)    shift; cmd_show "${1:-}";;
+  start)   shift; cmd_start "${1:-}";;
+  block)   shift; cmd_block "${1:-}" "${2:-}";;
+  note)    shift; cmd_note "${1:-}" "${2:-}";;
+  verify)  shift; cmd_verify "$@";;
+  stats)   shift; cmd_stats;;
+  publish) shift; cmd_publish "${1:-}";;
+  sync)    shift; cmd_sync "${1:-}";;
+  import)  shift; cmd_import "$@";;
+  promote) shift; cmd_promote "$@";;
+  list)   shift; cmd_list "${1:-}";;
+  status) shift; cmd_status "${1:-}";;
+  close)  shift; cmd_close "${1:-}";;
+  *) sed -n '2,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1;;
+esac

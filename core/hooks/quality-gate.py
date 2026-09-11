@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""
+quality-gate — PostToolUse hook for Edit/Write.
+
+The methodology forbids debug logging, placeholder implementations, and
+not-implemented stubs in committed code. Historically that was enforced by
+asking the model to remember. This checks.
+
+Non-blocking by design: it reports findings back into the transcript so they
+get fixed in the same turn, rather than failing the edit. Set
+ACP_QUALITY_GATE=block, or the strict hook profile, to make violations blocking.
+"""
+import json, os, re, sys
+
+SOURCE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go",
+              ".rb", ".java", ".kt", ".rs", ".php", ".cs", ".swift"}
+
+RULES = [
+    (re.compile(r"\bconsole\.log\s*\("),                 "console.log — use the project logger"),
+    (re.compile(r"\bprint\s*\(.*\bdebug\b", re.I),       "debug print — use the project logger"),
+    (re.compile(r"//\s*TODO:?\s*implement", re.I),       "TODO: implement — finish it or do not ship it"),
+    (re.compile(r"#\s*TODO:?\s*implement", re.I),        "TODO: implement — finish it or do not ship it"),
+    (re.compile(r"Not implemented"),                     "not-implemented stub"),
+    (re.compile(r"\bFIXME\b"),                           "FIXME left in source"),
+]
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        return 0
+
+    ti = payload.get("tool_input") or {}
+    path = ti.get("file_path") or ti.get("path") or ""
+    if not path or os.path.splitext(path)[1] not in SOURCE_EXT:
+        return 0
+    if re.search(r"(^|/)(test|tests|__tests__|spec)/|\.(test|spec)\.", path):
+        return 0          # test files may legitimately log and stub
+
+    text = ti.get("content") or ti.get("new_string") or ""
+    if not text:
+        return 0
+
+    found = []
+    for n, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith(("//", "#", "*")) and "TODO" not in line and "FIXME" not in line:
+            continue
+        for rx, msg in RULES:
+            if rx.search(line):
+                found.append(f"  {os.path.basename(path)}:{n}  {msg}")
+                break
+
+    if not found:
+        return 0
+
+    head = f"Quality gate — {len(found)} issue(s) just written into {path}:"
+    body = "\n".join(found[:12])
+    tail = "\nThese violate the project's code-quality rules. Fix them now, in this turn."
+    print(f"{head}\n{body}{tail}", file=sys.stderr)
+    strict = os.environ.get("ACP_STRICT") == "1" or os.environ.get("ACP_QUALITY_GATE") == "block" \
+        or os.environ.get("AICODEPIPELINE_QUALITY_GATE") == "block"
+    return 2 if strict else 0
+
+if __name__ == "__main__":
+    sys.exit(main())

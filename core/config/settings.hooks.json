@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+          "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:session:orient minimal,standard,strict {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/session-orient.sh" } ],
+        "description": "Open the session with in-flight work orders" }
+    ],
+    "PreToolUse": [
+      { "matcher": "Bash",
+        "hooks": [
+          { "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:rules standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/rule-hook.py" },
+          { "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:wo-reference standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/wo-reference.py" }
+        ],
+        "description": "Markdown hook rules and commit traceability" },
+      { "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:file-rules standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/rule-hook.py" }
+        ],
+        "description": "Markdown hook rules for file writes" }
+    ],
+    "PostToolUse": [
+      { "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:quality-gate standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/quality-gate.py" }
+        ],
+        "description": "No debug logging, stubs, or TODO-implement in source" }
+    ],
+    "Stop": [
+      { "hooks": [
+          { "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:stop:evidence-gate standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/evidence-gate.py",
+            "timeout": 10 }
+        ],
+        "description": "A closeout must rest on executed verification" }
+    ]
+  }
+}

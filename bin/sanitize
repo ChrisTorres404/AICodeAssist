@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""
+sanitize — scan a directory for material that must not be shared.
+
+Secrets, personal identifiers, internal infrastructure, host-specific paths,
+and dangerous files. Read-only: it reports, it never edits. A single CRITICAL
+finding is a FAIL. Warnings alone are PASS WITH WARNINGS.
+
+    bin/sanitize <dir> [--report <file.md>] [--allow <regex>]... [--quiet]
+
+A file named .sanitize-ignore in <dir> lists relative paths to skip, one per
+line, for files that legitimately contain patterns (a substitution table, a
+pattern list). Use it sparingly and never for real secrets.
+
+Exit codes: 0 PASS, 1 PASS WITH WARNINGS, 2 FAIL, 3 usage error.
+
+Used by bin/install.sh and bin/new-project to refuse installing a pack that
+fails, unless --allow-unsanitized is passed to them.
+"""
+import argparse, os, re, sys
+from datetime import date
+
+TEXT_EXT = {".md", ".txt", ".sh", ".py", ".js", ".ts", ".tsx", ".jsx", ".json",
+            ".yaml", ".yml", ".env", ".sql", ".toml", ".ini", ".cfg", ".conf",
+            ".html", ".css", ".xml", ".csv", ".rb", ".go", ".rs", ".java", ".kt",
+            ".php", ".cs", ".swift", ".mjs", ".cjs", ".example", ""}
+SKIP_DIRS = {"node_modules", ".git", "__pycache__", ".venv", "venv", "dist",
+             "build", ".next", ".turbo", "coverage"}
+
+# (id, severity, regex, label)  — severity: CRITICAL | WARNING
+PATTERNS = [
+    ("secret.apikey",  "CRITICAL", re.compile(r"(?i)\b(api[_-]?key|apikey|api[_-]?secret|client[_-]?secret)\b\s*[:=]\s*['\"]?[A-Za-z0-9+/=_\-]{16,}"), "API key or client secret"),
+    ("secret.pk",      "CRITICAL", re.compile(r"\bpk_(test|live)_[A-Za-z0-9]{16,}"), "publishable/test key"),
+    ("secret.sk",      "CRITICAL", re.compile(r"\bsk_(test|live)_[A-Za-z0-9]{16,}"), "secret key"),
+    ("secret.aws",     "CRITICAL", re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
+    ("secret.awssec",  "CRITICAL", re.compile(r"(?i)aws_secret(_access)?_key\s*[:=]\s*['\"]?[A-Za-z0-9+/=]{20,}"), "AWS secret key"),
+    ("secret.dburl",   "CRITICAL", re.compile(r"\b(postgres(ql)?|mysql|mongodb(\+srv)?|redis)://(?!(user|username|postgres|root|admin|\{\{)[^:]*:(pass|password|secret|postgres|root|\$\{|\{\{|<))[^:/\s]+:[^@\s]+@[^\s'\"]+"), "database URL with credentials"),
+    ("secret.jwt",     "CRITICAL", re.compile(r"\beyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}"), "JWT"),
+    ("secret.privkey", "CRITICAL", re.compile(r"-----BEGIN\s+(RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE KEY-----"), "private key"),
+    ("secret.github",  "CRITICAL", re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,})"), "GitHub token"),
+    ("secret.google",  "CRITICAL", re.compile(r"\bGOCSPX-[A-Za-z0-9_-]+"), "Google OAuth secret"),
+    ("secret.slack",   "CRITICAL", re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"), "Slack webhook"),
+    ("secret.sendgrid","CRITICAL", re.compile(r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}"), "SendGrid key"),
+    ("secret.password","CRITICAL", re.compile(r"(?i)\b(password|passwd|pwd)\b\s*[:=]\s*['\"](?!\$\{|\{\{|<|test|example|changeme|placeholder|your[_-]?)[^'\"\s]{6,}['\"]"), "password literal"),
+    ("pii.email",      "CRITICAL", re.compile(r"\b[A-Za-z0-9._%+-]+@(gmail|yahoo|hotmail|outlook|protonmail|icloud|me|aol)\.(com|net|org)\b"), "personal email address"),
+    ("infra.privip",   "WARNING",  re.compile(r"\b(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b"), "private IP"),
+    ("infra.pubip",    "CRITICAL", re.compile(r"(?<![/v\w.-])(?!(?:10|127|0)\.)(?!192\.168\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])(?:\.(?:\d{1,3})){3}(?![\w.-])(?<!\.0\.0\.0)"), "public IP address"),
+    ("infra.ssh",      "CRITICAL", re.compile(r"\bssh\s+(-i\s+\S+\s+)?[a-z_][a-z0-9_-]*@[0-9A-Za-z.-]+"), "SSH connection string"),
+    ("infra.pem",      "WARNING",  re.compile(r"\S+\.pem\b"), "key file reference"),
+    ("path.home",      "CRITICAL", re.compile(r"(/Users/(?!Shared/)[A-Za-z][A-Za-z0-9_-]*/|/home/(?!user/)[a-z][a-z0-9_-]*/|C:\\\\Users\\\\[A-Za-z])"), "host-specific home path"),
+    ("path.secrets",   "CRITICAL", re.compile(r"(^|\s)~?/?\.secrets/"), "secrets directory reference"),
+    ("cfg.entropy",    "WARNING",  re.compile(r"^[A-Z_]{4,}=[A-Za-z0-9+/=_-]{32,}$"), "high-entropy config value"),
+]
+
+DANGEROUS_FILES = [
+    (re.compile(r"(^|/)\.env(\.[A-Za-z0-9_.-]+)?$"), "environment file"),
+    (re.compile(r"\.(pem|key|p12|pfx|jks)$"), "key material"),
+    (re.compile(r"(^|/)(credentials|service-account[^/]*)\.json$"), "credential file"),
+    (re.compile(r"(^|/)\.secrets(/|$)"), "secrets directory"),
+    (re.compile(r"(^|/)(dump|.*\.dump|.*\.sql\.gz)$"), "database dump"),
+    (re.compile(r"\.map$"), "source map"),
+]
+
+def is_text(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in TEXT_EXT:
+        return False
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(4096)
+        return b"\x00" not in chunk
+    except OSError:
+        return False
+
+def truncate(s):
+    return s[:4] + "..." if len(s) > 4 else s
+
+def load_ignores(root):
+    """Paths listed in <root>/.sanitize-ignore (one per line, relative) are skipped."""
+    ig = os.path.join(root, ".sanitize-ignore")
+    if not os.path.isfile(ig):
+        return set()
+    with open(ig) as f:
+        return {l.strip() for l in f if l.strip() and not l.startswith("#")}
+
+def scan(root, allow):
+    findings, files_scanned = [], 0
+    ignores = load_ignores(root)
+    for dp, dns, fns in os.walk(root):
+        dns[:] = [d for d in dns if d not in SKIP_DIRS]
+        for fn in fns:
+            p = os.path.join(dp, fn); rel = os.path.relpath(p, root)
+            if rel in ignores or fn == ".sanitize-ignore":
+                continue
+            for rx, label in DANGEROUS_FILES:
+                if rx.search(rel) and not fn.endswith(".example"):
+                    findings.append(("file.dangerous", "CRITICAL", rel, 0, label, ""))
+            if not is_text(p):
+                continue
+            files_scanned += 1
+            try:
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    for n, line in enumerate(f, 1):
+                        if any(a.search(line) for a in allow):
+                            continue
+                        for pid, sev, rx, label in PATTERNS:
+                            m = rx.search(line)
+                            if m:
+                                findings.append((pid, sev, rel, n, label, truncate(m.group(0))))
+                                break
+            except OSError:
+                pass
+    return findings, files_scanned
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("dir")
+    ap.add_argument("--report")
+    ap.add_argument("--allow", action="append", default=[], help="regex; matching lines are ignored")
+    ap.add_argument("--quiet", action="store_true")
+    a = ap.parse_args()
+    if not os.path.isdir(a.dir):
+        print(f"sanitize: {a.dir} is not a directory", file=sys.stderr); return 3
+    allow = [re.compile(x) for x in a.allow]
+    findings, n = scan(a.dir, allow)
+    crit = [f for f in findings if f[1] == "CRITICAL"]
+    warn = [f for f in findings if f[1] == "WARNING"]
+    verdict = "FAIL" if crit else ("PASS WITH WARNINGS" if warn else "PASS")
+
+    by_cat = {}
+    for f in findings:
+        by_cat.setdefault(f[0], []).append(f)
+    lines = [f"# Sanitization Report: {os.path.basename(os.path.abspath(a.dir))}", "",
+             f"**Date:** {date.today().isoformat()}  ", f"**Files scanned:** {n}  ",
+             f"**Verdict:** {verdict}", "",
+             "| Category | Severity | Findings | Files |", "|---|---|---|---|"]
+    for pid in sorted(by_cat):
+        fs = by_cat[pid]
+        lines.append(f"| `{pid}` — {fs[0][4]} | {fs[0][1]} | {len(fs)} | {len({f[2] for f in fs})} |")
+    lines += ["", f"## Critical findings ({len(crit)})", ""]
+    for pid, sev, rel, ln, label, snip in crit[:400]:
+        loc = f"{rel}:{ln}" if ln else rel
+        lines.append(f"- **[{pid}]** `{loc}` — {label}" + (f" `{snip}`" if snip else ""))
+    if len(crit) > 400: lines.append(f"- … {len(crit) - 400} more")
+    lines += ["", f"## Warnings ({len(warn)})", ""]
+    for pid, sev, rel, ln, label, snip in warn[:200]:
+        lines.append(f"- **[{pid}]** `{rel}:{ln}` — {label}" + (f" `{snip}`" if snip else ""))
+    if len(warn) > 200: lines.append(f"- … {len(warn) - 200} more")
+    lines += ["", "## Recommendation", "",
+              {"FAIL": f"Fix or remove the {len(crit)} critical findings, then re-run.",
+               "PASS WITH WARNINGS": f"Clear of critical findings. Review the {len(warn)} warnings before sharing.",
+               "PASS": "Clear. Safe to share."}[verdict], ""]
+    report = "\n".join(lines)
+    if a.report:
+        with open(a.report, "w") as f: f.write(report)
+    if not a.quiet:
+        print(report if not a.report else f"{verdict}: {len(crit)} critical, {len(warn)} warnings across {n} files → {a.report}")
+    return {"PASS": 0, "PASS WITH WARNINGS": 1, "FAIL": 2}[verdict]
+
+if __name__ == "__main__":
+    sys.exit(main())

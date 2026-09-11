@@ -1,0 +1,15 @@
+# Behavioral suite manifest — one line per suite:   tier|file|label
+#
+# Tiers the runner understands (in escalating order):
+#   essential, comprehensive_a, comprehensive_b, auth_extended, admin, platform,
+#   security, advanced_auth, observability, enterprise, oauth, infrastructure
+# --quick runs essential; --standard runs essential + comprehensive + core tiers;
+# --full runs everything. Files are relative to the project's suites directory.
+#
+# Example rows — replace with your own:
+#
+# essential|wo-0101-health-critical-path.sh|Health & Readiness
+# essential|wo-0102-login-critical-path.sh|Login
+# comprehensive_a|comprehensive/users-tests.sh|Users (comprehensive)
+# security|wo-0201-input-validation.sh|Input Validation
+# infrastructure|wo-0301-migrations.sh|Migrations

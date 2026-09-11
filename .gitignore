@@ -1,0 +1,19 @@
+# Project binding — created per target project, never committed to the pipeline
+pipeline.config.sh
+
+# Rendered installs (the pipeline is the source; installs live in target repos)
+/installed/
+
+.DS_Store
+*.swp
+
+# Library index is generated — but committed, so contributors see it without running bin/lib
+
+# Build output
+/dist/
+
+__pycache__/
+# packs are user content; only the scaffold is tracked
+packs/*/
+!packs/README.md
+!packs/INDEX.md

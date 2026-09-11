@@ -1,0 +1,3 @@
+# files that legitimately contain scan patterns
+sanitize
+maintenance/portability-pass.sh
