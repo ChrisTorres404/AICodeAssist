@@ -44,6 +44,7 @@ UI, and DATA resolve to the detected stack's specialist.
 | security | `owasp-top10-expert` | `jwt-expert` | `project-validator-expert` |
 | performance | `performance-optimizer` | BACKEND | `project-validator-expert` |
 | analysis | `repo-analyst` | `code-explorer` | `factuality-validator` |
+| integration | `e2e-runner` | BACKEND | `project-validator-expert` |
 | docs | `documentation-expert` | `developer-experience-writer` | `critical-reviewer` |
 
 The validator is never the agent that implemented. For bugs, see

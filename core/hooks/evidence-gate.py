@@ -20,6 +20,27 @@ def sh(cmd):
     try: return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
     except Exception: return ""
 
+def latest_status(path):
+    """PASS | FAIL | RUNNING | PLAN | none, read exactly the way the drivers read it.
+
+    The '**Overall status:**' line is the authoritative answer; the run records
+    below it are history. A document whose latest run failed still contains the
+    word PASS further up, which is why this cannot be a search of the whole text.
+    """
+    try:
+        text = open(path, errors="ignore").read()
+    except OSError:
+        return "none"
+    m = re.search(r"^\*\*Overall status:\*\*(.*)$", text, re.M)
+    if not m: return "none"
+    line = m.group(1)
+    if "RUNNING" in line: return "RUNNING"
+    if re.search(r"EXECUTED\s*[—–-]+\s*PASS", line): return "PASS"
+    if re.search(r"EXECUTED\s*[—–-]+\s*FAIL", line): return "FAIL"
+    if "NOT EXECUTED" in line: return "PLAN"
+    return "none"
+
+
 def main():
     root = sh(["git", "rev-parse", "--show-toplevel"]).strip()
     if not root: return 0
@@ -42,12 +63,22 @@ def main():
         ver = [n for n in names if "VERIFICATION" in n.upper()]
         if not ver:
             problems.append(f"{os.path.relpath(d, root)}: CLOSEOUT present, no VERIFICATION document"); continue
-        text = "".join(open(os.path.join(d, v), errors="ignore").read() for v in ver)
-        executed = re.search(r"EXECUTED\s*[—–-]+\s*(PASS|FAIL)", text)
-        plan_only = re.search(r"NOT EXECUTED", text)
-        if not executed:
-            problems.append(f"{os.path.relpath(d, root)}: VERIFICATION has no 'EXECUTED — PASS/FAIL' line"
-                            + (" (only NOT EXECUTED — PLAN ONLY)" if plan_only else ""))
+        # The drivers read one authoritative line and so does this. Searching the
+        # whole document for any PASS-or-FAIL accepted a closeout whose latest run
+        # had failed, because an older passing run was still in the history.
+        rel = os.path.relpath(d, root)
+        statuses = [latest_status(os.path.join(d, v)) for v in sorted(ver)]
+        st = next((x for x in statuses if x != "none"), "none")
+        if st == "PASS":
+            pass
+        elif st == "FAIL":
+            problems.append(f"{rel}: the latest verification run is EXECUTED — FAIL")
+        elif st == "RUNNING":
+            problems.append(f"{rel}: the last verification never finished; an interrupted run is not a result")
+        elif st == "PLAN":
+            problems.append(f"{rel}: VERIFICATION is NOT EXECUTED — PLAN ONLY")
+        else:
+            problems.append(f"{rel}: VERIFICATION has no authoritative '**Overall status:**' line")
 
     # 2. debug logging in modified source
     for c in changed:
@@ -63,7 +94,7 @@ def main():
     if not problems and not warnings: return 0
     out = []
     if problems:
-        out.append("Evidence gate — a closeout is resting on missing or unexecuted verification:")
+        out.append("Evidence gate — a closeout is resting on verification that does not support it:")
         out += [f"  {p}" for p in problems]
         out.append("  Run the tests, record EXECUTED — PASS/FAIL with output, then close.")
     if warnings:

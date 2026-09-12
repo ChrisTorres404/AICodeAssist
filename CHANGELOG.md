@@ -1,5 +1,67 @@
 # Changelog
 
+### 1.1.3 — the installed project as a test target
+
+Findings from a blind recovery run on a mature codebase and two rounds of
+independent review, each with a regression evaluation under `harness/evals/`:
+
+- **Upgrading: re-run `acp install <project>` in each project you maintain.**
+  It is the only migration path. It replaces the pipeline's own hooks by their
+  `acp:` identity and keeps everything of yours. `acp doctor` only reports; it
+  never edits git hooks, so a project installed before this release will not be
+  told what it is missing until the installer has run there.
+- traceability is enforced by a git `commit-msg` hook as well as the tool hook,
+  so a citation of a work order nobody opened is refused whether the message
+  came from `-m`, `-F`, stdin or an editor (`commit-msg-traceability`). A
+  `commit-msg` hook you already have is left alone; chain the check into it to
+  get the same guarantee, as the README shows
+- `new-project` initialises the repository before installing, so scaffolded
+  projects get the hook; previously there was no repository to wire it into
+- an installed copy self-tests honestly: evaluations needing source-repository
+  fixtures skip with a reason instead of failing, and two checks that scanned
+  directories an install does not ship were scoping their scan wrong
+- `acp doctor` opens, verifies and closes a throwaway work order in the layout
+  it is pointed at, then removes it. It runs inside the target: doctoring one
+  project never writes into another (`fresh-install-day-one`)
+- `wo close` and `bug close` refuse a verification document that is still
+  mostly the shipped template, measured against the template itself
+  (`ALLOW_PLACEHOLDERS=1` when the prompts genuinely do not apply)
+- external commands run under a bound that survives a malformed setting, so a
+  third-party tool that hangs fails the run instead of holding it open forever
+  (`bounded-external-commands`)
+- the database-URL rule keys its exemption off the password rather than the
+  username, so documentation examples stop reading as critical findings
+
+Found by an adversarial review of the commit above, 23 scenarios against a
+frozen build:
+
+- work-order and bug identities are reserved atomically, so simultaneous
+  creators no longer all receive the same number, and a number carried by two
+  folders is reported rather than resolved by picking one (`concurrent-identity`).
+  The same change exposed an older defect: a bug series is a band, not a prefix,
+  and matching it as a prefix handed the second bug in a category a number that
+  already existed
+- verification refuses to record a pass when the source changed while the suite
+  ran, marks a run before it starts so an interrupted rerun cannot leave an
+  older pass standing, and the Stop hook now reads the authoritative status the
+  same way the drivers do (`evidence-integrity`). `ALLOW_TREE_DRIFT=1` is there
+  for suites that write into the tree by design
+- the git hook is installed where git actually looks: a linked worktree keeps
+  its hooks in the shared directory, and `core.hooksPath` moves them again
+  (`worktree-hook`). doctor reports a hook that is present but not executable as
+  the inactive thing it is
+- the traceability hook reads the authored message as written, comment lines
+  included, because `--cleanup=verbatim` records them and the hook cannot see
+  the command line that chose it
+- the minimal profile installs no git hook, and reinstalling it removes one the
+  pipeline put there earlier
+- a failed install leaves the project intact: the replacement is staged before
+  anything is removed, and the project's authored overlays and harness
+  configuration are held with the project until the install commits, so a retry
+  restores them (`install-failure-recovery`)
+- a bounded command is killed with its whole process group, so a timeout no
+  longer returns while the work it started carries on
+
 ### 1.1.2 — parallel-work fixes
 
 Found by building a four-module app with four agents working simultaneously in

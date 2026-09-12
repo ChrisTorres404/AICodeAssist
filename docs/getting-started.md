@@ -174,7 +174,13 @@ Closing before the suite passed is refused:
 wo: refusing to close WO-0001: verification is EXECUTED — FAIL. Fix the work, re-run:  wo verify 0001 --run <suite.sh>
 ```
 
-With an executed PASS on file, `wo close 1` drafts the closeout:
+Before it will close, write up the verification document. `wo verify` records what
+ran and what it returned; the narrative around it is yours. Close refuses a document
+that is still mostly the shipped template, because a form nobody filled in reads as
+evidence and is not. If the remaining prompts genuinely do not apply, `ALLOW_PLACEHOLDERS=1`
+says so explicitly.
+
+With an executed PASS on file and the verification written up, `wo close 1` drafts the closeout:
 
 ```
 WO-0001 closeout drafted: <project>/.../WO-0001-CLOSEOUT.md

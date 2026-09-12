@@ -17,16 +17,23 @@
 # Results land in harness/evals/results/<timestamp>.md with per-eval status.
 set -uo pipefail
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# An installed copy lives inside a project and has no source-repo fixtures. The
+# evaluations that scaffold projects can only run from the pipeline repository.
+INSTALLED=0; [ -f "$SELF/pipeline.config.example.sh" ] || INSTALLED=1
 EVALS="$SELF/harness/evals"; RESULTS="$EVALS/results"
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   list) for d in "$EVALS"/*/; do [ -f "$d/eval.sh" ] && printf '  %-32s %s\n' "$(basename "$d")" "$(sed -n '3p' "$d/README.md" 2>/dev/null | cut -c1-70)"; done;;
   run)
-    which="${1:-all}"; mkdir -p "$RESULTS"; ts="$(date +%Y-%m-%d--%H%M%S)"; out="$RESULTS/$ts.md"; pass=0; fail=0
+    which="${1:-all}"; mkdir -p "$RESULTS"; ts="$(date +%Y-%m-%d--%H%M%S)"; out="$RESULTS/$ts.md"; pass=0; fail=0; skipped=0
     { echo "# Pipeline evaluation — $ts"; echo; echo "| Evaluation | Status | Seconds |"; echo "|---|---|---|"; } > "$out"
     for d in "$EVALS"/*/; do
       n="$(basename "$d")"; [ -f "$d/eval.sh" ] || continue
       [ "$which" = all ] || [ "$which" = "$n" ] || continue
+      if [ "$INSTALLED" = 1 ] && [ -f "$d/.source-only" ]; then
+        skipped=$((skipped+1)); printf '  %-32s SKIP (needs source-repository fixtures)\n' "$n"
+        echo "| $n | SKIP | — |" >> "$out"; continue
+      fi
       tmp="$(mktemp -d)"; t0=$(date +%s)
       if PIPELINE_ROOT="$SELF" EVAL_TMP="$tmp" bash "$d/eval.sh" > "$tmp/log" 2>&1; then st="PASS"; pass=$((pass+1)); else st="FAIL"; fail=$((fail+1)); fi
       t=$(( $(date +%s) - t0 )); printf '  %-32s %s (%ss)\n' "$n" "$st" "$t"; echo "| $n | $st | $t |" >> "$out"
@@ -34,7 +41,10 @@ case "$cmd" in
       rm -rf "$tmp"
     done
     [ "$which" = all ] || [ -f "$EVALS/$which/eval.sh" ] || { echo "eval run: no evaluation named '$which' (see: eval list)" >&2; exit 2; }
-    echo; echo "  $pass passed, $fail failed — $out"; [ "$fail" -eq 0 ];;
+    echo; if [ "$skipped" -gt 0 ]; then echo "  $pass passed, $fail failed, $skipped skipped — $out"
+      echo "  ($skipped evaluations need fixtures only the pipeline repository carries, so coverage here is narrower than the source suite.)"
+    else echo "  $pass passed, $fail failed — $out"; fi
+    [ "$fail" -eq 0 ];;
   live)
     command -v claude >/dev/null || { echo "eval live: the claude CLI is not on PATH" >&2; exit 2; }
     which="${1:-all}"; mkdir -p "$RESULTS"; ts="$(date +%Y-%m-%d--%H%M%S)"; out="$RESULTS/live-$ts.md"; pass=0; fail=0

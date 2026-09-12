@@ -20,9 +20,55 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/bin"
-VERSION="1.1.2"
+VERSION="1.1.3"
 
 usage() { sed -n '3,/^# -\{20,\}$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
+
+bound_seconds() { # <value> <variable name> -> effective seconds, complaining on stdout if the value was unusable
+  local v="$1" name="$2"
+  case "$v" in
+    ''|*[!0-9]*|0) echo "  ($name='$v' is not a positive number of seconds; using 120)"; echo 120;;
+    *) echo "$v";;
+  esac
+}
+
+run_bounded() { # <seconds> <command...> -> the command's status, 124 on timeout, 2 if the bound is unusable
+  # A check that never returns is not a passing check. macOS ships no timeout(1)
+  # and bash 3.2 has no wait -n, so this waits by hand and escalates to KILL.
+  #
+  # A bound that is not a positive integer is refused outright and nothing is
+  # started. Quietly substituting a default would launch a long-running command
+  # under a bound the caller never asked for, which is the failure this function
+  # exists to prevent. Callers that take the value from a user turn it into a
+  # number first, out loud: see bound_seconds.
+  #
+  # The command runs in its own process group and the whole group is signalled,
+  # because killing only the immediate child leaves whatever it spawned running.
+  # Only the group this function created is ever signalled.
+  local secs="${1:-}"; shift || true
+  case "$secs" in
+    ''|*[!0-9]*) echo "run_bounded: '$secs' is not a number of seconds; nothing was run" >&2; return 2;;
+  esac
+  [ "$secs" -gt 0 ] 2>/dev/null || { echo "run_bounded: a bound of $secs seconds is not a bound; nothing was run" >&2; return 2; }
+  [ "$#" -gt 0 ] || { echo "run_bounded: no command given" >&2; return 2; }
+  (
+    set -m                      # each background job gets its own process group
+    "$@" >/dev/null 2>&1 &
+    pid=$!; waited=0
+    set +m
+    while kill -0 "$pid" 2>/dev/null; do
+      if [ "$waited" -ge "$secs" ]; then
+        kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+        sleep 1
+        kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+        exit 124
+      fi
+      sleep 1; waited=$((waited + 1))
+    done
+    wait "$pid"
+  ) 2>/dev/null
+}
 
 doctor() {
   local target="${1:-$PWD}" fail=0 warn=0
@@ -79,7 +125,47 @@ doctor() {
   else meh "no CLAUDE.md"; fi
   local wod; wod="$(sed -n 's/^export WORKORDERS_DIR="\([^"]*\)".*/\1/p' "$cfg" 2>/dev/null)"; wod="${wod:-Workspace/Docs/WorkOrders}"
   [ -d "$target/$wod" ] && ok "work orders: $(ls -d "$target/$wod"/WO-* 2>/dev/null | wc -l | tr -d ' ')" || meh "no work-order directory yet ($wod)"
-  git -C "$target" rev-parse --show-toplevel >/dev/null 2>&1 && ok "git repository" || meh "not a git repository (evidence gate and wo-reference need one)"
+  if git -C "$target" rev-parse --show-toplevel >/dev/null 2>&1; then
+    ok "git repository"
+    # The tool hook cannot see a message that arrives by file or editor; git can.
+    # Ask git where it looks, rather than inferring: a linked worktree and
+    # core.hooksPath both put the hook somewhere the obvious guess is wrong.
+    local cm; cm="$(cd "$target" && git rev-parse --git-path hooks/commit-msg 2>/dev/null || true)"
+    case "$cm" in ''|/*) ;; *) cm="$target/$cm";; esac
+    if [ -z "$cm" ] || [ ! -f "$cm" ]; then
+      meh "no commit-msg hook; a reference to a work order that does not exist can still be committed by file — re-run install to wire it"
+    elif ! grep -q 'acp:commit-msg:wo-reference' "$cm" 2>/dev/null; then
+      meh "commit-msg hook is not the pipeline's, so traceability only covers messages typed into the command; chain the check into your hook (README: The commit-msg hook)"
+    elif [ ! -x "$cm" ]; then
+      # git skips a hook it cannot execute, and says so only in a warning nobody reads.
+      bad "commit-msg hook is present but not executable, so git ignores it and phantom references commit freely: chmod +x $cm"
+    else
+      ok "commit-msg hook wired and executable (traceability holds for messages given by file or editor)"
+    fi
+  else meh "not a git repository (evidence gate and wo-reference need one)"; fi
+  # Reporting "healthy" while the drivers cannot actually complete a lifecycle is
+  # the worst failure a doctor can have: prove one end to end, here, now.
+  if [ -x "$dest/bin/wo" ]; then
+    # The drivers resolve the project from the working directory, so the probe has
+    # to run inside the target. Doctoring one project must never write into another.
+    local tabs probe pn
+    tabs="$(cd "$target" && pwd)"
+    probe="$tabs/.acp-doctor-probe.$$"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$probe" && chmod +x "$probe"
+    pn="$(cd "$tabs" && "$dest/bin/wo" new "acp doctor probe" --size trivial --area docs 2>/dev/null | grep -o 'WO-[0-9]*' | head -1)"
+    if [ -n "$pn" ]; then
+      pn="${pn#WO-}"
+      # The probe's verification document is untouched template, so the placeholder
+      # gate would refuse the close. That gate is for human work, not for this.
+      if ( cd "$tabs" && "$dest/bin/wo" verify "$pn" --run "$probe" >/dev/null 2>&1 \
+             && ALLOW_PLACEHOLDERS=1 "$dest/bin/wo" close "$pn" >/dev/null 2>&1 ); then
+        ok "lifecycle probe: a work order opened, verified and closed in this layout"
+      else bad "lifecycle probe failed: the drivers cannot complete a work order here"; fi
+      local wod pd; wod="$(sed -n 's/^export WORKORDERS_DIR="\([^"]*\)".*/\1/p' "$cfg" 2>/dev/null)"; wod="${wod:-Workspace/Docs/WorkOrders}"
+      pd="$(find "$tabs/$wod" -maxdepth 1 -type d -name "WO-$pn-*" 2>/dev/null | head -1)"; [ -n "$pd" ] && rm -rf "$pd"
+    else bad "lifecycle probe: wo new failed in this layout"; fi
+    rm -f "$probe"
+  fi
   echo
   if [ "$fail" -gt 0 ]; then echo "$fail failure(s), $warn warning(s)"; return 1; fi
   echo "healthy — $warn warning(s)"
@@ -100,10 +186,51 @@ case "$cmd" in
     live=0; for a in "$@"; do [ "$a" = "--live" ] && live=1; done
     rc=0
     echo "== lint";      "$BIN/lint" | tail -1 || rc=1; "$BIN/lint" >/dev/null 2>&1 || rc=1
-    echo "== sanitize";  for d in core bin docs harness packs; do r=0; "$BIN/sanitize" "$ROOT/$d" --quiet >/dev/null 2>&1 || r=$?; [ "$r" -lt 2 ] && echo "  $d clean" || { echo "  $d FAIL (critical findings)"; rc=1; }; done
-    echo "== evaluations"; "$BIN/eval" run || rc=1
-    echo "== plugin";    "$BIN/build-plugin" >/dev/null 2>&1 && echo "  built dist/plugin" || { echo "  build-plugin FAILED"; rc=1; }
-    if command -v claude >/dev/null 2>&1; then claude plugin validate "$ROOT/dist/plugin" >/dev/null 2>&1 && claude plugin validate "$ROOT/dist/plugin/.claude-plugin/plugin.json" >/dev/null 2>&1 && echo "  plugin and marketplace manifests validate" || { echo "  plugin validation FAILED (run: claude plugin validate dist/plugin/.claude-plugin/plugin.json)"; rc=1; }; else echo "  (claude CLI not found; plugin validation skipped)"; fi
+    # An installed copy ships a subset of these directories, and sanitize reserves
+    # exit 3 for its own usage errors: neither is a critical finding.
+    echo "== sanitize"
+    for d in core bin docs harness packs; do
+      [ -d "$ROOT/$d" ] || continue
+      r=0; "$BIN/sanitize" "$ROOT/$d" --quiet >/dev/null 2>&1 || r=$?
+      case "$r" in
+        0|1) echo "  $d clean";;
+        2)   echo "  $d FAIL (critical findings)"; rc=1;;
+        *)   echo "  $d FAIL (sanitize could not scan it, exit $r)"; rc=1;;
+      esac
+    done
+    if [ -f "$ROOT/pipeline.config.example.sh" ]; then echo "== evaluations (pipeline repository: full suite)"
+    else echo "== evaluations (installed copy: the ones needing source fixtures are skipped)"; fi
+    "$BIN/eval" run || rc=1
+    # Packaging the plugin is something only the pipeline repository can do; an
+    # installed copy has no packaging inputs, and failing it there would be noise.
+    if [ -f "$ROOT/pipeline.config.example.sh" ]; then
+      echo "== plugin"
+      # bound_seconds prints its complaint first and the effective value last
+      bs="$(bound_seconds "${ACP_PLUGIN_TIMEOUT:-120}" ACP_PLUGIN_TIMEOUT)"
+      echo "$bs" | sed '$d' | grep . || true
+      local_to="$(echo "$bs" | tail -1)"
+      r=0; run_bounded "$local_to" "$BIN/build-plugin" || r=$?
+      case "$r" in
+        0)   echo "  built dist/plugin";;
+        124) echo "  build-plugin timed out after ${local_to}s"; rc=1;;
+        *)   echo "  build-plugin FAILED"; rc=1;;
+      esac
+      if [ "$r" -eq 0 ]; then
+        if [ "${ACP_SKIP_PLUGIN_VALIDATE:-0}" = 1 ]; then echo "  (plugin validation skipped by request)"
+        elif command -v claude >/dev/null 2>&1; then
+          # The validator is an external CLI. It has hung here; bound it rather than
+          # let one third-party command hold the whole suite open indefinitely.
+          vr=0
+          run_bounded "$local_to" claude plugin validate "$ROOT/dist/plugin" || vr=$?
+          [ "$vr" -eq 0 ] && { run_bounded "$local_to" claude plugin validate "$ROOT/dist/plugin/.claude-plugin/plugin.json" || vr=$?; }
+          case "$vr" in
+            0)   echo "  plugin and marketplace manifests validate";;
+            124) echo "  plugin validation timed out after ${local_to}s (ACP_PLUGIN_TIMEOUT to raise it, ACP_SKIP_PLUGIN_VALIDATE=1 to skip)"; rc=1;;
+            *)   echo "  plugin validation FAILED (run: claude plugin validate dist/plugin/.claude-plugin/plugin.json)"; rc=1;;
+          esac
+        else echo "  (claude CLI not found; plugin validation skipped)"; fi
+      fi
+    fi
     [ -x "$BIN/maintenance/portability-check.sh" ] && { echo "== portability"; "$BIN/maintenance/portability-check.sh" || rc=1; }
     if [ "$live" -eq 1 ]; then echo "== live sessions"; "$BIN/eval" live || rc=1; fi
     echo; [ "$rc" -eq 0 ] && echo "ALL CHECKS PASSED" || echo "CHECKS FAILED"; exit "$rc";;

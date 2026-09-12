@@ -123,7 +123,7 @@ APP_DOMAIN=your-domain.com
 APP_PORT=8080
 
 # === Database ===
-DATABASE_URL=postgresql://user:password@localhost:5432/mydb
+DATABASE_URL=postgresql://user:${DB_PASSWORD}@localhost:5432/mydb
 REDIS_URL=redis://localhost:6379
 
 # === Secrets (REQUIRED — generate your own) ===

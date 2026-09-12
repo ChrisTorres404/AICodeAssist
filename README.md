@@ -60,6 +60,7 @@ acp wo start 0407 · block 0407 "reason" · note 0407 "text"  # status and sessi
 acp wo suite 0407          # scaffold the behavioural suite (sources the harness, exits non-zero on failure)
 acp wo verify 0407 --run suites/wo-0407.sh   # runs it; stamps EXECUTED — PASS/FAIL from exit code
 acp wo close 0407          # REFUSES without a VERIFICATION document
+acp wo integrate "Batch name" --covers 0402,0403,0404   # parallel work: prove the modules compose
 acp wo promote 0407        # carry it into a pack; writes one catalog entry file, so parallel promotions never conflict
 acp wo list · show · status · stats
 ```
@@ -114,6 +115,8 @@ falsely. The Stop hook checks that a closeout is not resting on the third.
 | A closeout in the working tree rests on executed evidence | `evidence-gate.py` Stop hook | standard warns, strict blocks |
 | No `console.log`, `TODO: implement`, not-implemented stubs | `quality-gate.py` PostToolUse | standard warns, strict blocks |
 | Commits reference a work order | `wo-reference.py` PreToolUse | advisory |
+| A commit cites a work order or bug that does not exist | `wo-reference.py` as a git `commit-msg` hook, wired at install | blocks, whether the message came from `-m`, `-F`, stdin or an editor (`ACP_WO_REFERENCE=warn` to override) |
+| A verification document that is still mostly template | `wo close`, `bug close` refuse (`ALLOW_PLACEHOLDERS=1` to override) | always |
 | Force-push to shared branches, `--no-verify`, destructive shell | markdown hook rules | block / warn |
 | Sessions open oriented | `session-orient.sh` SessionStart | all |
 | Credentials in staged changes | `commit-quality.py` PreToolUse on `git commit` | blocks; debug logging warns |
@@ -143,6 +146,53 @@ action: warn
 ---
 That looks like the production database. Are you sure?
 ```
+
+### The commit-msg hook
+
+Two of these checks live in Claude Code's hook system, which sees the command a session is
+about to run. That is early feedback, and it is not the whole picture: a commit message can
+reach git by `-F`, by stdin, or from an editor without ever appearing in a command. So the
+traceability check is also installed as a git `commit-msg` hook, which sees the final message
+every time. Installing wires it; `acp doctor` reports whether it is there.
+
+If the repository already has a `commit-msg` hook, installing leaves it alone rather than
+overwriting work you did not ask it to touch. The guarantee then applies only once you chain
+the check into your own hook:
+
+```sh
+"$(git rev-parse --show-toplevel)/.aicodepipeline/core/hooks/wo-reference.py" "$@" || exit $?
+```
+
+### What the evidence rules do and do not guarantee
+
+The drivers refuse a closeout without an executed pass, refuse one whose latest run failed or
+never finished, and refuse one whose source moved while the suite ran. That is a check on
+process, not an authentication of evidence, and the difference matters:
+
+- **A document can be written by hand.** A verification file with a pass line and no run log is
+  accepted. Files on your disk are yours; nothing here can prove otherwise. The rules stop work
+  drifting past its own tests. They do not stop someone determined to fake the result.
+- **A suite that asserts nothing passes.** The drivers record an exit code. A suite that
+  collects no tests and exits zero is a pass, because nothing else was ever claimed.
+- **A suite that swallows failures passes.** `false` followed by a successful command exits
+  zero. Write suites that propagate failure.
+- **Git hooks do not travel through a clone.** They live in the repository, not in its history.
+  Every fresh clone starts without them, so run `acp install <project>` once in each clone. This
+  is not specific to the pipeline; it is how git hooks work.
+
+### Upgrading an existing installation
+
+Re-run the installer over the project:
+
+```bash
+acp install <project>
+```
+
+That is the migration path, and it is the only one. It replaces the pipeline's own hooks by
+their `acp:` identity, keeps every hook and setting that is yours, and adds anything new since
+the version you have. `acp doctor` only reports; it never edits git hooks, so a project that
+was installed before a hook existed will not be told it is missing one until the installer has
+run again. If you maintain several projects, re-run it in each.
 
 ---
 

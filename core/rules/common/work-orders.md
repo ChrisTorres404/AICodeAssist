@@ -14,3 +14,18 @@ Right-size the ceremony with `--size`: `trivial` needs one document and a
 verification, `standard` needs the full set. State the size you chose.
 
 Long form: the `work-order` skill.
+
+## Parallel batches
+
+Work orders built at the same time each verify their own module. That proves
+nothing about the whole: every suite can pass while a record written by one
+module never reaches another. A batch is not finished until an **integration
+work order** closes on an executed composition suite.
+
+```bash
+wo integrate "<batch name>" --covers 0002,0003,0004,0005
+```
+
+It wires every covered suite into one suite and asks for the composition
+checks: one entity created in one module, then asserted in every other
+module's output. Open it when the batch is planned, not after the merge.

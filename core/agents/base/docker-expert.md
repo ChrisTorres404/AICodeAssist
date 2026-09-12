@@ -158,7 +158,7 @@ services:
       context: ./apps/api-server
       dockerfile: Dockerfile.dev
     environment:
-      DATABASE_URL: postgres://{{PROJECT_SLUG}}:password@postgres:5432/{{DB_NAME}}
+      DATABASE_URL: postgres://{{PROJECT_SLUG}}:${DB_PASSWORD}@postgres:5432/{{DB_NAME}}
       REDIS_URL: redis://redis:6379
       NODE_ENV: development
     ports:

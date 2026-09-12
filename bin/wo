@@ -10,7 +10,7 @@
 #   wo new "<title>" [--size trivial|small|standard|large] [--area A] [--series N]
 #                    [--priority P0|P1|P2|P3] [--sdk] [--ui]
 #       --area routes the work: backend api database auth rbac frontend ui
-#              styling testing cicd docker security performance docs analysis
+#              styling testing cicd docker security performance docs analysis integration
 #   wo list [--open|--active|--closed]   (--active: everything not closed)
 #   wo show <number>                 print the work order's primary document
 #   wo status <number>               which documents exist, which are missing
@@ -18,6 +18,7 @@
 #   wo block <number> "<reason>"     mark blocked
 #   wo note <number> "<text>"        append a dated session note
 #   wo suite <number>                       scaffold a behavioural suite for the work order
+#   wo integrate "<title>" --covers N,N,N   open the integration work order for a batch of parallel work orders
 #   wo verify <number> [--run <suite.sh>]   create the VERIFICATION document;
 #                                    with --run, execute the suite and record
 #                                    EXECUTED — PASS/FAIL from its exit code
@@ -107,8 +108,41 @@ has_doc() { # dir number key
   fi
 }
 
-wo_folder() { # number -> path, or empty
-  find "$WO_DIR" -maxdepth 1 -type d -name "WO-$1-*" -print -quit 2>/dev/null
+wo_folder() { # number -> path, or empty. Two folders sharing a number is not a
+  # thing to resolve by picking one: whichever is chosen, the other record becomes
+  # unaddressable and every later command silently acts on the wrong work order.
+  local hits n
+  hits="$(find "$WO_DIR" -maxdepth 1 -type d -name "WO-$1-*" 2>/dev/null | sort)"
+  [ -z "$hits" ] && return 0
+  n="$(printf '%s\n' "$hits" | grep -c . || true)"
+  if [ "${n:-0}" -gt 1 ]; then
+    { echo "wo: WO-$1 is ambiguous — $n folders carry that number:"
+      printf '%s\n' "$hits" | sed 's|^|    |'
+      echo "    Rename all but one (keep the number unique) before using WO-$1."
+    } >&2
+    return 0
+  fi
+  printf '%s\n' "$hits"
+}
+
+with_id_lock() { # <command...> — serialise identity allocation across processes
+  # mkdir is atomic on every POSIX filesystem, which is the whole reason it is the
+  # lock here: two drivers cannot both create the same directory.
+  local lock="$WO_DIR/.acp-id.lock" waited=0 rc=0
+  mkdir -p "$WO_DIR"
+  while ! mkdir "$lock" 2>/dev/null; do
+    # A lock nobody released belonged to a process that died holding it.
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rm -rf "$lock" 2>/dev/null || true; continue; fi
+    waited=$((waited + 1))
+    [ "$waited" -gt 600 ] && die "another wo is holding the identity lock ($lock). Remove it if nothing else is running."
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  # die() inside the protected section exits the script; the lock must not outlive it.
+  trap 'rm -rf "$lock" 2>/dev/null || true' EXIT
+  "$@" || rc=$?
+  trap - EXIT
+  rm -rf "$lock" 2>/dev/null || true
+  return $rc
 }
 
 next_number() { # [series]
@@ -153,6 +187,7 @@ delegation() { # area -> "primary|backup|validator"  (the orchestrator's table)
     performance) echo "performance-optimizer|BACKEND|project-validator-expert";;
     docs)        echo "documentation-expert|developer-experience-writer|critical-reviewer";;
     analysis)    echo "repo-analyst|code-explorer|factuality-validator";;
+    integration) echo "e2e-runner|BACKEND|project-validator-expert";;
     *) return 1;;
   esac
 }
@@ -181,17 +216,26 @@ cmd_new() {
   case "$size" in trivial|small|standard|large) ;; *) die "size must be trivial, small, standard, or large";; esac
   local primary="" backup="" validator=""
   if [ -n "$area" ]; then
-    local deleg; deleg="$(delegation "$area")" || die "unknown area '$area' — backend api database auth rbac frontend ui styling testing cicd docker security performance docs analysis"
+    local deleg; deleg="$(delegation "$area")" || die "unknown area '$area' — backend api database auth rbac frontend ui styling testing cicd docker security performance docs analysis integration"
     deleg="$(resolve_specialists "$deleg")"
     primary="${deleg%%|*}"; backup="$(printf '%s' "$deleg" | cut -d'|' -f2)"; validator="${deleg##*|}"
     case "$area" in ui|frontend) [ "$size" != trivial ] && want_ui=1;; esac
   fi
   [ -n "$title" ] || die 'usage: wo new "<title>" [--size S] [--series N] [--priority P0|P1|P2|P3] [--sdk] [--ui]'
   mkdir -p "$WO_DIR"
-  local num; num="$(next_number "$series")"
-  local dir="$WO_DIR/WO-$num-$(slugify "$title")"
-  [ -e "$dir" ] && die "$dir already exists"
-  mkdir -p "$dir"
+  # Choosing a number and taking it have to be one operation. Scanning first and
+  # creating afterwards lets four simultaneous creators all read the same maximum
+  # and all believe they own WO-0001.
+  local num dir
+  reserve_number() {
+    num="$(next_number "$series")"
+    dir="$WO_DIR/WO-$num-$(slugify "$title")"
+    [ -e "$dir" ] && die "$dir already exists"
+    [ -n "$(find "$WO_DIR" -maxdepth 1 -type d -name "WO-$num-*" -print -quit 2>/dev/null)" ] \
+      && die "WO-$num was taken while this ran; try again"
+    mkdir -p "$dir"
+  }
+  with_id_lock reserve_number
 
   printf 'size=%s\ntitle=%s\npriority=%s\ncreated=%s\nowner=%s\n' "$size" "$title" "$priority" "$(date +%F)" "$(git config user.name 2>/dev/null || whoami)" > "$dir/.wo-meta"
   [ -n "$area" ] && printf 'area=%s\nprimary=%s\nbackup=%s\nvalidator=%s\n' "$area" "$primary" "$backup" "$validator" >> "$dir/.wo-meta"
@@ -283,8 +327,15 @@ cmd_close() {
   case "$(latest_status "$vfile")" in
     PASS) ;;
     FAIL) die "refusing to close WO-$n: the latest verification run is EXECUTED — FAIL. Fix the work, re-run:  wo verify $n --run <suite.sh>";;
+    RUNNING) die "refusing to close WO-$n: the last verification never finished. It was interrupted, and an interrupted run is not a result — whatever passed before it says nothing about now. Run it again:  wo verify $n --run <suite.sh>";;
     *) die "refusing to close WO-$n: verification is NOT EXECUTED — PLAN ONLY. A plan is not evidence. Run it:  wo verify $n --run <suite.sh>";;
   esac
+  local ph budget; ph="$(unfilled_placeholders "$vfile")"; budget="$(placeholder_budget)"
+  if [ "${ph:-0}" -gt "$budget" ] && [ "${ALLOW_PLACEHOLDERS:-0}" != 1 ]; then
+    die "refusing to close WO-$n: the verification document still carries $ph of its template placeholders (at most $budget may remain).
+    A document nobody filled in reads as evidence and is not. Replace the narrative
+    sections with what actually ran, or pass ALLOW_PLACEHOLDERS=1 if they are genuinely N/A."
+  fi
   local recorded; recorded="$(grep -m1 -oE 'tree [0-9a-f]{16}' "$vfile" | cut -d' ' -f2 || true)"
   if [ -n "$recorded" ] && [ "${ALLOW_STALE:-0}" != 1 ] && [ "$recorded" != "$(tree_fingerprint)" ]; then
     die "refusing to close WO-$n: the code changed after the last PASS (tree $recorded then, $(tree_fingerprint) now).
@@ -406,10 +457,33 @@ cmd_note() {
   echo "WO-$n: note added to $(basename "$pd")"
 }
 
+unfilled_placeholders() { # file -> how many template placeholders were never replaced
+  local f="$1"; [ -f "$f" ] || { echo 0; return; }
+  # Square-bracket prompts the templates ship with, outside code blocks and the
+  # driver's own Execution Record. A document still full of them looks complete
+  # and says nothing.
+  awk 'BEGIN{c=0;code=0} /^```/{code=!code;next} code{next} /^## Execution Record/{stop=1} stop{next}
+       {n=gsub(/\[[A-Za-z][^]]{2,}\]/,""); c+=n} END{print c}' "$f"
+}
+
+placeholder_budget() { # how many template prompts may still remain at close
+  # Half of what the template itself ships with. Calibrating against the template
+  # keeps the gate proportionate when the template grows or shrinks, and asks for
+  # substantive filling rather than an exhausting sweep of every prose prompt.
+  local t="$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION.md" base
+  if [ -f "$t" ]; then base="$(unfilled_placeholders "$t")"; echo "$((base / 2))"; else echo 24; fi
+}
+
 latest_status() { # verification file -> PASS | FAIL | PLAN | none  (the Overall status line is authoritative; older run records are history)
   local f="$1"; [ -f "$f" ] || { echo none; return; }
   local line; line="$(grep -m1 -E '^\*\*Overall status:\*\*' "$f" || true)"
-  case "$line" in *"EXECUTED — PASS"*|*"EXECUTED - PASS"*) echo PASS;; *"EXECUTED — FAIL"*|*"EXECUTED - FAIL"*) echo FAIL;; *"NOT EXECUTED"*) echo PLAN;; *) echo none;; esac
+  case "$line" in
+    *RUNNING*) echo RUNNING;;
+    *"EXECUTED — PASS"*|*"EXECUTED - PASS"*) echo PASS;;
+    *"EXECUTED — FAIL"*|*"EXECUTED - FAIL"*) echo FAIL;;
+    *"NOT EXECUTED"*) echo PLAN;;
+    *) echo none;;
+  esac
 }
 tree_fingerprint() { # hash of the source state the evidence was produced against; the work-order, bug, session, results, and pipeline folders are excluded
   ( set +e; cd "$PROJECT_ROOT" 2>/dev/null || { echo nofp; exit 0; }
@@ -423,6 +497,38 @@ tree_fingerprint() { # hash of the source state the evidence was produced agains
         | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f" 2>/dev/null; done
     fi | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16
     true )
+}
+
+cmd_integrate() { # open the integration work order for a batch of parallel work orders
+  local title="" covers=""
+  while [ $# -gt 0 ]; do case "$1" in --covers) covers="$2"; shift 2;; -*) die "unknown flag $1";; *) [ -z "$title" ] && title="$1" || title="$title $1"; shift;; esac; done
+  [ -n "$title" ] || die 'usage: wo integrate "<title>" --covers 0002,0003,0004'
+  [ -n "$covers" ] || die "an integration work order must name what it covers:  --covers 0002,0003,0004"
+  local list suites=""
+  list="$(printf '%s' "$covers" | tr ',' ' ')"
+  for c in $list; do
+    c="$(pad "$c")"
+    local cd_; cd_="$(wo_folder "$c")"; [ -n "$cd_" ] || die "no work order WO-$c to cover"
+    local f; f="$(ls "$PROJECT_ROOT/${TESTING_DIR:-Workspace/Testing}/suites/" 2>/dev/null | grep -i "^wo-$c-" | head -1)"
+    [ -n "$f" ] || die "WO-$c has no suite in ${TESTING_DIR:-Workspace/Testing}/suites/ — every covered work order must be verified on its own first"
+    suites="$suites $f"
+  done
+  suites="${suites# }"
+  cmd_new "$title" --size standard --area integration
+  local num; num="$(ls -d "$WO_DIR"/WO-* 2>/dev/null | sed 's|.*/WO-||; s|-.*||' | sort -n | tail -1)"
+  local d; d="$(wo_folder "$num")"
+  meta_set "$d" covers "$(printf '%s' "$list" | tr ' ' ',')"
+  local slug; slug="$(basename "$d")"; slug="${slug#WO-$num-}"
+  local out="$PROJECT_ROOT/${TESTING_DIR:-Workspace/Testing}/suites/wo-$num-$slug.sh"
+  sed -e "s/WO-XXXX/WO-$num/g" -e "s/\[Title\]/$slug/g" -e "s|{{PIPELINE_ROOT}}|${PIPELINE_ROOT#$PROJECT_ROOT/}|g" \
+      -e "s|{{TESTING_DIR}}|${TESTING_DIR:-Workspace/Testing}|g" -e "s|{{COVERED_SUITES}}|$suites|g" \
+      "$TESTING_TEMPLATES/INTEGRATION-SUITE-TEMPLATE.sh" > "$out"
+  chmod +x "$out"
+  echo
+  echo "Integration work order WO-$num covers: $(printf '%s' "$list" | tr ' ' ',')"
+  echo "Suite scaffolded with those suites wired in: ${out#$PROJECT_ROOT/}"
+  echo "Write the composition checks — one entity walked across every covered module — then:"
+  echo "  wo verify $num --run ${out#$PROJECT_ROOT/}"
 }
 
 cmd_suite() { # scaffold a behavioural suite for a work order from the shipped template
@@ -453,20 +559,39 @@ cmd_verify() {
   fi
   [ -z "$suite" ] && { echo "Status is NOT EXECUTED — PLAN ONLY until you run something:  wo verify $n --run <suite.sh>"; return 0; }
   [ -f "$suite" ] || die "suite not found: $suite"
-  local stamp log rc status
+  local stamp log rc status fp_before fp_after
   stamp="$(date +%Y%m%d-%H%M%S)-$$"; log="$d/WO-$n-VERIFICATION-$stamp.log"
   echo "Running: $suite"
+  # Mark the run before it starts. A verification that is interrupted — a killed
+  # process group, a closed laptop — must not leave an older PASS standing as the
+  # authoritative answer, and nothing that runs at exit can be relied on to say so.
+  fp_before="$(tree_fingerprint)"
+  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** RUNNING (run $stamp started, tree $fp_before)/" "$out"
   set +e; bash "$suite" >"$log" 2>&1; rc=$?; set -e
+  fp_after="$(tree_fingerprint)"
   # Keep evidence portable and shareable: no host paths in the record.
   perl -pi -e "s|\Q$PROJECT_ROOT/\E||g" "$log" 2>/dev/null || true
   if [ "$rc" -eq 0 ]; then status="EXECUTED — PASS"; else status="EXECUTED — FAIL"; fi
+  # Evidence is a statement about a particular state of the source. If the source
+  # moved underneath the suite, the suite did not necessarily read what is there
+  # now, and a PASS would be an observation of something that no longer exists.
+  local drift=""
+  if [ "$fp_before" != "$fp_after" ] && [ "$rc" -eq 0 ]; then
+    if [ "${ALLOW_TREE_DRIFT:-0}" = 1 ]; then
+      drift="Source changed during the run (tree $fp_before to $fp_after); accepted because ALLOW_TREE_DRIFT=1."
+    else
+      status="EXECUTED — FAIL"
+      drift="Source changed while the suite ran (tree $fp_before at start, $fp_after at end). The suite may never have read what is on disk now, so this run is not evidence about it. Re-run on a still tree. ALLOW_TREE_DRIFT=1 if the suite itself writes into the tree by design."
+    fi
+  fi
   {
     printf '\n### Run %s\n\n' "$stamp"
-    printf -- '- **Status:** %s\n- **Command:** `bash %s`\n- **Exit code:** %s\n- **Log:** `%s`\n\n' "$status" "$suite" "$rc" "$(basename "$log")"
+    printf -- '- **Status:** %s\n- **Command:** `bash %s`\n- **Exit code:** %s\n- **Log:** `%s`\n' "$status" "$suite" "$rc" "$(basename "$log")"
+    [ -n "$drift" ] && printf -- '- **Source state:** %s\n' "$drift"
+    printf '\n' 
     printf '```\n'; tail -60 "$log"; printf '```\n'
   } >> "$out"
-  local fp; fp="$(tree_fingerprint)"
-  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp, tree $fp)/" "$out"
+  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp, tree $fp_after)/" "$out"
   echo "$status (exit $rc) — recorded in $(basename "$out"), full log in $(basename "$log")"
   local inum; inum="$(meta_get "$d" issue_number)"
   if [ -n "$inum" ] && command -v gh >/dev/null 2>&1; then
@@ -603,6 +728,7 @@ case "${1:-}" in
   note)    shift; cmd_note "${1:-}" "${2:-}";;
   verify)  shift; cmd_verify "$@";;
   suite)   shift; cmd_suite "${1:-}";;
+  integrate) shift; cmd_integrate "$@";;
   stats)   shift; cmd_stats;;
   publish) shift; cmd_publish "${1:-}";;
   sync)    shift; cmd_sync "${1:-}";;

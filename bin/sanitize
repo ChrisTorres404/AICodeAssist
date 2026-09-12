@@ -34,7 +34,10 @@ PATTERNS = [
     ("secret.sk",      "CRITICAL", re.compile(r"\bsk_(test|live)_[A-Za-z0-9]{16,}"), "secret key"),
     ("secret.aws",     "CRITICAL", re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
     ("secret.awssec",  "CRITICAL", re.compile(r"(?i)aws_secret(_access)?_key\s*[:=]\s*['\"]?[A-Za-z0-9+/=]{20,}"), "AWS secret key"),
-    ("secret.dburl",   "CRITICAL", re.compile(r"\b(postgres(ql)?|mysql|mongodb(\+srv)?|redis)://(?!(user|username|postgres|root|admin|\{\{)[^:]*:(pass|password|secret|postgres|root|\$\{|\{\{|<))[^:/\s]+:[^@\s]+@[^\s'\"]+"), "database URL with credentials"),
+    # What makes a connection URL dangerous is the password, not the username: key
+    # the exemption off the secret itself, so a rendered project slug does not
+    # turn an obvious placeholder into a critical finding.
+    ("secret.dburl",   "CRITICAL", re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)://(?P<dbuser>[^:/\s@'\"]+):(?!\$\{|\{\{|<|(?P=dbuser)@|\w*(?:pass|secret|token)\w*@|%s)[^@\s'\"]{3,}@" % "|".join(("pass","password","passwd","secret","changeme","example","placeholder","your","xxx","redacted","dbpass","pwd"))), "database URL with credentials"),
     ("secret.jwt",     "CRITICAL", re.compile(r"\beyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}"), "JWT"),
     ("secret.privkey", "CRITICAL", re.compile(r"-----BEGIN\s+(RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE KEY-----"), "private key"),
     ("secret.github",  "CRITICAL", re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,})"), "GitHub token"),

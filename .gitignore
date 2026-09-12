@@ -1,6 +1,9 @@
 # Project binding — created per target project, never committed to the pipeline
 pipeline.config.sh
 
+# Work done while dogfooding the pipeline on itself belongs to whoever ran it
+Workspace/
+
 .DS_Store
 *.swp
 

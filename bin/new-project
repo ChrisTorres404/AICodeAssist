@@ -97,6 +97,11 @@ sed -e "s|^export PROJECT_NAME=.*|export PROJECT_NAME=\"$NAME\"|" \
 echo "  wrote pipeline.config.sh"
 
 # --- 2. Install the pipeline ----------------------------------------------
+# The repository comes first: install wires a git commit-msg hook, and it can only
+# do that into a repository that already exists.
+if [ "$DO_GIT" -eq 1 ] && command -v git >/dev/null 2>&1 && [ ! -d "$TARGET/.git" ]; then
+  ( cd "$TARGET" && git init -q ) && echo "  git initialised"
+fi
 "$SRC/bin/install.sh" "$TARGET" --profile "$PROFILE" | sed 's/^/  /'
 
 # --- 3. Knowledge packs ----------------------------------------------------
@@ -158,8 +163,8 @@ build/
 GIEOF
 
 if [ "$DO_GIT" -eq 1 ] && command -v git >/dev/null 2>&1; then
-  ( cd "$TARGET" && git init -q && git add -A \
-    && git commit -q -m "Initialise $NAME with AICodePipeline" ) && echo "  git initialised"
+  ( cd "$TARGET" && git init -q 2>/dev/null; git add -A \
+    && git commit -q -m "Initialise $NAME with AICodePipeline" ) && echo "  first commit recorded"
 fi
 
 echo

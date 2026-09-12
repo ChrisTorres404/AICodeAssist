@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+. "$(dirname "$0")/../_lib/verification.sh"
 cd "$EVAL_TMP"; "$PIPELINE_ROOT/bin/new-project" p --name P >/dev/null || exit 1
 cd p; W=./.aicodepipeline/bin/wo
 printf '#!/usr/bin/env bash\nexit 0\n' > ok.sh; chmod +x ok.sh
@@ -19,7 +20,7 @@ for pair in "../wa $a" "../wb $b"; do set -- $pair
     perl -pi -e 's/\[Lesson 1\]/Suites clean up after themselves/; s/\[Lesson 2\]/Assert on what you created/; s/\[Lesson 3\]/Re-run after every fix/' "$1"/Workspace/Docs/WorkOrders/WO-"$2"-*/WO-"$2"-CLOSEOUT.md 2>/dev/null || true )
 done
 for pair in "../wa $a" "../wb $b"; do set -- $pair
-  ( cd "$1" && ./.aicodepipeline/bin/wo close "$2" >/dev/null 2>&1
+  ( cd "$1" && fill_wo "$2" && ./.aicodepipeline/bin/wo close "$2" >/dev/null || { echo "close failed in $1"; exit 1; }
     perl -pi -e 's/\[Lesson 1\]/Suites clean up after themselves/; s/\[Lesson 2\]/Assert on what you created/; s/\[Lesson 3\]/Re-run after every fix/' Workspace/Docs/WorkOrders/WO-"$2"-*/WO-"$2"-CLOSEOUT.md 2>/dev/null || true
     ./.aicodepipeline/bin/wo promote "$2" >/dev/null || { echo "promote failed in $1"; exit 1; }
     git add -A >/dev/null; git -c user.email=e@x -c user.name=e commit -q -m "WO-$2 promoted" ) || exit 1

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+. "$(dirname "$0")/../_lib/verification.sh"
 cd "$EVAL_TMP"; "$PIPELINE_ROOT/bin/new-project" proj --name Proj --no-git >/dev/null
 cd proj; W=./.aicodepipeline/bin/wo; B=./.aicodepipeline/bin/bug
 n="$($W new "Eval order" --size trivial --area backend | grep -o 'WO-[0-9]*' | head -1)"; n="${n#WO-}"
@@ -12,7 +13,7 @@ rc=0; $W close "$n" >/dev/null 2>&1 || rc=$?; [ "$rc" -ne 0 ] || { echo "closed 
 rc=0; $W promote "$n" >/dev/null 2>&1 || rc=$?; [ "$rc" -ne 0 ] || { echo "promoted on EXECUTED — FAIL"; exit 1; }
 printf '#!/usr/bin/env bash\nexit 0\n' > pass.sh; chmod +x pass.sh
 $W verify "$n" --run ./pass.sh >/dev/null                    # executed, passed
-$W close "$n" >/dev/null || { echo "close refused after EXECUTED — PASS"; exit 1; }
+fill_wo "$n"; $W close "$n" >/dev/null || { echo "close refused after EXECUTED — PASS"; exit 1; }
 $W show "$((10#$n))" >/dev/null || { echo "unpadded number not accepted"; exit 1; }
 rc=0; $W promote "$n" >/dev/null 2>&1 || rc=$?; [ "$rc" -ne 0 ] || { echo "promoted a closeout that still had template placeholders"; exit 1; }
 perl -pi -e 's/\[Lesson 1\]/Suites must clean up what they create/; s/\[Lesson 2\]/Assert on the record you made, not on collection size/; s/\[Lesson 3\]/Re-run the original suite after every fix/' "Workspace/Docs/WorkOrders/WO-$n-Eval-order/WO-$n-CLOSEOUT.md"
@@ -25,6 +26,6 @@ b="$($B new "Eval bug" --category api | grep -o 'BUG-[0-9]*' | head -1)"; b="${b
 $B verify "$b" >/dev/null
 rc=0; $B close "$b" >/dev/null 2>&1 || rc=$?; [ "$rc" -ne 0 ] || { echo "bug closed on plan-only verification"; exit 1; }
 $B verify "$b" --run ./pass.sh >/dev/null
-$B close "$b" >/dev/null || { echo "bug close refused after PASS"; exit 1; }
+fill_bug "$b"; $B close "$b" >/dev/null || { echo "bug close refused after PASS"; exit 1; }
 grep -q "Eval bug" "$(ls -d Workspace/Docs/Bugs/BUG-$b-*)"/BUG-$b-*.md || { echo "bug title not written into the issue document"; exit 1; }
 exit 0

@@ -46,19 +46,59 @@ fi
 
 die() { echo "bug: $*" >&2; exit 1; }
 slugify() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g' -e 's/^-//' -e 's/-$//'; }
-bug_folder() { find "$BUG_DIR" -maxdepth 1 -type d -name "BUG-$1-*" -print -quit 2>/dev/null; }
+bug_folder() { # number -> path, or empty. Two folders sharing a number is not a
+  # thing to resolve by picking one: whichever is chosen, the other record becomes
+  # unaddressable and every later command silently acts on the wrong bug.
+  local hits n
+  hits="$(find "$BUG_DIR" -maxdepth 1 -type d -name "BUG-$1-*" 2>/dev/null | sort)"
+  [ -z "$hits" ] && return 0
+  n="$(printf '%s\n' "$hits" | grep -c . || true)"
+  if [ "${n:-0}" -gt 1 ]; then
+    { echo "bug: BUG-$1 is ambiguous — $n folders carry that number:"
+      printf '%s\n' "$hits" | sed 's|^|    |'
+      echo "    Rename all but one (keep the number unique) before using BUG-$1."
+    } >&2
+    return 0
+  fi
+  printf '%s\n' "$hits"
+}
+
+with_id_lock() { # <command...> — serialise identity allocation across processes
+  local lock="$BUG_DIR/.acp-id.lock" waited=0 rc=0
+  mkdir -p "$BUG_DIR"
+  while ! mkdir "$lock" 2>/dev/null; do
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rm -rf "$lock" 2>/dev/null || true; continue; fi
+    waited=$((waited + 1))
+    [ "$waited" -gt 600 ] && die "another bug is holding the identity lock ($lock). Remove it if nothing else is running."
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  trap 'rm -rf "$lock" 2>/dev/null || true' EXIT
+  "$@" || rc=$?
+  trap - EXIT
+  rm -rf "$lock" 2>/dev/null || true
+  return $rc
+}
 
 next_number() {
-  local series="${1:-}" max=0 n
+  # A series is a band, not a prefix: 0100 means 0100-0199. Matching the series as
+  # a literal prefix made every 4-digit series a band of one, so the second bug in
+  # a category was handed a number that already existed.
+  local series="${1:-}" max=0 n base top cand
+  if [ -n "$series" ]; then base="$((10#$series))"; top="$(( (base / 100) * 100 + 99 ))"; fi
   for d in "$BUG_DIR"/BUG-*; do
     [ -d "$d" ] || continue
     n="$(basename "$d")"; n="${n#BUG-}"; n="${n%%-*}"
     case "$n" in ''|*[!0-9]*) continue;; esac
-    [ -n "$series" ] && { [ "${n:0:${#series}}" = "$series" ] || continue; }
+    if [ -n "$series" ]; then
+      [ "$((10#$n))" -ge "$base" ] && [ "$((10#$n))" -le "$top" ] || continue
+    fi
     [ "$((10#$n))" -gt "$max" ] && max="$((10#$n))"
   done
-  if [ "$max" -eq 0 ] && [ -n "$series" ]; then printf '%04d' "$((10#$series))"
-  else printf '%04d' "$((max + 1))"; fi
+  if [ "$max" -eq 0 ] && [ -n "$series" ]; then cand="$base"; else cand="$((max + 1))"; fi
+  if [ -n "$series" ] && [ "$cand" -gt "$top" ]; then
+    die "series $series is full ($base-$top). Open this one in another category, or widen the series."
+  fi
+  printf '%04d' "$cand"
 }
 
 render() { sed -e "s/BUG-XXXX/BUG-$3/g" -e "s/\[Title\]/$4/g" -e "s/\[Short Title\]/$4/g" -e "s/YYYY-MM-DD/$(date +%F)/g" "$1" > "$2"; }
@@ -107,10 +147,16 @@ cmd_new() {
   mkdir -p "$BUG_DIR"
   [ -n "$series" ] || series="1000"   # uncategorised bugs go to the overflow series, as the methodology says
   local num slug dir
-  num="$(next_number "$series")"; slug="$(slugify "$title")"
-  dir="$BUG_DIR/BUG-$num-$slug"
-  [ -e "$dir" ] && die "$dir already exists"
-  mkdir -p "$dir"
+  # Choosing a number and taking it have to be one operation; see bin/wo.
+  reserve_number() {
+    num="$(next_number "$series")"; slug="$(slugify "$title")"
+    dir="$BUG_DIR/BUG-$num-$slug"
+    [ -e "$dir" ] && die "$dir already exists"
+    [ -n "$(find "$BUG_DIR" -maxdepth 1 -type d -name "BUG-$num-*" -print -quit 2>/dev/null)" ] \
+      && die "BUG-$num was taken while this ran; try again"
+    mkdir -p "$dir"
+  }
+  with_id_lock reserve_number
   render "$TEMPLATES/BUG-TEMPLATE-ISSUE.md" "$dir/BUG-$num-$slug.md" "$num" "$title"
   [ "$want_prompt" -eq 1 ] && render "$TEMPLATES/BUG-TEMPLATE-PROMPT.md" "$dir/BUG-$num-Prompt.md" "$num" "$title"
   printf 'title=%s\ncreated=%s\nowner=%s\n' "$title" "$(date +%F)" "$(git config user.name 2>/dev/null || whoami)" > "$dir/.bug-meta"
@@ -179,19 +225,66 @@ cmd_verify() {
   fi
   [ -z "$suite" ] && { echo "Status is NOT EXECUTED — PLAN ONLY until you run something:  bug verify $n --run <suite.sh>"; return 0; }
   [ -f "$suite" ] || die "suite not found: $suite"
-  local stamp log rc status; stamp="$(date +%Y%m%d-%H%M%S)"; log="$d/BUG-$n-VERIFICATION-$stamp.log"
+  local stamp log rc status; stamp="$(date +%Y%m%d-%H%M%S)-$$"; log="$d/BUG-$n-VERIFICATION-$stamp.log"
+  # Mark the run before it starts, so an interrupted run cannot leave an older
+  # PASS standing as the authoritative answer. See bin/wo for the reasoning.
+  local fp_before fp_after drift=""
+  fp_before="$(tree_fingerprint)"
+  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** RUNNING (run $stamp started, tree $fp_before)/" "$out"
   set +e; bash "$suite" >"$log" 2>&1; rc=$?; set -e
+  fp_after="$(tree_fingerprint)"
   if [ "$rc" -eq 0 ]; then status="EXECUTED — PASS"; else status="EXECUTED — FAIL"; fi
-  { printf '\n### Run %s\n\n- **Status:** %s\n- **Command:** `bash %s`\n- **Exit code:** %s\n- **Log:** `%s`\n\n```\n' "$stamp" "$status" "$suite" "$rc" "$(basename "$log")"; tail -60 "$log"; printf '```\n'; } >> "$out"
-  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp)/" "$out"
+  if [ "$fp_before" != "$fp_after" ] && [ "$rc" -eq 0 ]; then
+    if [ "${ALLOW_TREE_DRIFT:-0}" = 1 ]; then
+      drift="Source changed during the run (tree $fp_before to $fp_after); accepted because ALLOW_TREE_DRIFT=1."
+    else
+      status="EXECUTED — FAIL"
+      drift="Source changed while the suite ran (tree $fp_before at start, $fp_after at end). The suite may never have read what is on disk now. Re-run on a still tree, or ALLOW_TREE_DRIFT=1 if the suite writes into the tree by design."
+    fi
+  fi
+  { printf '\n### Run %s\n\n- **Status:** %s\n- **Command:** `bash %s`\n- **Exit code:** %s\n- **Log:** `%s`\n' "$stamp" "$status" "$suite" "$rc" "$(basename "$log")"
+    [ -n "$drift" ] && printf -- '- **Source state:** %s\n' "$drift"
+    printf '\n```\n'; tail -60 "$log"; printf '```\n'; } >> "$out"
+  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp, tree $fp_after)/" "$out"
   echo "$status (exit $rc) — recorded in $(basename "$out")"
   [ "$rc" -eq 0 ] || return 1
+}
+
+unfilled_placeholders() { # file -> how many template placeholders were never replaced
+  local f="$1"; [ -f "$f" ] || { echo 0; return; }
+  awk 'BEGIN{c=0;code=0} /^```/{code=!code;next} code{next} /^## Execution Record/{stop=1} stop{next}
+       {n=gsub(/\[[A-Za-z][^]]{2,}\]/,""); c+=n} END{print c}' "$f"
+}
+placeholder_budget() { # how many template prompts may still remain at close
+  local t="$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION.md" base
+  if [ -f "$t" ]; then base="$(unfilled_placeholders "$t")"; echo "$((base / 2))"; else echo 24; fi
+}
+
+# Shared with bin/wo: the same evidence rule has to mean the same thing in both.
+tree_fingerprint() { # hash of the source state the evidence was produced against; the work-order, bug, session, results, and pipeline folders are excluded
+  ( set +e; cd "$PROJECT_ROOT" 2>/dev/null || { echo nofp; exit 0; }
+    local ex=(":!${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!${TESTING_DIR:-Workspace/Testing}/results")
+    if git rev-parse --show-toplevel >/dev/null 2>&1; then
+      { git ls-files -s -- . "${ex[@]}" 2>/dev/null; git diff -- . "${ex[@]}" 2>/dev/null
+        git ls-files -o --exclude-standard -- . "${ex[@]}" 2>/dev/null | while IFS= read -r f; do [ -f "$f" ] && { printf '%s\n' "$f"; cat "$f"; }; done; } 2>/dev/null
+    else
+      find . -type f -not -path './.git/*' -not -path "./${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}/*" -not -path "./${BUGS_DIR:-Workspace/Docs/Bugs}/*" -not -path "./${SESSIONS_DIR:-Workspace/Sessions}/*" \
+           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./${TESTING_DIR:-Workspace/Testing}/results/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
+        | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f" 2>/dev/null; done
+    fi | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16
+    true )
 }
 
 latest_status() { # verification file -> PASS | FAIL | PLAN | none
   local f="$1"; [ -f "$f" ] || { echo none; return; }
   local line; line="$(grep -m1 -E '^\*\*Overall status:\*\*' "$f" || true)"
-  case "$line" in *"EXECUTED — PASS"*|*"EXECUTED - PASS"*) echo PASS;; *"EXECUTED — FAIL"*|*"EXECUTED - FAIL"*) echo FAIL;; *"NOT EXECUTED"*) echo PLAN;; *) echo none;; esac
+  case "$line" in
+    *RUNNING*) echo RUNNING;;
+    *"EXECUTED — PASS"*|*"EXECUTED - PASS"*) echo PASS;;
+    *"EXECUTED — FAIL"*|*"EXECUTED - FAIL"*) echo FAIL;;
+    *"NOT EXECUTED"*) echo PLAN;;
+    *) echo none;;
+  esac
 }
 
 cmd_promote() {
@@ -232,8 +325,15 @@ cmd_close() {
   case "$(latest_status "$d/BUG-$n-VERIFICATION.md")" in
     PASS) ;;
     FAIL) die "refusing to close BUG-$n: the latest verification run is EXECUTED — FAIL. Fix it and re-run:  bug verify $n --run <suite.sh>";;
+    RUNNING) die "refusing to close BUG-$n: the last verification never finished. An interrupted run is not a result. Run it again:  bug verify $n --run <suite.sh>";;
     *) die "refusing to close BUG-$n: verification is NOT EXECUTED — PLAN ONLY. Run it:  bug verify $n --run <suite.sh>";;
   esac
+  local ph budget; ph="$(unfilled_placeholders "$d/BUG-$n-VERIFICATION.md")"; budget="$(placeholder_budget)"
+  if [ "${ph:-0}" -gt "$budget" ] && [ "${ALLOW_PLACEHOLDERS:-0}" != 1 ]; then
+    die "refusing to close BUG-$n: the verification document still carries $ph of its template placeholders (at most $budget may remain).
+    A document nobody filled in reads as evidence and is not. Replace the narrative
+    sections with what actually ran, or pass ALLOW_PLACEHOLDERS=1 if they are genuinely N/A."
+  fi
   local slug out; slug="$(basename "$d")"; slug="${slug#BUG-$n-}"
   out="$d/BUG-$n-$slug-CLOSEOUT.md"
   [ -e "$out" ] && die "$out already exists"

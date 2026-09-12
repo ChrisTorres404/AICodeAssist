@@ -81,17 +81,37 @@ fi
 
 # --- 1. Copy core/ and harness/ verbatim, then render ---------------------
 mkdir -p "$DEST"
-# Overlays are the user's own agent narrowing; they survive every reinstall.
-# Overlays and the harness configuration are the project's own; they survive every reinstall.
-KEEP_OVERLAYS="$(mktemp -d)"; KEEP_HCONF="$(mktemp -d)"
-[ -d "$DEST/core/agents/overlays" ] && cp -R "$DEST/core/agents/overlays/." "$KEEP_OVERLAYS/" 2>/dev/null || true
-[ -d "$DEST/harness/config" ] && cp -R "$DEST/harness/config/." "$KEEP_HCONF/" 2>/dev/null || true
+# Overlays and the harness configuration are the project's own work, not the
+# pipeline's, and they survive every reinstall. Holding them in an anonymous
+# temporary directory meant a failed install left them stranded: the project had
+# already lost them, and the retry had nothing left to preserve. They are kept
+# with the project instead, and only discarded once the install has committed.
+RECOVERY="$DEST/.acp-install-recovery"
+
+if [ -d "$RECOVERY" ]; then
+  say "recovering authored files left by an interrupted install"
+  if [ -d "$RECOVERY/overlays" ]; then mkdir -p "$DEST/core/agents/overlays"; cp -R "$RECOVERY/overlays/." "$DEST/core/agents/overlays/" 2>/dev/null || true; fi
+  if [ -d "$RECOVERY/harness-config" ]; then mkdir -p "$DEST/harness/config"; cp -R "$RECOVERY/harness-config/." "$DEST/harness/config/" 2>/dev/null || true; fi
+fi
+
+rm -rf "$RECOVERY"; mkdir -p "$RECOVERY/overlays" "$RECOVERY/harness-config"
+[ -d "$DEST/core/agents/overlays" ] && cp -R "$DEST/core/agents/overlays/." "$RECOVERY/overlays/" 2>/dev/null || true
+[ -d "$DEST/harness/config" ] && cp -R "$DEST/harness/config/." "$RECOVERY/harness-config/" 2>/dev/null || true
+printf 'started=%s\nsource=%s\nnote=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SRC" \
+  "Authored files held while the pipeline was replaced. Re-run install to restore them; it is removed once an install finishes." > "$RECOVERY/MANIFEST"
+
+# Build the new trees beside the old ones and swap at the end. Removing first and
+# copying afterwards left a window in which a failed copy destroyed the install.
+rm -rf "$DEST/.core.incoming" "$DEST/.harness.incoming"
+cp -R "$SRC/core" "$DEST/.core.incoming" || { echo "install: copying core/ from $SRC failed; the existing installation and $RECOVERY are untouched" >&2; rm -rf "$DEST/.core.incoming"; exit 1; }
+cp -R "$SRC/harness" "$DEST/.harness.incoming" || { echo "install: copying harness/ from $SRC failed; the existing installation and $RECOVERY are untouched" >&2; rm -rf "$DEST/.core.incoming" "$DEST/.harness.incoming"; exit 1; }
 rm -rf "$DEST/core" "$DEST/harness"
-cp -R "$SRC/core" "$SRC/harness" "$DEST/" || { echo "install: copying core/ and harness/ from $SRC failed" >&2; exit 1; }
+mv "$DEST/.core.incoming" "$DEST/core" && mv "$DEST/.harness.incoming" "$DEST/harness" \
+  || { echo "install: could not put the new core/ and harness/ in place; authored files are in $RECOVERY" >&2; exit 1; }
 find "$DEST/core" "$DEST/harness" -name .DS_Store -delete 2>/dev/null || true
 printf '%s\n' "$(cd "$SRC" && pwd -P)" > "$DEST/.source"
-mkdir -p "$DEST/core/agents/overlays"; cp -R "$KEEP_OVERLAYS/." "$DEST/core/agents/overlays/" 2>/dev/null || true; rm -rf "$KEEP_OVERLAYS"
-[ -n "$(ls -A "$KEEP_HCONF" 2>/dev/null)" ] && { cp -R "$KEEP_HCONF/." "$DEST/harness/config/"; say "harness/config kept from the previous install"; }; rm -rf "$KEEP_HCONF"
+mkdir -p "$DEST/core/agents/overlays"; cp -R "$RECOVERY/overlays/." "$DEST/core/agents/overlays/" 2>/dev/null || true
+[ -n "$(ls -A "$RECOVERY/harness-config" 2>/dev/null)" ] && { cp -R "$RECOVERY/harness-config/." "$DEST/harness/config/"; say "harness/config kept from the previous install"; }
 echo "$PROFILE" > "$DEST/.profile"
 mkdir -p "$DEST/bin"
 cp -p "$SRC/bin/acp" "$SRC/bin/wo" "$SRC/bin/bug" "$SRC/bin/pack" "$SRC/bin/sanitize" "$SRC/bin/detect-stack" "$SRC/bin/stack-specialist" "$SRC/bin/new-project" "$SRC/bin/install.sh" "$SRC/bin/build-plugin" "$SRC/bin/eval" "$SRC/bin/lint" "$DEST/bin/"
@@ -285,6 +305,44 @@ json.dump(cur, open(target, "w"), indent=2)
 print(f"  {note}; {len(added)} allow and {len(added_deny)} deny rules added")
 PYEOF
 
+# --- 4b. git commit-msg hook ---------------------------------------------
+# The tool hook sees the command a session is about to run; it cannot see a message
+# that arrives by file or editor. Git can. This is the only place the traceability
+# check is complete, so it is wired into the repository itself.
+REL_DEST="${DEST#"$TARGET"/}"
+if (cd "$TARGET" && git rev-parse --git-dir >/dev/null 2>&1); then
+  # Ask git where the hook goes rather than inferring it. In a linked worktree the
+  # per-worktree git directory is not where git looks for hooks, and core.hooksPath
+  # moves them somewhere else again; guessing writes a file nothing ever runs.
+  CMSG="$(cd "$TARGET" && git rev-parse --git-path hooks/commit-msg 2>/dev/null)"
+  case "$CMSG" in /*) ;; *) CMSG="$TARGET/$CMSG";; esac
+  SHARED=0
+  if [ "$(cd "$TARGET" && git rev-parse --git-dir 2>/dev/null)" != "$(cd "$TARGET" && git rev-parse --git-common-dir 2>/dev/null)" ]; then SHARED=1; fi
+  if [ "$PROFILE" = minimal ]; then
+    # minimal means no hooks, and that has to include this one. Only ours is removed.
+    if [ -f "$CMSG" ] && grep -q 'acp:commit-msg:wo-reference' "$CMSG" 2>/dev/null; then
+      rm -f "$CMSG"; say "commit-msg: pipeline hook removed (minimal profile installs no hooks)"
+    else say "commit-msg: none installed (minimal profile)"; fi
+  elif [ -f "$CMSG" ] && ! grep -q 'acp:commit-msg:wo-reference' "$CMSG" 2>/dev/null; then
+    say "commit-msg: left your existing hook alone; to add the traceability check, call"
+    say "            \"\$(git rev-parse --show-toplevel)/$REL_DEST/core/hooks/wo-reference.py\" \"\$@\" from it"
+  else
+    mkdir -p "$(dirname "$CMSG")"
+    cat > "$CMSG" <<CMSGEOF
+#!/usr/bin/env sh
+# acp:commit-msg:wo-reference — installed by AICodePipeline, safe to delete
+hook="\$(git rev-parse --show-toplevel 2>/dev/null)/$REL_DEST/core/hooks/wo-reference.py"
+[ -f "\$hook" ] || exit 0
+exec python3 "\$hook" "\$@"
+CMSGEOF
+    chmod +x "$CMSG"
+    say "commit-msg: traceability hook wired into ${CMSG#"$TARGET"/}"
+    if [ "$SHARED" -eq 1 ]; then say "            (this is a linked worktree; git shares that hook with every worktree of this repository)"; fi
+  fi
+else
+  say "commit-msg: no git repository yet; re-run install after 'git init' to wire the traceability hook"
+fi
+
 # --- 5. Project CLAUDE.md, only if the project has none ------------------
 if [ ! -f "$TARGET/CLAUDE.md" ]; then
   STACK_SECTION="$(printf '%s' "$STACK_JSON" | python3 -c '
@@ -328,6 +386,9 @@ else
 fi
 
 echo
+# The install has committed; the authored files are back in place.
+rm -rf "$RECOVERY"
+
 echo "Done. Next:"
 echo "  export PATH=\"$DEST/bin:\$PATH\""
 echo "  cd $TARGET && acp doctor && wo new \"My first work order\""
