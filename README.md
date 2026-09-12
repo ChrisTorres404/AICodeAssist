@@ -60,7 +60,7 @@ acp wo start 0407 · block 0407 "reason" · note 0407 "text"  # status and sessi
 acp wo suite 0407          # scaffold the behavioural suite (sources the harness, exits non-zero on failure)
 acp wo verify 0407 --run suites/wo-0407.sh   # runs it; stamps EXECUTED — PASS/FAIL from exit code
 acp wo close 0407          # REFUSES without a VERIFICATION document
-acp wo promote 0407        # carry it into a pack, with a catalog entry
+acp wo promote 0407        # carry it into a pack; writes one catalog entry file, so parallel promotions never conflict
 acp wo list · show · status · stats
 ```
 

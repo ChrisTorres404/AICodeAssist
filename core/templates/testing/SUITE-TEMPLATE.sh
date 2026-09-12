@@ -17,8 +17,26 @@ check() { # actual expected label
 code() { curl -s -o /dev/null -w '%{http_code}' -A "$TEST_USER_AGENT" "$@"; }
 
 echo "== WO-XXXX against $BASE"
-HEALTH="$(health_url || true)"
-wait_for_server "$HEALTH" 10 >/dev/null 2>&1 || { echo "  FAIL service is not up at $BASE"; exit 1; }
+# Self-starting: a suite must run for anyone, not only for whoever wrote it.
+# If the service is not already up, start it with SUITE_START_CMD (default: the
+# project's run command) and stop it on exit. Fixtures the suite needs are
+# created by the suite itself, never passed in through the environment.
+HOST="$(printf '%s' "$API_BASE" | sed -E 's|^(https?://[^/]+).*|\1|')"
+STARTED=""
+if ! curl -s -o /dev/null --max-time 2 "$HOST/"; then
+  START="${SUITE_START_CMD:-}"
+  [ -z "$START" ] && [ -f "$ROOT/package.json" ] && START="npm start"
+  [ -n "$START" ] || { echo "  FAIL nothing is listening at $HOST and SUITE_START_CMD is not set"; exit 1; }
+  set -m                                   # own process group, so the whole service tree can be stopped
+  ( cd "$ROOT" && eval "$START" ) >"/tmp/suite-service.$$.log" 2>&1 &
+  STARTED=$!
+  set +m
+  stop_service() { [ -n "${STARTED:-}" ] || return 0; kill -- -"$STARTED" 2>/dev/null || kill "$STARTED" 2>/dev/null; wait "$STARTED" 2>/dev/null; }
+  trap 'stop_service' EXIT INT TERM
+  for _ in $(seq 1 20); do curl -s -o /dev/null --max-time 1 "$HOST/" && break; sleep 0.5; done
+fi
+HEALTH="$(health_url || true)"          # resolved now that the service answers
+[ "$(code "$HEALTH")" = 200 ] || { echo "  FAIL no healthy endpoint (tried $HEALTH)"; [ -n "$STARTED" ] && tail -5 "/tmp/suite-service.$$.log"; exit 1; }
 
 # --- checks: one behaviour per line; create what you need and clean it up after ---
 check "$(code "$HEALTH")" 200 "health answers 200"

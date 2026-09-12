@@ -62,6 +62,13 @@ A suite that only makes HTTP calls needs none of it.
 
 ## Write a suite
 
+A suite must run for anyone, not only for whoever wrote it. `wo suite <n>`
+scaffolds one that starts the service itself when nothing is listening
+(`SUITE_START_CMD`, defaulting to the project's run command), stops it on exit,
+and creates its own fixtures. A suite that needs data passed in through the
+environment passes for its author and fails in the regression tier.
+
+
 ```bash
 #!/usr/bin/env bash
 source "$(dirname "$0")/../../.aicodepipeline/harness/config/test-config.env"

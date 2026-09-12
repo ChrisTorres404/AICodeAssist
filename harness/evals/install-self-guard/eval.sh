@@ -17,7 +17,7 @@ n="$(./.aicodepipeline/bin/wo new "Suite check" --size small --area backend | gr
 f="$(ls Workspace/Testing/suites/wo-$n-*.sh)"; bash -n "$f" || { echo "scaffolded suite has a syntax error"; exit 1; }
 rc=0; out="$(API_BASE=http://127.0.0.1:1/api/v1 bash "$f" 2>&1)" || rc=$?
 [ "$rc" -ne 0 ] || { echo "scaffolded suite exited 0 with no service up"; exit 1; }
-echo "$out" | grep -q "service is not up" || { echo "scaffolded suite failed for the wrong reason:"; echo "$out" | head -5; exit 1; }
+case "$out" in *"nothing is listening"*|*"service is not up"*|*"did not become healthy"*) ;; *) echo "scaffolded suite failed for the wrong reason:"; echo "$out" | head -5; exit 1;; esac
 # 4. detect-stack --write installs the rule sets the code now needs
 mkdir -p src && printf '{"name":"p","scripts":{"test":"vitest"},"dependencies":{"react":"19.0.0"}}' > package.json && echo '{}' > tsconfig.json && echo '{}' > package-lock.json
 ./.aicodepipeline/bin/detect-stack . --write >/dev/null || { echo "detect-stack --write failed"; exit 1; }

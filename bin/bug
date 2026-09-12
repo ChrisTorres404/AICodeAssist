@@ -207,7 +207,8 @@ cmd_promote() {
   slug="${PROJECT_SLUG:-$slug}"; pack="${pack:-$slug}"
   local pdir="${PACKS_DIR:-$PIPELINE_ROOT/packs}/$pack"; mkdir -p "$pdir/bugs"
   local b; b="$(basename "$d")"; rm -rf "$pdir/bugs/$b"; cp -R "$d" "$pdir/bugs/$b"
-  local cat="$pdir/CATALOG.md" issue close root fix
+  local entry_dir="$pdir/catalog" entry="$pdir/catalog/BUG-$n.md" issue close root fix
+  mkdir -p "$entry_dir"
   issue="$(ls "$d"/BUG-$n-*.md | grep -v -- "-\(CLOSEOUT\|VERIFICATION\|Prompt\)" | head -1 || true)"
   close="$d/BUG-$n-${b#BUG-$n-}-CLOSEOUT.md"; [ -f "$close" ] || close=""
   section() { awk -v h="$2" 'BEGIN{p=0} /^## /{p=($0 ~ h)} p&&!/^## /{print}' "$1" | sed -e '/^[[:space:]]*$/d' -e '/^---*$/d' | head -n "${3:-6}"; }
@@ -217,8 +218,9 @@ cmd_promote() {
   { printf '## BUG-%s — %s\n\n- **Folder:** `bugs/%s`\n- **Promoted:** %s from project `%s`\n' "$n" "${b#BUG-$n-}" "$b" "$(date +%F)" "$slug"
     [ -n "$root" ] && { printf -- '- **Root cause:**\n'; printf '%s\n' "$root" | sed 's/^/    /'; }
     [ -n "$fix" ]  && { printf -- '- **Fix:**\n'; printf '%s\n' "$fix" | sed 's/^/    /'; }
-    printf -- '- **Pitfalls:**\n    _(what would have found this faster? add it)_\n\n'; } >> "$cat"
-  echo "BUG-$n promoted to pack '$pack'. Catalog: $cat — edit the Pitfalls line now."
+    printf -- '- **Pitfalls:**\n    _(what would have found this faster? add it)_\n\n'; } > "$entry"
+  "$PIPELINE_ROOT/bin/pack" catalog "$pack" >/dev/null 2>&1 || true
+  echo "BUG-$n promoted to pack '$pack'. Entry: $entry — edit the Pitfalls line now."
 }
 
 cmd_close() {

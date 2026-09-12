@@ -17,4 +17,6 @@ out="$(printf '%s' "$plain" | python3 "$H" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && [ -z "$out" ] || { echo "plain README should be ignored: $out"; exit 1; }
 badline='{"tool_input":{"file_path":"'"$PWD"'/doc.md","content":"---\nwo: WO-0001\n---\nThe guard enforces it. <!-- SOURCE: src/real.ts:L99999 -->\n"}}'
 out="$(printf '%s' "$badline" | python3 "$H" 2>&1)"; echo "$out" | grep -q "line does not exist" || { echo "bad line number not reported: $out"; exit 1; }
+ph='{"tool_input":{"file_path":"'"$PWD"'/doc.md","content":"---\nwo: WO-0001\n---\nEvery claim carries <!-- SOURCE: path:L12 --> naming its file.\n"}}'
+out="$(printf '%s' "$ph" | python3 "$H" 2>&1)"; [ -z "$out" ] || { echo "a template placeholder path was reported as a claim: $out"; exit 1; }
 exit 0

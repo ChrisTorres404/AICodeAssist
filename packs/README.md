@@ -13,3 +13,8 @@ pack index                      # regenerate INDEX.md
 ```
 
 Run `bin/sanitize packs/<name>` before sharing a pack with anyone.
+
+
+Each pack keeps one catalog entry per promoted item under `catalog/`, and
+`CATALOG.md` is generated from them by `pack catalog`. That is what lets two
+people promote at the same time without a merge conflict.

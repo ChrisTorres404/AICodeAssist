@@ -1,5 +1,20 @@
 # Changelog
 
+### 1.1.2 — parallel-work fixes
+
+Found by building a four-module app with four agents working simultaneously in
+separate worktrees:
+
+- `wo promote` and `bug promote` write one catalog entry file per item under
+  `packs/<name>/catalog/`; `pack catalog` assembles `CATALOG.md` from them and
+  the generated file is untracked, so concurrent promotions merge cleanly
+  (`parallel-promote`). Legacy single-file catalogs migrate on first use.
+- scaffolded suites are self-starting: they start the service when nothing is
+  listening, resolve the health endpoint afterwards, and stop the whole process
+  group on exit, so a suite that passes for its author passes for everyone
+  (`suite-self-starting`)
+- the documentation hook ignores template placeholder SOURCE paths
+
 ### 1.1.1 — round-two audit fixes
 
 Findings from an independent consumer audit of 1.1.0, each with a regression

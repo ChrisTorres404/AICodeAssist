@@ -17,6 +17,8 @@ standard profile; blocking in strict (or ACP_DOC_CLAIMS=block).
 """
 import json, os, re, subprocess, sys
 
+# A template's own instruction ("<!-- SOURCE: path:L12 -->") is an example, not a claim.
+PLACEHOLDER = re.compile(r"^(path|file|filename|your-file)(/|$)|^path/to/|^[<{\[]|\{\{|\.\.\.|…")
 SOURCE_RX = re.compile(r"<!--\s*SOURCE:\s*([^\s:>]+)(?::L?(\d+)(?:-L?\d+)?)?[^>]*-->")
 OVERCLAIM = [
     (re.compile(r"\b(never|always|impossible|cannot be|can't be)\b", re.I), "state the mechanism: \"by design, X prevents...\" / \"under normal operation...\""),
@@ -58,6 +60,7 @@ def main():
     seen = set()
     for m in SOURCE_RX.finditer(text):
         ref, line_no = m.group(1), m.group(2)
+        if PLACEHOLDER.search(ref): continue
         key = (ref, line_no)
         if key in seen: continue
         seen.add(key)
