@@ -1,6 +1,6 @@
 ---
 name: cpp-expert
-description: ELITE C++ architect: builds, reviews, and repairs C++ code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any C++ module, service, or build, and as the reviewer for C++ changes.
+description: "ELITE C++ architect: builds, reviews, and repairs C++ code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any C++ module, service, or build, and as the reviewer for C++ changes."
 model: sonnet
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: arkts-expert
-description: ELITE HarmonyOS / ArkTS architect: builds, reviews, and repairs HarmonyOS / ArkTS code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any HarmonyOS / ArkTS module, service, or build, and as the reviewer for HarmonyOS / ArkTS changes.
+description: "ELITE HarmonyOS / ArkTS architect: builds, reviews, and repairs HarmonyOS / ArkTS code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any HarmonyOS / ArkTS module, service, or build, and as the reviewer for HarmonyOS / ArkTS changes."
 model: sonnet
 ---
 

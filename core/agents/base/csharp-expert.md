@@ -1,6 +1,6 @@
 ---
 name: csharp-expert
-description: ELITE C# / .NET architect: builds, reviews, and repairs C# / .NET code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any C# / .NET module, service, or build, and as the reviewer for C# / .NET changes.
+description: "ELITE C# / .NET architect: builds, reviews, and repairs C# / .NET code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any C# / .NET module, service, or build, and as the reviewer for C# / .NET changes."
 model: sonnet
 ---
 

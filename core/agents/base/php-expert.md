@@ -1,6 +1,6 @@
 ---
 name: php-expert
-description: ELITE PHP architect: builds, reviews, and repairs PHP code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any PHP module, service, or build, and as the reviewer for PHP changes.
+description: "ELITE PHP architect: builds, reviews, and repairs PHP code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any PHP module, service, or build, and as the reviewer for PHP changes."
 model: sonnet
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: quarkus-verification
-description: Verification loop for Quarkus projects: build, static analysis, tests with coverage, security scans, native compilation, and diff review before release or PR. Use when the task calls for quarkus verification.
+description: "Verification loop for Quarkus projects: build, static analysis, tests with coverage, security scans, native compilation, and diff review before release or PR. Use when the task calls for quarkus verification."
 ---
 
 # Quarkus Verification Loop

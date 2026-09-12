@@ -183,7 +183,8 @@ traces to a source file:
 
 Three rules make it honest. **Source or silence**: anything that cannot be
 traced to a file is omitted, never invented, and every claim carries a
-`<!-- SOURCE: path:L12 -->` comment that a hook verifies. **No implemented
+`<!-- SOURCE: path:L12 -->` comment that a hook verifies (the hook proves the reference exists; the
+factuality validator proves the source supports the claim). **No implemented
 badge without a code reference**, and every partial lists its limitations.
 **The validator is never the author**: a factuality validator marks each
 claim VERIFIED, UNVERIFIED, or DISCREPANCY, and a critical reviewer hunts

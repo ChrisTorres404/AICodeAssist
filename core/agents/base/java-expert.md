@@ -1,6 +1,6 @@
 ---
 name: java-expert
-description: ELITE Java architect: builds, reviews, and repairs Java code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Java module, service, or build, and as the reviewer for Java changes.
+description: "ELITE Java architect: builds, reviews, and repairs Java code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Java module, service, or build, and as the reviewer for Java changes."
 model: sonnet
 ---
 

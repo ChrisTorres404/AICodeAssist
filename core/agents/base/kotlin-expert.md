@@ -1,6 +1,6 @@
 ---
 name: kotlin-expert
-description: ELITE Kotlin architect: builds, reviews, and repairs Kotlin code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Kotlin module, service, or build, and as the reviewer for Kotlin changes.
+description: "ELITE Kotlin architect: builds, reviews, and repairs Kotlin code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Kotlin module, service, or build, and as the reviewer for Kotlin changes."
 model: sonnet
 ---
 

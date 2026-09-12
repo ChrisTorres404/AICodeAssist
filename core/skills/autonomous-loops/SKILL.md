@@ -1,6 +1,6 @@
 ---
 name: autonomous-loops
-description: Patterns and architectures for autonomous Claude Code loops — from simple sequential pipelines to RFC-driven multi-agent DAG systems. Retained for compatibility only: when new autonomous loop guidance is needed, use continuous-agent-loop instead. Use when the task calls for autonomous loops.
+description: "Patterns and architectures for autonomous Claude Code loops — from simple sequential pipelines to RFC-driven multi-agent DAG systems. Retained for compatibility only: when new autonomous loop guidance is needed, use continuous-agent-loop instead. Use when the task calls for autonomous loops."
 ---
 
 # Autonomous Loops Skill

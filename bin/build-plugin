@@ -15,7 +15,7 @@
 set -euo pipefail
 case "${1:-}" in -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0;; esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="1.1.0"
+VERSION="1.1.1"
 [ "${1:-}" = "--version" ] && VERSION="$2"
 OUT="$ROOT/dist/plugin"
 rm -rf "$OUT"; mkdir -p "$OUT"/{agents,skills,commands,hooks,bin,rules,workflows,.claude-plugin}
@@ -48,7 +48,7 @@ import json, sys
 src, dst = sys.argv[1:3]
 d = json.load(open(src))
 def fix(cmd):
-    return (cmd.replace("{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/", "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"))
+    return (cmd.replace("${CLAUDE_PROJECT_DIR:-.}/{{PIPELINE_ROOT}}/core/hooks/", "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/"))
 for ev in d["hooks"].values():
     for entry in ev:
         for h in entry.get("hooks", []):

@@ -20,7 +20,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/bin"
-VERSION="1.1.0"
+VERSION="1.1.1"
 
 usage() { sed -n '3,/^# -\{20,\}$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
@@ -103,7 +103,7 @@ case "$cmd" in
     echo "== sanitize";  for d in core bin docs harness packs; do r=0; "$BIN/sanitize" "$ROOT/$d" --quiet >/dev/null 2>&1 || r=$?; [ "$r" -lt 2 ] && echo "  $d clean" || { echo "  $d FAIL (critical findings)"; rc=1; }; done
     echo "== evaluations"; "$BIN/eval" run || rc=1
     echo "== plugin";    "$BIN/build-plugin" >/dev/null 2>&1 && echo "  built dist/plugin" || { echo "  build-plugin FAILED"; rc=1; }
-    if command -v claude >/dev/null 2>&1; then claude plugin validate "$ROOT/dist/plugin" >/dev/null 2>&1 && echo "  plugin validates" || { echo "  plugin validation FAILED"; rc=1; }; else echo "  (claude CLI not found; plugin validation skipped)"; fi
+    if command -v claude >/dev/null 2>&1; then claude plugin validate "$ROOT/dist/plugin" >/dev/null 2>&1 && claude plugin validate "$ROOT/dist/plugin/.claude-plugin/plugin.json" >/dev/null 2>&1 && echo "  plugin and marketplace manifests validate" || { echo "  plugin validation FAILED (run: claude plugin validate dist/plugin/.claude-plugin/plugin.json)"; rc=1; }; else echo "  (claude CLI not found; plugin validation skipped)"; fi
     [ -x "$BIN/maintenance/portability-check.sh" ] && { echo "== portability"; "$BIN/maintenance/portability-check.sh" || rc=1; }
     if [ "$live" -eq 1 ]; then echo "== live sessions"; "$BIN/eval" live || rc=1; fi
     echo; [ "$rc" -eq 0 ] && echo "ALL CHECKS PASSED" || echo "CHECKS FAILED"; exit "$rc";;

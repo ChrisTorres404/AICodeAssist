@@ -17,10 +17,11 @@ check() { # actual expected label
 code() { curl -s -o /dev/null -w '%{http_code}' -A "$TEST_USER_AGENT" "$@"; }
 
 echo "== WO-XXXX against $BASE"
-wait_for_server "$(health_url || true)" 10 >/dev/null 2>&1 || { echo "  FAIL service is not up at $BASE"; exit 1; }
+HEALTH="$(health_url || true)"
+wait_for_server "$HEALTH" 10 >/dev/null 2>&1 || { echo "  FAIL service is not up at $BASE"; exit 1; }
 
 # --- checks: one behaviour per line; create what you need and clean it up after ---
-check "$(code "$BASE/health")" 200 "health answers 200"
+check "$(code "$HEALTH")" 200 "health answers 200"
 # id="$(curl -s -X POST -H 'content-type: application/json' -d '{"title":"x"}' "$BASE/things" | jq -r .id)"
 # check "$(code "$BASE/things/$id")" 200 "GET the record we created"
 # curl -s -o /dev/null -X DELETE "$BASE/things/$id"   # clean up

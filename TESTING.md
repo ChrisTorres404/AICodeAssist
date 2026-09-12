@@ -59,7 +59,7 @@ validation. Takes a minute or two. Expected output:
   stack-fixtures                   PASS (41s)
   wo-close-needs-verification      PASS (3s)
 
-  10 passed, 0 failed — harness/evals/results/2026-09-11--195943.md
+  19 passed, 0 failed — harness/evals/results/2026-09-11--195943.md
 
 == plugin
   built dist/plugin

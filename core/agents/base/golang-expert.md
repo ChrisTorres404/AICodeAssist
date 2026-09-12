@@ -1,6 +1,6 @@
 ---
 name: golang-expert
-description: ELITE Go architect: builds, reviews, and repairs Go code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Go module, service, or build, and as the reviewer for Go changes.
+description: "ELITE Go architect: builds, reviews, and repairs Go code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Go module, service, or build, and as the reviewer for Go changes."
 model: sonnet
 ---
 

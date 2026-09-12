@@ -1,6 +1,6 @@
 ---
 name: vue-expert
-description: ELITE Vue architect: builds, reviews, and repairs Vue code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Vue module, service, or build, and as the reviewer for Vue changes.
+description: "ELITE Vue architect: builds, reviews, and repairs Vue code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Vue module, service, or build, and as the reviewer for Vue changes."
 model: sonnet
 ---
 

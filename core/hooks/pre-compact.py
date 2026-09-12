@@ -26,7 +26,7 @@ def main():
     ts = datetime.datetime.now().strftime("%Y-%m-%d--%H%M")
     wo = ""
     for cand in (os.path.join(root, ".aicodepipeline", "bin", "wo"),):
-        if os.path.exists(cand): wo = subprocess.run([cand, "list", "--open"], capture_output=True, text=True, cwd=root).stdout.strip()
+        if os.path.exists(cand): wo = subprocess.run([cand, "list", "--active"], capture_output=True, text=True, cwd=root).stdout.strip()
     note = "\n".join([
         f"# Compaction note — {ts}", "",
         "Written automatically before context compaction. Read this first after resuming.", "",

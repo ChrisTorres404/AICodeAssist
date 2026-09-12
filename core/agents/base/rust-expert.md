@@ -1,6 +1,6 @@
 ---
 name: rust-expert
-description: ELITE Rust architect: builds, reviews, and repairs Rust code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Rust module, service, or build, and as the reviewer for Rust changes.
+description: "ELITE Rust architect: builds, reviews, and repairs Rust code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Rust module, service, or build, and as the reviewer for Rust changes."
 model: sonnet
 ---
 

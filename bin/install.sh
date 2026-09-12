@@ -162,6 +162,19 @@ for sp in ${SKILL_PACKS:-}; do
   done
   say "skill pack '$sp' installed"
 done
+python3 - "$TARGET/.claude/agents" "$DEST/core/agents/domain" "${AGENT_PACKS:-}" <<'PYEOF'
+import os, sys
+installed, domain, selected = sys.argv[1:4]
+sel = set(selected.split()); removed = 0
+if os.path.isdir(domain) and os.path.isdir(installed):
+    for pk in os.listdir(domain):
+        d = os.path.join(domain, pk)
+        if not os.path.isdir(d) or pk in sel: continue
+        for f in os.listdir(d):
+            if f.endswith(".md") and f != "README.md" and os.path.exists(os.path.join(installed, f)):
+                os.remove(os.path.join(installed, f)); removed += 1
+if removed: print(f"  reconciled: {removed} domain agent(s) from packs not selected removed")
+PYEOF
 for ap in ${AGENT_PACKS:-}; do
   if [ -d "$DEST/core/agents/domain/$ap" ]; then cp -p "$DEST"/core/agents/domain/"$ap"/*.md "$TARGET/.claude/agents/"; say "agent pack installed: $ap"
   else echo "  WARNING: no agent pack named '$ap' (available: $(ls "$DEST/core/agents/domain" | grep -v README | tr '\n' ' '))" >&2; fi
@@ -184,6 +197,28 @@ for d in "$DEST"/core/skills/*/; do
   rm -rf "$TARGET/.claude/skills/$n"
   cp -R "$d" "$TARGET/.claude/skills/$n"
 done
+# Reconcile: anything pipeline-owned that this profile does not select is removed;
+# the user's own skills and agents (names the pipeline does not ship) are never touched.
+python3 - "$TARGET/.claude/skills" "$DEST/core/skills" "$DEST/core/skill-packs" "$PROFILE" "${SKILL_PACKS:-}" "$LIFECYCLE" <<'PYEOF'
+import os, shutil, sys
+installed, core, packs, profile, selected_packs, lifecycle = sys.argv[1:7]
+owned = set(os.listdir(core)) if os.path.isdir(core) else set()
+pack_skills = {}
+if os.path.isdir(packs):
+    for pk in os.listdir(packs):
+        d = os.path.join(packs, pk)
+        if os.path.isdir(d): pack_skills[pk] = set(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)))
+for ss in pack_skills.values(): owned |= ss
+if profile == "minimal": selected = set(lifecycle.split())
+else: selected = set(x for x in owned if x in os.listdir(core)) if os.path.isdir(core) else set()
+for pk in selected_packs.split(): selected |= pack_skills.get(pk, set())
+removed = 0
+if os.path.isdir(installed):
+    for name in os.listdir(installed):
+        if name in owned and name not in selected:
+            shutil.rmtree(os.path.join(installed, name), ignore_errors=True); removed += 1
+if removed: print(f"  reconciled: {removed} pipeline skill(s) not in the {profile} profile removed (user skills untouched)")
+PYEOF
 
 say "installed $(ls "$TARGET/.claude/agents" | wc -l | tr -d ' ') agents, $(ls "$TARGET/.claude/commands" | wc -l | tr -d ' ') commands, $(ls "$TARGET/.claude/skills" | wc -l | tr -d ' ') skills, $(ls "$TARGET/.claude/workflows" 2>/dev/null | wc -l | tr -d ' ') workflows"
 
@@ -213,13 +248,30 @@ if os.path.exists(target):
     except Exception: cur = {}
 hooks = json.load(open(hooks_f))
 base  = json.load(open(base_f))
+# Hooks are merged by identity: every command carrying an "acp:" id is pipeline-owned and is
+# replaced by the shipped version (upgrades); everything else in the user's settings is kept.
+def is_acp(h): return "acp:" in (h.get("command") or "")
+existing = cur.get("hooks") or {}
+kept = {}
+removed = 0
+for ev, groups in existing.items():
+    out = []
+    for g in groups:
+        hs = [h for h in (g.get("hooks") or []) if not is_acp(h)]
+        removed += len(g.get("hooks") or []) - len(hs)
+        if hs: out.append({**g, "hooks": hs})
+    if out: kept[ev] = out
 if os.environ.get("ACP_PROFILE_MINIMAL") == "1":
-    note = "hooks skipped (minimal profile)"
-elif "hooks" not in cur:
-    cur["hooks"] = hooks["hooks"]
-    note = "hooks installed"
+    note = f"hooks: none installed (minimal profile); {removed} pipeline hook(s) removed, user hooks kept"
+    if kept: cur["hooks"] = kept
+    else: cur.pop("hooks", None)
 else:
-    note = "hooks left alone (settings.json already defines them)"
+    merged = dict(kept)
+    for ev, groups in hooks["hooks"].items():
+        merged.setdefault(ev, []).extend(groups)
+    cur["hooks"] = merged
+    n = sum(len(g.get("hooks") or []) for gs in hooks["hooks"].values() for g in gs)
+    note = f"hooks: {n} pipeline hooks installed ({removed} replaced), user hooks kept"
 perms = cur.setdefault("permissions", {})
 allow = perms.setdefault("allow", [])
 added = [r for r in base["permissions"]["allow"] if r not in allow]

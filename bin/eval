@@ -33,6 +33,7 @@ case "$cmd" in
       [ "$st" = FAIL ] && { echo; echo "### $n"; echo '```'; tail -40 "$tmp/log"; echo '```'; } >> "$out"
       rm -rf "$tmp"
     done
+    [ "$which" = all ] || [ -f "$EVALS/$which/eval.sh" ] || { echo "eval run: no evaluation named '$which' (see: eval list)" >&2; exit 2; }
     echo; echo "  $pass passed, $fail failed — $out"; [ "$fail" -eq 0 ];;
   live)
     command -v claude >/dev/null || { echo "eval live: the claude CLI is not on PATH" >&2; exit 2; }
@@ -56,6 +57,7 @@ case "$cmd" in
       { echo; echo "### $n — $st"; echo '```'; cat "$tmp/check.log"; echo '```'; echo "Transcript: \`$(basename "$transcript")\`"; } >> "$out"
       [ "$st" = FAIL ] && [ -n "${EVAL_KEEP:-}" ] && echo "  project kept at $proj" || rm -rf "$tmp"
     done
+    [ "$which" = all ] || [ -f "$EVALS/live/$which/prompt.md" ] || { echo "eval live: no scenario named '$which'" >&2; exit 2; }
     echo; echo "  $pass passed, $fail failed — $out"; [ "$fail" -eq 0 ];;
   new)
     n="${1:?name}"; d="$EVALS/$n"; [ -e "$d" ] && { echo "exists: $d" >&2; exit 1; }; mkdir -p "$d"

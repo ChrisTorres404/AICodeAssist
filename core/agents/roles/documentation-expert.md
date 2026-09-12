@@ -1,6 +1,6 @@
 ---
 name: documentation-expert
-description: {{PROJECT_NAME}} documentation authority. Owns the tiered documentation model, the document lifecycle from DRAFT to FINAL, placement and naming in the docs tree, and the routing of every documentation job to the specialist that should do it. Use PROACTIVELY before creating, placing, or organising any document, and whenever a knowledge-extraction or documentation work order is opened.
+description: "{{PROJECT_NAME}} documentation authority. Owns the tiered documentation model, the document lifecycle from DRAFT to FINAL, placement and naming in the docs tree, and the routing of every documentation job to the specialist that should do it. Use PROACTIVELY before creating, placing, or organising any document, and whenever a knowledge-extraction or documentation work order is opened."
 model: sonnet
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---

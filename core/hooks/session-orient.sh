@@ -17,7 +17,7 @@ while [ "$ROOT" != "/" ] && [ ! -f "$ROOT/pipeline.config.sh" ]; do
 done
 [ -f "$ROOT/pipeline.config.sh" ] || exit 0
 
-open="$(cd "$ROOT" && "$PIPELINE/bin/wo" list --open 2>/dev/null | tail -n +2 | head -8 || true)"
+open="$(cd "$ROOT" && "$PIPELINE/bin/wo" list --active 2>/dev/null | tail -n +2 | head -8 || true)"
 [ -z "$open" ] && exit 0
 
 echo "In-flight work orders (SCTPVC = Spec/Checklist/Tasks/Prompt/Verification/Closeout):"

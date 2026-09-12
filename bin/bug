@@ -21,7 +21,8 @@ set -euo pipefail
 
 PIPELINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SELF_ROOT="$PIPELINE_ROOT"
-TEMPLATES="$PIPELINE_ROOT/core/templates/bugs"
+TEMPLATES="$PIPELINE_ROOT/core/templates/bugs"; [ -d "$TEMPLATES" ] || TEMPLATES="$PIPELINE_ROOT/templates/bugs"   # plugin layout
+TESTING_TEMPLATES="$(dirname "$TEMPLATES")/testing"
 
 find_config() {
   local d="$PWD"
@@ -172,7 +173,7 @@ cmd_verify() {
   local d; d="$(bug_folder "$n")"; [ -n "$d" ] || die "no BUG-$n"
   local out="$d/BUG-$n-VERIFICATION.md"
   if [ ! -f "$out" ] || [ "$force" -eq 1 ]; then
-    render_v "$PIPELINE_ROOT/core/templates/testing/TEST-TEMPLATE-VERIFICATION.md" "$out" "$n" "$(basename "$d")"
+    render_v "$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION.md" "$out" "$n" "$(basename "$d")"
     printf '\n---\n\n## Execution Record\n\n**Overall status:** NOT EXECUTED — PLAN ONLY\n\n' >> "$out"
     echo "BUG-$n verification document created: $out"
   fi
@@ -187,12 +188,18 @@ cmd_verify() {
   [ "$rc" -eq 0 ] || return 1
 }
 
+latest_status() { # verification file -> PASS | FAIL | PLAN | none
+  local f="$1"; [ -f "$f" ] || { echo none; return; }
+  local line; line="$(grep -m1 -E '^\*\*Overall status:\*\*' "$f" || true)"
+  case "$line" in *"EXECUTED — PASS"*|*"EXECUTED - PASS"*) echo PASS;; *"EXECUTED — FAIL"*|*"EXECUTED - FAIL"*) echo FAIL;; *"NOT EXECUTED"*) echo PLAN;; *) echo none;; esac
+}
+
 cmd_promote() {
   local n="" pack="" allow=0
   while [ $# -gt 0 ]; do case "$1" in --pack) pack="$2"; shift 2;; --allow-unsanitized) allow=1; shift;; -*) die "unknown flag $1";; *) n="$1"; shift;; esac; done
   [ -n "$n" ] || die "usage: bug promote <number> [--pack <name>] [--allow-unsanitized]"
   local d; d="$(bug_folder "$n")"; [ -n "$d" ] || die "no BUG-$n"
-  ls "$d" | grep -qi -- "VERIFICATION" || die "refusing to promote BUG-$n: not verified."
+  [ "$(latest_status "$d/BUG-$n-VERIFICATION.md")" = PASS ] || die "refusing to promote BUG-$n: the latest verification is not EXECUTED — PASS ($(latest_status "$d/BUG-$n-VERIFICATION.md")). Run it:  bug verify $n --run <suite.sh>"
   [ -x "$PIPELINE_ROOT/bin/sanitize" ] || die "bin/sanitize is missing — refusing to promote unscanned work."
   local rc=0; "$PIPELINE_ROOT/bin/sanitize" "$d" --quiet >/dev/null 2>&1 || rc=$?
   if [ "$rc" -eq 2 ] && [ "$allow" -eq 0 ]; then die "refusing to promote BUG-$n: fails sanitization. Fix, or pass --allow-unsanitized for a private pack."; fi
@@ -220,10 +227,9 @@ cmd_close() {
   ls "$d" | grep -qi -- "VERIFICATION" \
     || die "refusing to close BUG-$n: no BUG-$n-VERIFICATION.md.
     The methodology forbids a closeout without executed-test evidence. Run:  bug verify $n --run <suite.sh>"
-  local vstatus; vstatus="$(cat "$d"/BUG-$n-VERIFICATION*.md 2>/dev/null | grep -oE "EXECUTED\s*[—–-]+\s*(PASS|FAIL)|NOT EXECUTED[^*]*" | head -1)"
-  case "$vstatus" in
-    *PASS*) ;;
-    *FAIL*) die "refusing to close BUG-$n: verification is EXECUTED — FAIL. Fix it and re-run:  bug verify $n --run <suite.sh>";;
+  case "$(latest_status "$d/BUG-$n-VERIFICATION.md")" in
+    PASS) ;;
+    FAIL) die "refusing to close BUG-$n: the latest verification run is EXECUTED — FAIL. Fix it and re-run:  bug verify $n --run <suite.sh>";;
     *) die "refusing to close BUG-$n: verification is NOT EXECUTED — PLAN ONLY. Run it:  bug verify $n --run <suite.sh>";;
   esac
   local slug out; slug="$(basename "$d")"; slug="${slug#BUG-$n-}"

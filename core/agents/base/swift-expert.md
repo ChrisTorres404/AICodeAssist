@@ -1,6 +1,6 @@
 ---
 name: swift-expert
-description: ELITE Swift architect: builds, reviews, and repairs Swift code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Swift module, service, or build, and as the reviewer for Swift changes.
+description: "ELITE Swift architect: builds, reviews, and repairs Swift code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Swift module, service, or build, and as the reviewer for Swift changes."
 model: sonnet
 ---
 

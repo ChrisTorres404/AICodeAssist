@@ -1,6 +1,6 @@
 ---
 name: django-expert
-description: ELITE Django architect: builds, reviews, and repairs Django code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Django module, service, or build, and as the reviewer for Django changes.
+description: "ELITE Django architect: builds, reviews, and repairs Django code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Django module, service, or build, and as the reviewer for Django changes."
 model: sonnet
 ---
 

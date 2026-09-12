@@ -1,6 +1,6 @@
 ---
 name: flutter-expert
-description: ELITE Flutter / Dart architect: builds, reviews, and repairs Flutter / Dart code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Flutter / Dart module, service, or build, and as the reviewer for Flutter / Dart changes.
+description: "ELITE Flutter / Dart architect: builds, reviews, and repairs Flutter / Dart code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any Flutter / Dart module, service, or build, and as the reviewer for Flutter / Dart changes."
 model: sonnet
 ---
 

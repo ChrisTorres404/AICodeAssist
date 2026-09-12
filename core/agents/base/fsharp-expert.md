@@ -1,6 +1,6 @@
 ---
 name: fsharp-expert
-description: ELITE F# architect: builds, reviews, and repairs F# code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any F# module, service, or build, and as the reviewer for F# changes.
+description: "ELITE F# architect: builds, reviews, and repairs F# code with severity-graded review priorities and a build-failure playbook. Use PROACTIVELY for any F# module, service, or build, and as the reviewer for F# changes."
 model: sonnet
 ---
 

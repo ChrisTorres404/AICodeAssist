@@ -81,3 +81,5 @@ write the document. Self-review is not a gate.
 A hook checks that every `SOURCE` path exists and warns on over-claim words.
 
 Long form: `{{PIPELINE_ROOT}}/core/methodology/KNOWLEDGE-EXTRACTION-METHODOLOGY.md`.
+
+The hook proves that every SOURCE path and line exists. It does not prove the source supports the claim; that is the factuality validator's job, and no document reaches VALIDATED without it.

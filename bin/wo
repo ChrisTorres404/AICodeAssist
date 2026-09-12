@@ -11,7 +11,7 @@
 #                    [--priority P0|P1|P2|P3] [--sdk] [--ui]
 #       --area routes the work: backend api database auth rbac frontend ui
 #              styling testing cicd docker security performance docs analysis
-#   wo list [--open|--closed]
+#   wo list [--open|--active|--closed]   (--active: everything not closed)
 #   wo show <number>                 print the work order's primary document
 #   wo status <number>               which documents exist, which are missing
 #   wo start <number>                mark in progress
@@ -42,7 +42,8 @@ set -euo pipefail
 
 PIPELINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SELF_ROOT="$PIPELINE_ROOT"
-TEMPLATES="$PIPELINE_ROOT/core/templates/workorders"
+TEMPLATES="$PIPELINE_ROOT/core/templates/workorders"; [ -d "$TEMPLATES" ] || TEMPLATES="$PIPELINE_ROOT/templates/workorders"   # plugin layout
+TESTING_TEMPLATES="$(dirname "$TEMPLATES")/testing"
 
 # Resolve where work orders live: pipeline.config.sh in cwd or any parent.
 find_config() {
@@ -247,6 +248,7 @@ cmd_list() {
     case "$st" in *C) state="closed";; *) state="$(meta_get "$d" status)"; state="${state:-open}";; esac
     case "$filter" in
       --open)   [ "$state" = "open" ]   || continue;;
+      --active) [ "$state" != "closed" ] || continue;;
       --closed) [ "$state" = "closed" ] || continue;;
     esac
     printf "%-8s %-6s %-12s %-8s %s\n" "WO-$n" "$st" "$state" "$size" "${b#WO-$n-}"
@@ -277,12 +279,17 @@ cmd_close() {
     || die "refusing to close WO-$n: no WO-$n-VERIFICATION.md.
     The methodology forbids a closeout without executed-test evidence.
     Create it by running the suite:  wo verify $n --run <suite.sh>"
-  local vstatus; vstatus="$(cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -oE "EXECUTED\s*[—–-]+\s*(PASS|FAIL)|NOT EXECUTED[^*]*" | head -1)"
-  case "$vstatus" in
-    *PASS*) ;;
-    *FAIL*) die "refusing to close WO-$n: verification is EXECUTED — FAIL. Fix the work, re-run:  wo verify $n --run <suite.sh>";;
+  local vfile="$d/WO-$n-VERIFICATION.md"
+  case "$(latest_status "$vfile")" in
+    PASS) ;;
+    FAIL) die "refusing to close WO-$n: the latest verification run is EXECUTED — FAIL. Fix the work, re-run:  wo verify $n --run <suite.sh>";;
     *) die "refusing to close WO-$n: verification is NOT EXECUTED — PLAN ONLY. A plan is not evidence. Run it:  wo verify $n --run <suite.sh>";;
   esac
+  local recorded; recorded="$(grep -m1 -oE 'tree [0-9a-f]{16}' "$vfile" | cut -d' ' -f2 || true)"
+  if [ -n "$recorded" ] && [ "${ALLOW_STALE:-0}" != 1 ] && [ "$recorded" != "$(tree_fingerprint)" ]; then
+    die "refusing to close WO-$n: the code changed after the last PASS (tree $recorded then, $(tree_fingerprint) now).
+    Evidence is bound to the source it ran against. Re-run:  wo verify $n --run <suite.sh>   (ALLOW_STALE=1 to override)"
+  fi
   local out="$d/WO-$n-CLOSEOUT.md"
   [ -e "$out" ] && die "$out already exists"
   local title; title="$(basename "$d")"; title="${title#WO-$n-}"
@@ -399,6 +406,25 @@ cmd_note() {
   echo "WO-$n: note added to $(basename "$pd")"
 }
 
+latest_status() { # verification file -> PASS | FAIL | PLAN | none  (the Overall status line is authoritative; older run records are history)
+  local f="$1"; [ -f "$f" ] || { echo none; return; }
+  local line; line="$(grep -m1 -E '^\*\*Overall status:\*\*' "$f" || true)"
+  case "$line" in *"EXECUTED — PASS"*|*"EXECUTED - PASS"*) echo PASS;; *"EXECUTED — FAIL"*|*"EXECUTED - FAIL"*) echo FAIL;; *"NOT EXECUTED"*) echo PLAN;; *) echo none;; esac
+}
+tree_fingerprint() { # hash of the source state the evidence was produced against; the work-order, bug, session, results, and pipeline folders are excluded
+  ( set +e; cd "$PROJECT_ROOT" 2>/dev/null || { echo nofp; exit 0; }
+    local ex=(":!$WORKORDERS_DIR" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!${TESTING_DIR:-Workspace/Testing}/results")
+    if git rev-parse --show-toplevel >/dev/null 2>&1; then
+      { git ls-files -s -- . "${ex[@]}" 2>/dev/null; git diff -- . "${ex[@]}" 2>/dev/null
+        git ls-files -o --exclude-standard -- . "${ex[@]}" 2>/dev/null | while IFS= read -r f; do [ -f "$f" ] && { printf '%s\n' "$f"; cat "$f"; }; done; } 2>/dev/null
+    else
+      find . -type f -not -path './.git/*' -not -path "./$WORKORDERS_DIR/*" -not -path "./${BUGS_DIR:-Workspace/Docs/Bugs}/*" -not -path "./${SESSIONS_DIR:-Workspace/Sessions}/*" \
+           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./${TESTING_DIR:-Workspace/Testing}/results/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
+        | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f" 2>/dev/null; done
+    fi | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16
+    true )
+}
+
 cmd_suite() { # scaffold a behavioural suite for a work order from the shipped template
   local n="${1:-}"; [ -n "$n" ] || die "usage: wo suite <number>"
   local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
@@ -406,7 +432,7 @@ cmd_suite() { # scaffold a behavioural suite for a work order from the shipped t
   local dir="$PROJECT_ROOT/${TESTING_DIR:-Workspace/Testing}/suites" out
   mkdir -p "$dir"; out="$dir/wo-$n-$slug.sh"
   [ -e "$out" ] && die "$out already exists"
-  sed -e "s/WO-XXXX/WO-$n/g" -e "s/\[Title\]/$slug/g" -e "s|{{PIPELINE_ROOT}}|${PIPELINE_ROOT#$PROJECT_ROOT/}|g" "$PIPELINE_ROOT/core/templates/testing/SUITE-TEMPLATE.sh" > "$out"
+  sed -e "s/WO-XXXX/WO-$n/g" -e "s/\[Title\]/$slug/g" -e "s|{{PIPELINE_ROOT}}|${PIPELINE_ROOT#$PROJECT_ROOT/}|g" "$TESTING_TEMPLATES/SUITE-TEMPLATE.sh" > "$out"
   chmod +x "$out"
   echo "Suite scaffolded: ${out#$PROJECT_ROOT/}"
   echo "Fill in the checks, start the service, then:  wo verify $n --run ${out#$PROJECT_ROOT/}"
@@ -421,7 +447,7 @@ cmd_verify() {
   local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
   local out="$d/WO-$n-VERIFICATION.md" title; title="$(meta_get "$d" title)"; title="${title:-$(basename "$d")}"
   if [ ! -f "$out" ] || [ "$force" -eq 1 ]; then
-    render "$TEMPLATES/../testing/TEST-TEMPLATE-VERIFICATION.md" "$out" "$n" "$title" "P2"
+    render "$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION.md" "$out" "$n" "$title" "P2"
     printf '\n---\n\n## Execution Record\n\n**Overall status:** NOT EXECUTED — PLAN ONLY\n\n' >> "$out"
     echo "WO-$n verification document created: $out"
   fi
@@ -439,7 +465,8 @@ cmd_verify() {
     printf -- '- **Status:** %s\n- **Command:** `bash %s`\n- **Exit code:** %s\n- **Log:** `%s`\n\n' "$status" "$suite" "$rc" "$(basename "$log")"
     printf '```\n'; tail -60 "$log"; printf '```\n'
   } >> "$out"
-  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp)/" "$out"
+  local fp; fp="$(tree_fingerprint)"
+  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp, tree $fp)/" "$out"
   echo "$status (exit $rc) — recorded in $(basename "$out"), full log in $(basename "$log")"
   local inum; inum="$(meta_get "$d" issue_number)"
   if [ -n "$inum" ] && command -v gh >/dev/null 2>&1; then
@@ -471,9 +498,9 @@ cmd_stats() {
     case "$(meta_get "$d" size)" in trivial) sizes_t=$((sizes_t+1));; small) sizes_s=$((sizes_s+1));; large) sizes_l=$((sizes_l+1));; *) sizes_st=$((sizes_st+1));; esac
     if ls "$d" | grep -qi -- "WO-$n-CLOSEOUT"; then
       closed=$((closed+1))
-      if ls "$d" | grep -qi -- "WO-$n-VERIFICATION" && cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*PASS"; then
+      if [ "$(latest_status "$d/WO-$n-VERIFICATION.md")" = PASS ]; then
         evidenced=$((evidenced+1))
-      elif ls "$d" | grep -qi -- "WO-$n-VERIFICATION" && cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*FAIL"; then
+      elif [ "$(latest_status "$d/WO-$n-VERIFICATION.md")" = FAIL ]; then
         failing=$((failing+1)); failing_list+=("WO-$n")
       else
         drift=$((drift+1)); drift_list+=("WO-$n")
@@ -512,7 +539,7 @@ cmd_promote() {
   done
   [ -n "$n" ] || die "usage: wo promote <number> [--pack <name>] [--allow-unsanitized] [--allow-placeholders]"
   local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
-  cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*PASS" || die "refusing to promote WO-$n: no EXECUTED — PASS verification. Precedent without evidence is folklore."
+  [ "$(latest_status "$d/WO-$n-VERIFICATION.md")" = PASS ] || die "refusing to promote WO-$n: the latest verification is not EXECUTED — PASS ($(latest_status "$d/WO-$n-VERIFICATION.md")). Precedent without evidence is folklore."
   if [ "$allow_ph" -eq 0 ] && [ -f "$d/WO-$n-CLOSEOUT.md" ] && grep -qE "\[Lesson [0-9]\]|\[What was delivered\]|\[Root cause\]|\[Brief|TBD|TODO" "$d/WO-$n-CLOSEOUT.md"; then
     die "refusing to promote WO-$n: the CLOSEOUT still has template placeholders (e.g. '[Lesson 1]').
     The pitfalls are the part the next project needs. Fill them in, or pass --allow-placeholders."

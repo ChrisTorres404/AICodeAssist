@@ -1,5 +1,33 @@
 # Changelog
 
+### 1.1.1 — round-two audit fixes
+
+Findings from an independent consumer audit of 1.1.0, each with a regression
+evaluation under `harness/evals/`:
+
+- release gate validates the real plugin manifest, not only the marketplace one;
+  lint rejects frontmatter that is not valid YAML (38 files corrected)
+- packaged drivers work from the plugin layout (`plugin-drivers`)
+- close and promote read the authoritative latest verification result in both
+  drivers; plan-only and PASS-then-FAIL are refused (`promote-latest-status`)
+- evidence is bound to the source tree it ran against: closing after the code
+  changed requires a re-run (`evidence-freshness`)
+- hooks merge by identity: user hooks survive, reinstalls do not duplicate,
+  tampered pipeline hooks are restored, minimal removes only pipeline hooks
+  (`hooks-merge`)
+- reinstalling with a smaller profile removes pipeline-owned skills and
+  pack agents the profile does not select; user additions survive
+  (`profile-reconcile`)
+- hook commands are quoted and relative to the project directory, so paths
+  with spaces and moved projects work (`hooks-paths`)
+- session orientation lists in-progress and blocked work (`wo list --active`,
+  `session-orient-active`)
+- the scaffolded suite asserts against the health URL it resolved
+  (`suite-health-url`)
+- an unknown evaluation name is an error, never "0 passed" (`eval-unknown-name`)
+- documented: the documentation hook proves references resolve; the
+  factuality validator proves support
+
 ## 1.1.0
 
 What the pipeline contains now: the work-order and bug drivers with their

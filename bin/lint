@@ -24,6 +24,29 @@ VALID_MODELS = {"sonnet", "opus", "haiku", "inherit"}
 BAD_UNICODE = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069\u180e\u115f\u1160\u2061-\u2064\u3164]|[\U000e0000-\U000e007f]")
 PERSONAL = re.compile(r"(/Users/(?!Shared/)[A-Za-z][A-Za-z0-9_-]*/|/home/(?!user/)[a-z][a-z0-9_-]*/|C:\\\\Users\\\\[A-Za-z])")
 
+def yaml_ok(fm_text):
+    """True when the frontmatter parses. Uses PyYAML when available; otherwise a strict
+    line check that rejects the shapes Claude Code's loader refuses (a block-scalar
+    marker followed by text, keys without values, unindented continuations)."""
+    try:
+        import yaml  # type: ignore
+        try: yaml.safe_load(fm_text); return True
+        except Exception: return False
+    except ImportError:
+        pass
+    prev_block = False
+    for line in fm_text.split("\n"):
+        if not line.strip(): continue
+        if line.startswith((" ", "\t")):
+            if not prev_block and not re.match(r"^\s+- ", line) and not re.match(r"^\s+\S+: ", line): return False
+            continue
+        m = re.match(r"^([A-Za-z_][\w-]*):(\s*(.*))?$", line)
+        if not m: return False
+        val = (m.group(3) or "").strip()
+        if re.match(r"^[>|][-+]?\S", val): return False   # '>.' or '>-text' is invalid
+        prev_block = val in (">", ">-", "|", "|-", ">+", "|+", "")
+    return True
+
 def fm_of(text):
     m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", text.lstrip("\ufeff"), re.S)
     if not m: return None
@@ -36,6 +59,8 @@ def fm_of(text):
     return d
 
 def check_agent(p):
+    _m = re.match(r"(?s)^---\n(.*?)\n---", p.read_text(errors="ignore"))
+    if _m and not yaml_ok(_m.group(1)): err(p.relative_to(ROOT), "frontmatter is not valid YAML")
     rel = p.relative_to(ROOT); t = p.read_text(errors="replace"); fm = fm_of(t)
     if fm is None: err(rel, "missing frontmatter"); return
     for k in ("name", "description", "model"):
@@ -48,6 +73,10 @@ def check_agent(p):
     if "## Activation Triggers" in t: err(rel, "dead 'Activation Triggers' section")
 
 def check_skill(d):
+    _p = d / "SKILL.md"
+    if _p.exists():
+        _m = re.match(r"(?s)^---\n(.*?)\n---", _p.read_text(errors="ignore"))
+        if _m and not yaml_ok(_m.group(1)): err(_p.relative_to(ROOT), "frontmatter is not valid YAML (Claude Code would load the skill with empty metadata)")
     rel = d.relative_to(ROOT); p = d / "SKILL.md"
     if not p.exists(): err(rel, "no SKILL.md"); return
     fm = fm_of(p.read_text(errors="replace"))
@@ -75,7 +104,7 @@ def check_hooks_json(p):
             for h in e.get("hooks", []):
                 if h.get("type") != "command": err(rel, f"{ev}: unsupported hook type {h.get('type')}")
                 if not h.get("command"): err(rel, f"{ev}: hook without command")
-                elif "run-hook.sh acp:" not in h["command"]: warn(rel, f"{ev}: hook not routed through run-hook.sh with an acp: id")
+                elif not re.search(r'run-hook\.sh"? acp:', h["command"]): warn(rel, f"{ev}: hook not routed through run-hook.sh with an acp: id")
 
 def check_rule(p):
     rel = p.relative_to(ROOT); t = p.read_text(errors="replace")

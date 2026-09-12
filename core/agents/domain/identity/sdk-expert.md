@@ -1,6 +1,6 @@
 ---
 name: sdk-expert
-description: {{PROJECT_NAME}} SDK architect for client-side authentication, token management, session handling, and framework integrations. Use for SDK development, client initialization, or token flow implementation.
+description: "{{PROJECT_NAME}} SDK architect for client-side authentication, token management, session handling, and framework integrations. Use for SDK development, client initialization, or token flow implementation."
 model: opus
 ---
 
