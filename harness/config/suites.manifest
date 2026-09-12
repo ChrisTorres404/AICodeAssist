@@ -1,15 +1,33 @@
 # Behavioral suite manifest — one line per suite:   tier|file|label
 #
-# Tiers the runner understands (in escalating order):
-#   essential, comprehensive_a, comprehensive_b, auth_extended, admin, platform,
-#   security, advanced_auth, observability, enterprise, oauth, infrastructure
-# --quick runs essential; --standard runs essential + comprehensive + core tiers;
-# --full runs everything. Files are relative to the project's suites directory.
+# Tiers the runners understand:
+#   essential       fastest proof the system is alive and the core path works
+#   core            the everyday regression set
+#   extended        slower or less central functional suites
+#   security        authorization, input validation, abuse and hardening checks
+#   integration     suites that cross a boundary (third-party, queue, webhook)
+#   performance     latency and throughput assertions (not the k6 load harness)
+#   infrastructure  migrations, configuration, deployment shape
+#   recent          suites for work still settling; promoted to another tier later
+#
+# Modes:
+#   --quick     essential
+#   --standard  essential + core + extended
+#   --full      every tier
+#
+# Files are relative to the project's suites directory. A listed file that does
+# not exist is reported as SKIP, never as a pass.
 #
 # Example rows — replace with your own:
 #
-# essential|wo-0101-health-critical-path.sh|Health & Readiness
-# essential|wo-0102-login-critical-path.sh|Login
-# comprehensive_a|comprehensive/users-tests.sh|Users (comprehensive)
-# security|wo-0201-input-validation.sh|Input Validation
-# infrastructure|wo-0301-migrations.sh|Migrations
+# essential|health-and-readiness.sh|Health & Readiness
+# essential|core-write-path.sh|Create, read back, verify persisted
+# core|users-crud.sh|Users CRUD
+# core|search-filters.sh|Search & Filtering
+# extended|reporting-exports.sh|Reporting Exports
+# security|input-validation.sh|Input Validation
+# security|authorization-matrix.sh|Authorization Matrix
+# integration|outbound-webhooks.sh|Outbound Webhooks
+# performance|list-endpoint-latency.sh|List Endpoint Latency
+# infrastructure|migrations-applied.sh|Migrations Applied
+# recent|wip-feature-flags.sh|Feature Flags (new)

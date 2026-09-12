@@ -13,11 +13,11 @@ order means the second kind.
 ## Run
 
 ```bash
-{{TESTING_DIR}}/../harness/runners/run-all-critical-tests.sh --quick     # essentials
-{{TESTING_DIR}}/../harness/runners/run-all-critical-tests.sh --standard  # full regression
+{{PIPELINE_ROOT}}/harness/runners/run-all-critical-tests.sh --quick     # essential tier
+{{PIPELINE_ROOT}}/harness/runners/run-all-critical-tests.sh --standard  # essential + core + extended; --full runs every tier
 ```
 
-Environment comes from `harness/config/test-config.env` — one file switches the
+Suites are registered by tier in `{{TESTING_DIR}}/suites.manifest`. Environment comes from `{{PIPELINE_ROOT}}/harness/config/test-config.env` — one file switches the
 whole suite between local, docker, and test databases. Never hardcode a host,
 port, or credential in a suite.
 
@@ -47,9 +47,18 @@ the state change too.
 The third status exists so that you never need to use the first one falsely.
 A work order closed on a fabricated PASS is worse than one left open.
 
+## Lessons from running suites at scale
+
+- **Comprehensive suites exhaust the connection pool.** Between heavy suites, terminate idle backends for the application and wait a few seconds, or the next suite fails on connections, not logic.
+- **Test clients must look like real clients.** Risk scoring blocked a default `curl` user agent and failed every login; set a browser user agent in the config. Logins need tenant context where the API requires it.
+- **Know the security policies the tests run under.** An MFA policy of "required for all" cannot be satisfied by automated tests without enrolment; use an optional policy in the test tenant, or enrol in setup.
+- **Test both token delivery paths.** Auth changes that moved tokens from body to cookie broke every suite that read the body. Suites cover cookie and body delivery, through one helper that extracts from the cookie jar.
+- **Run every related suite, not only the new one.** The archive-table drift was caught by a suite nobody re-ran.
+- **Test the failure path.** Suites that only verify success missed cookies left behind after a failed validation.
+- **Fixtures created by hand are not fixtures.** Keys, tenants, and users the tests depend on are registered by migration or seed script, never by a manual insert someone forgets to repeat.
+
 ## Load testing
 
-`harness/load/` is a k6 harness — smoke, login storm, refresh steady state,
-rate-limit flood, mixed blend. Always run `scenarios/smoke.js` green before any
+`harness/load/` is a k6 harness — smoke, steady state, ramp to breakpoint, rate-limit flood, mixed blend with a soak mode. Always run `scenarios/smoke.js` green before any
 load scenario; a red smoke means the harness or the stack is misconfigured and
 every number after it is noise. See `harness/load/RUNBOOK.md`.

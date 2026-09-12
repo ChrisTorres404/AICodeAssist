@@ -57,9 +57,9 @@ Brief description of what was fixed and how. Include:
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `path/to/file1.ts` | Modified | Brief description of change |
-| `path/to/file2.ts` | Modified | Brief description of change |
-| `path/to/test.spec.ts` | Added | New test coverage |
+| `[path/to/file]` | Modified | [what changed] |
+| `[path/to/file]` | Added | [what changed] |
+| `path/to/<unit test file>` | Added | New test coverage |
 
 ---
 
@@ -87,10 +87,10 @@ Tests:       X passed, X total
 
 | Role | Name | Date | Status |
 |------|------|------|--------|
-| **Developer** | __________ | YYYY-MM-DD | Approved |
-| **Code Reviewer** | __________ | YYYY-MM-DD | Approved |
-| **QA Verifier** | __________ | YYYY-MM-DD | Approved |
-| **Product Owner** | __________ | YYYY-MM-DD | Approved |
+| **Developer** | __________ | YYYY-MM-DD | [ ] |
+| **Code Reviewer** | __________ | YYYY-MM-DD | [ ] |
+| **QA Verifier** | __________ | YYYY-MM-DD | [ ] |
+| **Product Owner** | __________ | YYYY-MM-DD | [ ] |
 
 ---
 
@@ -138,7 +138,7 @@ Tests:       X passed, X total
 
 ## Closure Statement
 
-This bug has been verified as fixed and all acceptance criteria have been met. The fix has been deployed to production and monitored for stability.
+[State what was verified, by which suite and run, and where the fix is deployed. Do not write this sentence until it is true.]
 
 **Root Cause:** [One sentence summary]
 

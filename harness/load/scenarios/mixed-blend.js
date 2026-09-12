@@ -1,13 +1,29 @@
-// WO-50000 Scenario 3 (+5 soak): Realistic mixed traffic across 3 tenants.
-// Pressures the RLS-transaction-per-request design and the DB pool (default 20).
-// SOAK=1 flips to a long, steady run to hunt leaks instead of a ramp to breakpoint.
+// Scenario 4 (+ soak): Realistic mixed traffic across the configured endpoint
+// weights. Ramps to find the blended ceiling; SOAK=1 flips it to a long steady
+// run that hunts leaks instead — watch for memory that only climbs and a
+// connection floor that never returns to its starting level.
+//
+//   k6 run scenarios/mixed-blend.js
+//   SOAK=1 SOAK_RATE=120 SOAK_DURATION=4h k6 run scenarios/mixed-blend.js
+//
+// Env: START_RATE, PEAK_RATE, STAGES, STAGE_DURATION, P99_MS,
+//      SOAK, SOAK_RATE, SOAK_DURATION
 
-import http from 'k6/http';
-import { check, sleep } from 'k6';
-import { login, authHeaders, pickUser, API_BASE } from '../lib/common.js';
-import { vu, iteration } from 'k6/execution';
+import { sleep } from 'k6';
+import { pickEndpoint, callEndpoint, tokenFor, AUTH_MODE } from '../lib/common.js';
 
 const SOAK = __ENV.SOAK === '1';
+const START_RATE = Number(__ENV.START_RATE || 50);
+const PEAK_RATE = Number(__ENV.PEAK_RATE || 400);
+const STAGE_COUNT = Math.max(1, Number(__ENV.STAGES || 5));
+const STAGE_DURATION = __ENV.STAGE_DURATION || '2m';
+const P99_MS = Number(__ENV.P99_MS || 500);
+
+const step = STAGE_COUNT > 1 ? (PEAK_RATE - START_RATE) / (STAGE_COUNT - 1) : 0;
+const stages = [];
+for (let i = 0; i < STAGE_COUNT; i++) {
+  stages.push({ target: Math.round(START_RATE + step * i), duration: STAGE_DURATION });
+}
 
 export const options = SOAK
   ? {
@@ -16,9 +32,9 @@ export const options = SOAK
           executor: 'constant-arrival-rate',
           rate: Number(__ENV.SOAK_RATE || 120),
           timeUnit: '1s',
-          duration: '4h',
-          preAllocatedVUs: 300,
-          maxVUs: 600,
+          duration: __ENV.SOAK_DURATION || '4h',
+          preAllocatedVUs: Number(__ENV.PRE_VUS || 300),
+          maxVUs: Number(__ENV.MAX_VUS || 600),
         },
       },
       thresholds: { http_req_failed: ['rate<0.01'] },
@@ -27,54 +43,31 @@ export const options = SOAK
       scenarios: {
         mixed: {
           executor: 'ramping-arrival-rate',
-          startRate: 50,
+          startRate: START_RATE,
           timeUnit: '1s',
-          preAllocatedVUs: 300,
-          maxVUs: 1000,
-          stages: [
-            { target: 50, duration: '1m' },
-            { target: 150, duration: '2m' },
-            { target: 250, duration: '2m' },
-            { target: 350, duration: '2m' },
-            { target: 400, duration: '2m' },
-          ],
+          preAllocatedVUs: Number(__ENV.PRE_VUS || 300),
+          maxVUs: Number(__ENV.MAX_VUS || 1000),
+          stages: stages,
         },
       },
       thresholds: {
-        'http_req_duration{name:me}': ['p(99)<500'],
+        http_req_duration: [`p(99)<${P99_MS}`],
         http_req_failed: ['rate<0.01'],
       },
     };
 
-// Cache one token per VU to avoid re-login on every iteration (mirrors real clients
-// that hold a token for ~12 min). Re-login only when missing.
+// Cache one token per VU, as a real client holds one rather than
+// re-authenticating on every call. Re-acquire only when it stops working.
 let token = null;
 
 export default function () {
-  const user = pickUser(vu.idInTest, iteration);
-  if (!token) token = login(user);
-  if (!token) return;
-
-  const r = Math.random();
-  if (r < 0.7) {
-    const res = http.get(`${API_BASE}/me`, {
-      headers: authHeaders(token),
-      tags: { name: 'me' },
-    });
-    check(res, { 'me ok': (x) => x.status === 200 });
-    if (res.status === 401) token = null; // expired → force refresh next iter
-  } else if (r < 0.85) {
-    // refresh path (cookie-based in prod; token re-issue here approximates the DB cost)
-    token = login(user);
-  } else if (r < 0.95) {
-    token = login(user);
-  } else {
-    // authz-heavy read: policies list exercises the unified RBAC+ABAC PDP
-    const res = http.get(`${API_BASE}/policies?limit=20`, {
-      headers: authHeaders(token),
-      tags: { name: 'authz' },
-    });
-    check(res, { 'authz ok': (x) => x.status === 200 || x.status === 403 });
+  if (AUTH_MODE === 'login' && !token) {
+    token = tokenFor();
+    if (!token) return;
   }
-  sleep(0.1);
+
+  const res = callEndpoint(pickEndpoint(), token);
+  if (res.status === 401) token = null;
+
+  sleep(Number(__ENV.THINK_TIME || 0.1));
 }

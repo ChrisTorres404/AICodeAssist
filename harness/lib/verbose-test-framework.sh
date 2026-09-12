@@ -22,24 +22,34 @@ if [ -f "$_TEST_CONFIG" ] && [ -z "$_TEST_CONFIG_LOADED" ]; then
   export _TEST_CONFIG_LOADED=1
 fi
 
-# API Configuration (defaults match LOCAL_DEV)
-export API_BASE="${API_BASE:-http://localhost:8601/api/v1}"
-export API_HOST="${API_HOST:-localhost:8601}"
+# API Configuration — test-config.env supplies these; the fallbacks keep the
+# framework usable when sourced on its own.
+_default_api_base='{{API_BASE_URL}}'
+_default_origin='{{WEB_ORIGIN}}'
+export API_BASE="${API_BASE:-$_default_api_base}"
+export ORIGIN="${ORIGIN:-$_default_origin}"
+export HEALTH_PATH="${HEALTH_PATH:-/health}"
+export METRICS_PATH="${METRICS_PATH:-/metrics}"
 
-# Portal origin — use for non-admin user logins (admin console 8600 restricts to platform owners)
-export PORTAL_ORIGIN="${PORTAL_ORIGIN:-http://localhost:8604}"
+# Authentication (optional — only the auth helpers read these)
+export AUTH_LOGIN_PATH="${AUTH_LOGIN_PATH:-/auth/login}"
+export AUTH_REGISTER_PATH="${AUTH_REGISTER_PATH:-/auth/register}"
+export AUTH_TOKEN_JQ="${AUTH_TOKEN_JQ:-.access_token}"
+export AUTH_EMAIL_FIELD="${AUTH_EMAIL_FIELD:-email}"
+export AUTH_PASSWORD_FIELD="${AUTH_PASSWORD_FIELD:-password}"
+_default_extra_fields='{}'
+export AUTH_EXTRA_LOGIN_FIELDS="${AUTH_EXTRA_LOGIN_FIELDS:-$_default_extra_fields}"
 
-# Tenant defaults
-export DEFAULT_TENANT_SLUG="${DEFAULT_TENANT_SLUG:-{{PROJECT_SLUG}}-platform}"
-
-# Database Configuration (defaults match LOCAL_DEV)
+# Database Configuration (optional — SQL helpers are inert without DB_NAME)
 export DB_HOST="${DB_HOST:-localhost}"
 export DB_PORT="${DB_PORT:-5432}"
 export DB_USER="${DB_USER:-$USER}"
-export DB_NAME="${DB_NAME:-{{DB_NAME}}}"
-export PGPASSWORD="${PGPASSWORD:-}"
+export DB_NAME="${DB_NAME:-}"
+export PGPASSWORD="${PGPASSWORD:-${DB_PASS:-}}"
 
-# Browser-like User-Agent to avoid risk scoring penalty (curl/wget/postman flagged as suspicious)
+# A browser User-Agent by default: services that score clients for risk, or
+# block unknown agents, treat curl-like agents as suspicious — the harness
+# would then measure the bot filter instead of the behaviour under test.
 export TEST_USER_AGENT="${TEST_USER_AGENT:-Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36}"
 
 # Test Configuration
@@ -302,7 +312,8 @@ http_request() {
   local start_time=$(date +%s)
   local response
 
-  # Build header args array — always include Origin for CSRF guard and real User-Agent for risk scoring
+  # Build header args array — a browser User-Agent always, plus an Origin
+  # header, which CSRF guards commonly require on state-changing requests.
   local -a header_args=(-H "Content-Type: application/json" -H "Accept: application/json" -A "$TEST_USER_AGENT")
 
   # Check if caller already provides an Origin header
@@ -311,9 +322,8 @@ http_request() {
     [[ "$header" == Origin:* ]] && has_origin=true
   done
 
-  # Add default Origin if not overridden (required by CSRF guard)
-  if [ "$has_origin" = "false" ]; then
-    header_args+=(-H "Origin: ${PORTAL_ORIGIN:-http://localhost:8604}")
+  if [ "$has_origin" = "false" ] && [ -n "${ORIGIN:-}" ]; then
+    header_args+=(-H "Origin: $ORIGIN")
   fi
 
   for header in "${extra_headers[@]}"; do
@@ -373,8 +383,18 @@ http_delete() {
 # Execute SQL query
 # Usage: run_sql "SELECT * FROM table"
 # Returns: Sets SQL_RESULT, SQL_ROW_COUNT
+db_configured() {
+  [ -n "${DB_NAME:-}" ] && command -v psql > /dev/null 2>&1
+}
+
 run_sql() {
   local query="$1"
+
+  if ! db_configured; then
+    log_warn "no database configured (set DB_NAME) — skipping query"
+    SQL_RESULT=""; SQL_ROW_COUNT=0
+    return 1
+  fi
 
   log_sql "$query"
 
@@ -395,12 +415,14 @@ run_sql() {
 # Execute SQL and return single value
 sql_value() {
   local query="$1"
+  db_configured || return 1
   psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "$query" 2>/dev/null | head -1
 }
 
 # Execute SQL and return row count
 sql_count() {
   local query="$1"
+  db_configured || { echo 0; return 1; }
   psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "$query" 2>/dev/null | wc -l
 }
 
@@ -548,102 +570,104 @@ assert_sql_no_rows() {
 # TEST SETUP/TEARDOWN
 # ============================================================================
 
-# Create a test user
-# Usage: create_test_user "email" "password"
-# Returns: Sets TEST_USER_ID, TEST_USER_EMAIL, TEST_ACCESS_TOKEN, TEST_REFRESH_TOKEN, TEST_SESSION_ID
+# Build a JSON credential body from the configured field names, merged with
+# AUTH_EXTRA_LOGIN_FIELDS (a JSON object, empty by default).
+auth_body() {
+  local email="$1"
+  local password="$2"
+  local extra="${AUTH_EXTRA_LOGIN_FIELDS:-}"
+  [ -n "$extra" ] || extra='{}'
+
+  jq -n \
+    --arg ef "${AUTH_EMAIL_FIELD:-email}" --arg e "$email" \
+    --arg pf "${AUTH_PASSWORD_FIELD:-password}" --arg p "$password" \
+    --argjson extra "$extra" \
+    '{($ef): $e, ($pf): $p} + $extra'
+}
+
+# Register a throwaway account through AUTH_REGISTER_PATH.
+# Sets TEST_USER_EMAIL, TEST_USER_PASSWORD and, when the response carries one,
+# TEST_ACCESS_TOKEN (read with AUTH_TOKEN_JQ).
 create_test_user() {
-  local email="${1:-test_$(date +%s)@example.com}"
-  local password="${2:-TestPassword123!}"
+  local email="${1:-$(random_email)}"
+  local password="${2:-${TEST_PASSWORD:-TestPassword123!}}"
 
-  log_action "Creating test user: $email"
+  log_action "Registering test user: $email"
 
-  http_post "$API_BASE/auth/register" "{
-    \"email\": \"$email\",
-    \"password\": \"$password\",
-    \"first_name\": \"Test\",
-    \"last_name\": \"User\",
-    \"tenant_slug\": \"$DEFAULT_TENANT_SLUG\"
-  }"
+  http_post "${API_BASE}${AUTH_REGISTER_PATH}" "$(auth_body "$email" "$password")"
 
   if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
     TEST_USER_EMAIL="$email"
     TEST_USER_PASSWORD="$password"
-    TEST_USER_ID=$(echo "$HTTP_BODY" | jq -r '.user.id')
-    TEST_ACCESS_TOKEN=$(echo "$HTTP_BODY" | jq -r '.access_token')
-    TEST_REFRESH_TOKEN=$(echo "$HTTP_BODY" | jq -r '.refresh_token')
-    TEST_SESSION_ID=$(echo "$HTTP_BODY" | jq -r '.session.id')
-    TEST_CSRF_TOKEN=$(echo "$HTTP_BODY" | jq -r '.csrf_token')
-
-    # Verify email so login works
-    run_sql "UPDATE auth.users SET email_verified_at = NOW() WHERE email = '$email';" > /dev/null 2>&1
-
-    log_info "Created user: $TEST_USER_ID (email verified)"
+    TEST_ACCESS_TOKEN=$(echo "$HTTP_BODY" | jq -r "${AUTH_TOKEN_JQ} // empty" 2>/dev/null)
+    log_info "Registered $email"
     return 0
-  else
-    log_warn "Failed to create test user: HTTP $HTTP_CODE"
-    return 1
   fi
+
+  log_warn "Failed to register test user: HTTP $HTTP_CODE"
+  return 1
 }
 
-# Login as test user
-# Usage: login_test_user "email" "password"
+# Log in through AUTH_LOGIN_PATH. Sets TEST_ACCESS_TOKEN from AUTH_TOKEN_JQ.
 login_test_user() {
   local email="${1:-$TEST_USER_EMAIL}"
   local password="${2:-$TEST_USER_PASSWORD}"
 
   log_action "Logging in as: $email"
 
-  http_post "$API_BASE/auth/login" "{
-    \"email\": \"$email\",
-    \"password\": \"$password\",
-    \"tenant_id\": ${DEFAULT_TENANT_ID:-1}
-  }" "Origin: $PORTAL_ORIGIN"
+  http_post "${API_BASE}${AUTH_LOGIN_PATH}" "$(auth_body "$email" "$password")"
 
-  if [ "$HTTP_CODE" = "200" ]; then
-    TEST_ACCESS_TOKEN=$(echo "$HTTP_BODY" | jq -r '.access_token')
-    TEST_REFRESH_TOKEN=$(echo "$HTTP_BODY" | jq -r '.refresh_token')
-    TEST_SESSION_ID=$(echo "$HTTP_BODY" | jq -r '.session.id')
-    TEST_CSRF_TOKEN=$(echo "$HTTP_BODY" | jq -r '.csrf_token')
-
-    log_info "Login successful, session: $TEST_SESSION_ID"
+  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+    TEST_ACCESS_TOKEN=$(echo "$HTTP_BODY" | jq -r "${AUTH_TOKEN_JQ} // empty" 2>/dev/null)
+    if [ -z "$TEST_ACCESS_TOKEN" ]; then
+      log_warn "Login succeeded but no token at '${AUTH_TOKEN_JQ}'"
+      return 1
+    fi
+    log_info "Login successful"
     return 0
-  else
-    log_warn "Login failed: HTTP $HTTP_CODE"
-    return 1
   fi
+
+  log_warn "Login failed: HTTP $HTTP_CODE"
+  return 1
 }
 
-# Delete test user
-# Usage: delete_test_user "email"
+# Remove a user the harness created. Requires AUTH_USER_CLEANUP_SQL, whose
+# {email} placeholder is substituted; without it, cleanup is skipped loudly
+# rather than guessing at a schema.
 delete_test_user() {
   local email="${1:-$TEST_USER_EMAIL}"
 
-  log_action "Deleting test user: $email"
+  if [ -z "${AUTH_USER_CLEANUP_SQL:-}" ]; then
+    log_warn "AUTH_USER_CLEANUP_SQL not set — skipping cleanup of $email"
+  else
+    log_action "Deleting test user: $email"
+    run_sql "${AUTH_USER_CLEANUP_SQL//\{email\}/$email}"
+  fi
 
-  run_sql "DELETE FROM auth.users WHERE email = '$email';"
-
-  # Clear test variables
-  unset TEST_USER_ID TEST_USER_EMAIL TEST_USER_PASSWORD
-  unset TEST_ACCESS_TOKEN TEST_REFRESH_TOKEN TEST_SESSION_ID TEST_CSRF_TOKEN
+  unset TEST_USER_EMAIL TEST_USER_PASSWORD TEST_ACCESS_TOKEN
 }
 
-# Reset test state
+# Reset captured request/response state between tests.
 reset_test_state() {
   unset HTTP_CODE HTTP_BODY HTTP_DURATION
   unset SQL_RESULT SQL_ROW_COUNT
 }
 
-# Clean up risk-scoring state that can cause false "suspicious activity" blocks
-# The adaptive risk engine flags logins from IPs with recent audit failures.
-# This clears those audit events so fresh test runs start clean.
-# Usage: clean_risk_state
-clean_risk_state() {
-  log_action "Cleaning risk-scoring state (audit events + Redis rate limits)"
-  # Remove recent failed-login audit events from localhost IPs
-  run_sql "DELETE FROM audit.events WHERE action IN ('auth.login_failed','auth.session_blocked_high_risk') AND (metadata->>'ip_address' IN ('::1','127.0.0.1','::ffff:127.0.0.1') OR metadata->>'ip_address' IS NULL) AND created_at > NOW() - INTERVAL '2 hours';" > /dev/null 2>&1
-  # Flush Redis rate-limit counters
-  redis-cli FLUSHDB > /dev/null 2>&1 || true
-  log_info "Risk state cleaned"
+# Put the system into a known state before a batch of tests.
+# REDIS_FLUSH=1 flushes the configured Redis database (rate limiters, caches);
+# TEST_PREP_SQL, when set, is executed against DB_NAME. Both default to off, so
+# this is a no-op unless the project asks for it.
+reset_test_environment() {
+  if [ "${REDIS_FLUSH:-0}" = "1" ] && command -v redis-cli > /dev/null 2>&1; then
+    log_action "Flushing Redis at ${REDIS_HOST:-localhost}:${REDIS_PORT:-6379}"
+    redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" FLUSHDB > /dev/null 2>&1 || \
+      log_warn "Redis flush failed"
+  fi
+
+  if [ -n "${TEST_PREP_SQL:-}" ] && db_configured; then
+    log_action "Running TEST_PREP_SQL"
+    run_sql "$TEST_PREP_SQL" > /dev/null 2>&1 || log_warn "TEST_PREP_SQL failed"
+  fi
 }
 
 # ============================================================================
@@ -664,7 +688,7 @@ start_suite() {
 
   echo -e "${DIM}Configuration:${NC}"
   echo -e "  API Base:  ${BOLD}$API_BASE${NC}"
-  echo -e "  Database:  ${BOLD}$DB_NAME${NC} @ ${BOLD}$DB_HOST${NC}"
+  echo -e "  Database:  ${BOLD}${DB_NAME:-none}${NC} @ ${BOLD}$DB_HOST${NC}"
   echo -e "  Verbose:   ${BOLD}$VERBOSE${NC}"
   echo ""
 }
@@ -701,22 +725,26 @@ end_suite() {
   fi
 }
 
-# Print actual database statistics
+# Print real database statistics as evidence of system state.
+# Driven by DB_STATS_QUERIES: "label=SQL" lines, each query returning a single
+# value. Prints nothing at all when unset.
 print_db_stats() {
+  [ -n "${DB_STATS_QUERIES:-}" ] || return 0
+  db_configured || return 0
+
   subsection_header "ACTUAL DATABASE STATISTICS"
-
   echo ""
-  local user_count=$(sql_value "SELECT COUNT(*) FROM auth.users;")
-  local session_count=$(sql_value "SELECT COUNT(*) FROM auth.sessions WHERE is_revoked = false AND status = 'active';")
-  local tenant_count=$(sql_value "SELECT COUNT(*) FROM auth.tenants;")
-  local revoked_count=$(sql_value "SELECT COUNT(*) FROM auth.sessions WHERE is_revoked = true;")
-  local high_risk=$(sql_value "SELECT COUNT(*) FROM auth.sessions WHERE risk_score > 50 AND is_revoked = false;")
 
-  echo "  Users:              $user_count"
-  echo "  Active Sessions:    $session_count"
-  echo "  Revoked Sessions:   $revoked_count"
-  echo "  Tenants:            $tenant_count"
-  echo "  High-Risk Sessions: $high_risk"
+  local line label query value
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in \#*) continue;; esac
+    label="${line%%=*}"
+    query="${line#*=}"
+    [ -n "$query" ] && [ "$query" != "$line" ] || continue
+    value=$(sql_value "$query")
+    printf "  %-24s %s\n" "$label:" "${value:-n/a}"
+  done <<< "$DB_STATS_QUERIES"
   echo ""
 }
 
@@ -727,12 +755,12 @@ print_db_stats() {
 # Wait for API to be ready
 wait_for_api() {
   local max_wait="${1:-30}"
-  local url="${2:-$API_BASE/metrics}"
+  local url="${2:-${API_BASE}${HEALTH_PATH}}"
 
   log_action "Waiting for API at $url..."
 
   for i in $(seq 1 $max_wait); do
-    if curl -s "$url" > /dev/null 2>&1; then
+    if curl -s -A "$TEST_USER_AGENT" "$url" > /dev/null 2>&1; then
       log_info "API ready after ${i}s"
       return 0
     fi
@@ -751,7 +779,7 @@ random_string() {
 
 # Generate random email
 random_email() {
-  echo "test_$(random_string 8)_$(date +%s)@example.com"
+  echo "${TEST_USER_PREFIX:-harness_}$(random_string 8)_$(date +%s)@${TEST_EMAIL_DOMAIN:-example.com}"
 }
 
 # Sleep with message
@@ -772,10 +800,11 @@ export -f log_action log_command log_request log_response
 export -f log_sql log_sql_result log_validation log_comparison
 export -f log_pass log_fail log_skip log_warn log_info log_debug
 export -f http_request http_get http_post http_put http_patch http_delete
-export -f run_sql sql_value sql_count
+export -f run_sql sql_value sql_count db_configured
 export -f assert_http_status assert_json_field assert_json_equals
 export -f assert_response_contains assert_sql_equals assert_sql_has_rows assert_sql_no_rows
-export -f create_test_user login_test_user delete_test_user reset_test_state clean_risk_state
+export -f auth_body create_test_user login_test_user delete_test_user
+export -f reset_test_state reset_test_environment
 export -f start_suite end_suite print_db_stats
 export -f wait_for_api random_string random_email sleep_with_message
 

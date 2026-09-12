@@ -1,41 +1,112 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command",
-          "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:session:orient minimal,standard,strict {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/session-orient.sh" } ],
-        "description": "Open the session with in-flight work orders" }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:session:orient minimal,standard,strict {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/session-orient.sh"
+          }
+        ],
+        "description": "Open the session with in-flight work orders"
+      }
     ],
     "PreToolUse": [
-      { "matcher": "Bash",
+      {
+        "matcher": "Bash",
         "hooks": [
-          { "type": "command",
-            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:rules standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/rule-hook.py" },
-          { "type": "command",
-            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:wo-reference standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/wo-reference.py" }
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:rules standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/rule-hook.py"
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:wo-reference standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/wo-reference.py"
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:commit-quality standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/commit-quality.py",
+            "timeout": 30
+          }
         ],
-        "description": "Markdown hook rules and commit traceability" },
-      { "matcher": "Edit|Write|MultiEdit",
+        "description": "Markdown hook rules, commit traceability, staged-change quality"
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command",
-            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:file-rules standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/rule-hook.py" }
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:file-rules standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/rule-hook.py"
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:config-protection standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/config-protection.py"
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:pre:doc-file-warning standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/doc-file-warning.py"
+          }
         ],
-        "description": "Markdown hook rules for file writes" }
+        "description": "Markdown hook rules, protected config, scratch-file warning"
+      }
     ],
     "PostToolUse": [
-      { "matcher": "Edit|Write|MultiEdit",
+      {
+        "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command",
-            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:quality-gate standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/quality-gate.py" }
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:quality-gate standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/quality-gate.py"
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:format standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/post-edit-format.py",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:typecheck strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/post-edit-typecheck.py",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:design-quality standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/design-quality.py"
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:ui-size standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/ui-size-check.py"
+          },
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:post:doc-claims standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/doc-claims-check.py"
+          }
         ],
-        "description": "No debug logging, stubs, or TODO-implement in source" }
+        "description": "Quality gate, project formatter, type-check (strict), UI design drift, UI line limits, documentation claims"
+      }
     ],
     "Stop": [
-      { "hooks": [
-          { "type": "command",
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:stop:evidence-gate standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/evidence-gate.py",
-            "timeout": 10 }
+            "timeout": 10
+          }
         ],
-        "description": "A closeout must rest on executed verification" }
+        "description": "A closeout must rest on executed verification"
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/run-hook.sh acp:compact:note minimal,standard,strict python3 {{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/core/hooks/pre-compact.py",
+            "timeout": 10
+          }
+        ],
+        "description": "Write an orientation note before context compaction"
+      }
     ]
   }
 }

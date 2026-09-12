@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# eval — run behavioural evaluations of the pipeline's own agents, commands, and
+# hooks against fixture projects, so a change to an agent or rule is verified the
+# same way a change to code is.
+#
+#   eval list                 evaluations available
+#   eval run [name|all]       run one or every evaluation; exit 1 on any failure
+#   eval live [name|all]      drive real Claude Code sessions (claude -p) and check what they leave behind
+#   eval new <name>           scaffold an evaluation
+#
+# An evaluation is a directory under harness/evals/<name>/ with:
+#   eval.sh        the check; exit 0 = pass. Receives PIPELINE_ROOT and a fresh
+#                  scratch dir in EVAL_TMP. May install the pipeline into a
+#                  fixture, invoke drivers, feed hooks on stdin, and grep output.
+#   README.md      what it proves and why it exists (the failure it guards).
+#
+# Results land in harness/evals/results/<timestamp>.md with per-eval status.
+set -uo pipefail
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EVALS="$SELF/harness/evals"; RESULTS="$EVALS/results"
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  list) for d in "$EVALS"/*/; do [ -f "$d/eval.sh" ] && printf '  %-32s %s\n' "$(basename "$d")" "$(sed -n '3p' "$d/README.md" 2>/dev/null | cut -c1-70)"; done;;
+  run)
+    which="${1:-all}"; mkdir -p "$RESULTS"; ts="$(date +%Y-%m-%d--%H%M%S)"; out="$RESULTS/$ts.md"; pass=0; fail=0
+    { echo "# Pipeline evaluation — $ts"; echo; echo "| Evaluation | Status | Seconds |"; echo "|---|---|---|"; } > "$out"
+    for d in "$EVALS"/*/; do
+      n="$(basename "$d")"; [ -f "$d/eval.sh" ] || continue
+      [ "$which" = all ] || [ "$which" = "$n" ] || continue
+      tmp="$(mktemp -d)"; t0=$(date +%s)
+      if PIPELINE_ROOT="$SELF" EVAL_TMP="$tmp" bash "$d/eval.sh" > "$tmp/log" 2>&1; then st="PASS"; pass=$((pass+1)); else st="FAIL"; fail=$((fail+1)); fi
+      t=$(( $(date +%s) - t0 )); printf '  %-32s %s (%ss)\n' "$n" "$st" "$t"; echo "| $n | $st | $t |" >> "$out"
+      [ "$st" = FAIL ] && { echo; echo "### $n"; echo '```'; tail -40 "$tmp/log"; echo '```'; } >> "$out"
+      rm -rf "$tmp"
+    done
+    echo; echo "  $pass passed, $fail failed — $out"; [ "$fail" -eq 0 ];;
+  live)
+    command -v claude >/dev/null || { echo "eval live: the claude CLI is not on PATH" >&2; exit 2; }
+    which="${1:-all}"; mkdir -p "$RESULTS"; ts="$(date +%Y-%m-%d--%H%M%S)"; out="$RESULTS/live-$ts.md"; pass=0; fail=0
+    MAXT="${EVAL_LIVE_MAX_TURNS:-80}"; MODEL_FLAG=(--model "${EVAL_LIVE_MODEL:-sonnet}")   # explicit: the CLI default may need a newer client
+    { echo "# Live evaluation — $ts"; echo; echo "| Scenario | Status | Seconds | Turns | Cost (USD) |"; echo "|---|---|---|---|---|"; } > "$out"
+    for d in "$EVALS"/live/*/; do
+      n="$(basename "$d")"; case "$n" in _*) continue;; esac; [ -f "$d/prompt.md" ] || continue
+      [ "$which" = all ] || [ "$which" = "$n" ] || continue
+      tmp="$(mktemp -d)"; proj="$tmp/project"; t0=$(date +%s)
+      "$SELF/bin/new-project" "$proj" --name "Live Fixture" >/dev/null 2>&1 || { echo "  $n  FAIL (scaffold)"; fail=$((fail+1)); continue; }
+      cp -R "$EVALS/live/_fixture/." "$proj/"; ( cd "$proj" && git add -A >/dev/null && git -c user.email=e@x -c user.name=e commit -q -m "fixture" )
+      [ -f "$d/setup.sh" ] && PROJECT="$proj" bash "$d/setup.sh"
+      transcript="$RESULTS/live-$ts-$n.json"
+      ( cd "$proj" && PATH="$proj/.aicodepipeline/bin:$PATH" ACP_HOOK_PROFILE="${EVAL_LIVE_PROFILE:-standard}"           claude -p "$(cat "$d/prompt.md")" --permission-mode bypassPermissions --output-format json --max-turns "$MAXT" --no-session-persistence ${MODEL_FLAG[@]+"${MODEL_FLAG[@]}"} > "$transcript" 2>"$transcript.err" ) || true
+      turns="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('num_turns','?'))" "$transcript" 2>/dev/null || echo '?')"
+      cost="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(round(d.get('total_cost_usd',0),2))" "$transcript" 2>/dev/null || echo '?')"
+      if PROJECT="$proj" TRANSCRIPT="$transcript" bash "$d/check.sh" > "$tmp/check.log" 2>&1; then st="PASS"; pass=$((pass+1)); else st="FAIL"; fail=$((fail+1)); fi
+      t=$(( $(date +%s) - t0 )); printf '  %-16s %s (%ss, %s turns, $%s)
+' "$n" "$st" "$t" "$turns" "$cost"; echo "| $n | $st | $t | $turns | $cost |" >> "$out"
+      { echo; echo "### $n — $st"; echo '```'; cat "$tmp/check.log"; echo '```'; echo "Transcript: \`$(basename "$transcript")\`"; } >> "$out"
+      [ "$st" = FAIL ] && [ -n "${EVAL_KEEP:-}" ] && echo "  project kept at $proj" || rm -rf "$tmp"
+    done
+    echo; echo "  $pass passed, $fail failed — $out"; [ "$fail" -eq 0 ];;
+  new)
+    n="${1:?name}"; d="$EVALS/$n"; [ -e "$d" ] && { echo "exists: $d" >&2; exit 1; }; mkdir -p "$d"
+    printf '# %s\n\nProves: <what this guards against>\n' "$n" > "$d/README.md"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n# PIPELINE_ROOT and EVAL_TMP are set. Exit non-zero to fail.\n\n' > "$d/eval.sh"; chmod +x "$d/eval.sh"; echo "created $d";;
+  *) sed -n '2,20p' "$0";;
+esac

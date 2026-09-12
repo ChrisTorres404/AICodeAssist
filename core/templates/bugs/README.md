@@ -2,7 +2,7 @@
 
 ## MANDATORY: Bug Tracking Methodology
 
-**ALL bugs in the {{PROJECT_NAME}} MUST follow this structure. No exceptions.**
+**Every bug in {{PROJECT_NAME}} follows this structure. No exceptions.**
 
 ---
 
@@ -40,44 +40,43 @@ BUG-XXXX-[slug]/
 
 ## How to Create a New Bug Report
 
-### Step 1: Determine Bug Number
-Check existing bugs in `{{BUGS_DIR}}/` and use the next available number.
+Do not copy these templates by hand. The driver picks the number from the
+category's series, creates the folder, renders the issue document, and writes
+the routing at the top of it.
 
-### Step 2: Create the Folder
 ```bash
-mkdir -p {{BUGS_DIR}}/BUG-XXXX-[slug]
+pack bug "<symptom>"                              # has this happened before?
+bug new "<title>" --category <category>           # add --prompt for a complex one
 ```
 
-Use a short, descriptive slug (lowercase, hyphens):
-- `login-analytics-timezone-mismatch`
-- `sdk-health-paths-missing-prefix`
-- `dashboard-session-count-zero`
+The slug is derived from the title, so give it a real one: short, lowercase,
+and specific about the symptom.
 
-### Step 3: Copy Core Template (REQUIRED)
-Copy the template file to the new folder and rename:
-- `BUG-TEMPLATE-ISSUE.md` → `BUG-XXXX-[slug].md`
+- `report-totals-off-by-timezone`
+- `client-health-path-missing-prefix`
+- `dashboard-count-always-zero`
 
-### Step 4: Copy Specialized Templates (if applicable)
-If the bug requires AI assistance:
-- `BUG-TEMPLATE-PROMPT.md` → `BUG-XXXX-Prompt.md`
+Then:
 
-### Step 5: Fill In Details
-Replace all `[placeholders]` with actual content.
-
-### Step 6: On Fix Completion
-Create closeout using:
-- `BUG-TEMPLATE-CLOSEOUT.md` → `BUG-XXXX-[slug]-CLOSEOUT.md`
+1. **Reproduce it first.** An investigation with no reproduction is a guess.
+2. **Fill in every `[placeholder]`** with verified content.
+3. **Link the work order** that introduced the behavior.
+4. **Close with evidence**: `bug verify <n> --run <suite>` then
+   `bug close <n>`, which is refused without a verification document.
 
 ---
 
-## Gold Standard Examples
+## Good Examples
 
-Reference these completed bug reports for best practices:
+There is no canonical list. Search for the nearest precedent:
 
-- `BUG-0001-login-analytics-timezone-mismatch/` - Complete with issue + closeout
-- `BUG-0007-rate-limit-forced-logout/` - Complete with issue + closeout
-- `BUG-0006-health-check-pool-saturation/` - Includes addendum for known behavior
-- `BUG-0018-sdk-missing-usage-module/` - Recent example with proper structure
+```bash
+pack bug "<symptom>"        # bug investigations across every installed pack
+pack search "<symptom>"     # everything, including the work order behind it
+```
+
+A promoted bug carries its reproduction, root cause, fix, and the pitfall that
+allowed it. Failing that, read the most recently closed bug in `{{BUGS_DIR}}`.
 
 ---
 
@@ -94,19 +93,26 @@ Reference these completed bug reports for best practices:
 
 ## Bug Numbering by Category
 
-| Range | Theme |
-|-------|-------|
-| 0001-0099 | Auth & Session bugs |
-| 0100-0199 | API & SDK bugs |
-| 0200-0299 | Database & Migration bugs |
-| 0300-0399 | UI & Frontend bugs |
-| 0400-0499 | Observability & Metrics bugs |
-| 0500-0599 | Security bugs |
-| 0600-0699 | Performance bugs |
-| 0700-0799 | Integration bugs |
-| 0800-0899 | Configuration bugs |
-| 0900-0999 | Documentation bugs |
-| 1000+ | Overflow / Misc |
+`--category` picks the series and records the routing. This is the driver's
+table; do not pick a number yourself.
+
+| Category | Series |
+|---|---|
+| `auth` | 0001 |
+| `api` | 0100 |
+| `database` (`db`) | 0200 |
+| `ui` (`frontend`) | 0300 |
+| `observability` | 0400 |
+| `security` | 0500 |
+| `performance` (`perf`) | 0600 |
+| `integration` | 0700 |
+| `config` (`deployment`) | 0800 |
+| `docs` (`documentation`) | 0900 |
+| *(none given)* | 1000 — decide the routing before investigating |
+
+Who investigates, who fixes, and who validates each category:
+`{{PIPELINE_ROOT}}/core/methodology/MANDATORY-BUG-METHODOLOGY.md` and
+`{{PIPELINE_ROOT}}/core/rules/common/troubleshooting.md`.
 
 ---
 

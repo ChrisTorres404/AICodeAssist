@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# stack-specialist backend|ui|data [project-dir]
+# Resolves "the stack's specialist" to a concrete agent name using detect-stack.
+set -uo pipefail
+case "${1:-}" in backend|ui|data) ;; *) echo "usage: stack-specialist backend|ui|data [project-dir]" >&2; exit 2;; esac
+kind="$1"; dir="${2:-.}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STACK_JSON="$("$here/detect-stack" "$dir" --json 2>/dev/null || echo '{}')" KIND="$kind" python3 - <<'PY'
+import json, os
+kind = os.environ["KIND"]
+try: d = json.loads(os.environ.get("STACK_JSON") or "{}")
+except Exception: d = {}
+L = d.get("languages", []); F = d.get("frameworks", [])
+def first(*c):
+    return next((x for x in c if x), None)
+if kind == "backend":
+    prim = L[0] if L else ""
+    a = first("nestjs-expert" if "nestjs" in F else None, "nextjs-expert" if "nextjs" in F else None,
+              "django-expert" if "django" in F else None, "fastapi-expert" if "fastapi" in F else None,
+              "python-expert" if prim == "python" else None,
+              "nodejs-expert" if prim in ("typescript", "javascript") else None,
+              {"golang": "golang-expert", "rust": "rust-expert", "java": "java-expert", "kotlin": "kotlin-expert",
+               "swift": "swift-expert", "php": "php-expert", "csharp": "csharp-expert", "fsharp": "fsharp-expert",
+               "cpp": "cpp-expert", "ruby": "rest-expert", "dart": "flutter-expert"}.get(prim), "rest-expert")
+elif kind == "ui":
+    a = first("nextjs-expert" if "nextjs" in F else None, "react-expert" if "react" in F else None,
+              "angular-expert" if "angular" in F else None, "svelte-expert" if "svelte" in F else None,
+              "remix-expert" if "remix" in F else None, "vue-expert" if "vue" in F or "nuxt" in F else None,
+              "flutter-expert" if "flutter" in F or (L and L[0] == "dart") else None, "swift-expert" if L and L[0] == "swift" else None,
+              "kotlin-expert" if L and L[0] == "kotlin" else None, "arkts-expert" if L and L[0] == "arkts" else None,
+              "react-expert" if any(x in L for x in ("typescript", "javascript")) else None, "html-expert")
+else:
+    a = first("typeorm-expert" if "nestjs" in F else None, "postgres-expert")
+print(a)
+PY

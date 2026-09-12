@@ -10,25 +10,13 @@ paths:
 
 > This file extends [typescript/security.md](../typescript/security.md) and [common/security.md](../common/security.md) with React specific content.
 
+Worked examples: skill `react-patterns`.
+
 ## XSS via `dangerouslySetInnerHTML`
 
 CRITICAL. The prop name is deliberately scary — treat every usage as a code review halt.
 
-```tsx
-// CRITICAL: unsanitized user input
-<div dangerouslySetInnerHTML={{ __html: userBio }} />
-
-// CORRECT options:
-// 1. Render as text
-<div>{userBio}</div>
-
-// 2. Render parsed markdown via a library that sanitizes
-<ReactMarkdown>{userBio}</ReactMarkdown>
-
-// 3. If raw HTML is required, sanitize first with DOMPurify
-import DOMPurify from "isomorphic-dompurify";
-<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(userBio) }} />
-```
+Correct options: render the value as text, render parsed markdown via a library that sanitizes, or — when raw HTML is genuinely required — sanitize first with DOMPurify.
 
 Audit checklist for every `dangerouslySetInnerHTML` call:
 
@@ -38,24 +26,7 @@ Audit checklist for every `dangerouslySetInnerHTML` call:
 
 ## Unsafe URL Schemes
 
-`javascript:` and `data:` URLs in `href`, `src`, and `xlink:href` execute arbitrary code.
-
-```tsx
-// CRITICAL: javascript: URL injection
-<a href={user.website}>Visit</a>   // if user.website = "javascript:alert(1)"
-
-// CORRECT: validate scheme
-function safeUrl(url: string): string | undefined {
-  try {
-    const parsed = new URL(url);
-    if (["http:", "https:", "mailto:"].includes(parsed.protocol)) return url;
-  } catch {
-    return undefined;
-  }
-  return undefined;
-}
-<a href={safeUrl(user.website)}>Visit</a>
-```
+`javascript:` and `data:` URLs in `href`, `src`, and `xlink:href` execute arbitrary code. Validate the scheme against an allowlist (`http:`, `https:`, `mailto:`) before rendering a user-supplied URL.
 
 React warns about `javascript:` URLs in `href` in development mode, but does not block them at runtime. `data:` URLs and other schemes also slip through. Always validate.
 
@@ -63,38 +34,11 @@ React warns about `javascript:` URLs in `href` in development mode, but does not
 
 `<a target="_blank">` without `rel="noopener noreferrer"` lets the target page access `window.opener` and run navigation hijacks.
 
-```tsx
-// WRONG
-<a href={externalUrl} target="_blank">External</a>
-
-// CORRECT
-<a href={externalUrl} target="_blank" rel="noopener noreferrer">External</a>
-```
-
 Modern browsers default to `noopener` when `target="_blank"`, but do not rely on browser defaults — be explicit.
 
 ## Server Action Input Validation
 
-Server Actions (`"use server"`) run with the same trust level as a public API endpoint. Validate every input.
-
-```tsx
-"use server";
-import { z } from "zod";
-
-const Input = z.object({
-  email: z.string().email(),
-  age: z.number().int().min(0).max(120),
-});
-
-export async function updateUser(_state: unknown, formData: FormData) {
-  const parsed = Input.safeParse({
-    email: formData.get("email"),
-    age: Number(formData.get("age")),
-  });
-  if (!parsed.success) return { error: parsed.error.flatten() };
-  // ...
-}
-```
+Server Actions (`"use server"`) run with the same trust level as a public API endpoint. Validate every input with a schema before using it.
 
 - Authenticate inside the action — do not trust the client-side route gate
 - Authorize: confirm the current user has permission for the specific record they are mutating
@@ -110,11 +54,6 @@ Prefixed env vars are bundled into the client. Treat them as public.
 | Vite | `VITE_*` | `.env` server-side only |
 | Create React App | `REACT_APP_*`, plus `NODE_ENV` and `PUBLIC_URL` | All others (anything without the `REACT_APP_` prefix is server-side only) |
 | Remix | `process.env` access in `loader`/`action` only | Same |
-
-```ts
-// CRITICAL: secret leaked to client bundle
-const apiKey = process.env.NEXT_PUBLIC_STRIPE_SECRET_KEY;
-```
 
 Audit on every PR that touches env vars: would this string in the public bundle be a problem?
 
@@ -144,16 +83,7 @@ frame-ancestors 'none';
 
 ## Prototype Pollution via Object Spread
 
-```tsx
-// WRONG: untrusted JSON spread directly into state
-const update = await req.json();
-setState({ ...state, ...update });    // attacker controls __proto__
-
-// CORRECT: parse with a schema, or guard keys
-const Allowed = z.object({ name: z.string(), email: z.string().email() });
-const parsed = Allowed.parse(await req.json());
-setState({ ...state, ...parsed });
-```
+Never spread untrusted JSON straight into state — the attacker controls `__proto__`. Parse it with a schema first, or guard the keys.
 
 ## SSR Template Injection
 

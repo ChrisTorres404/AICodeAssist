@@ -2,8 +2,8 @@
 
 **Work Order:** WO-XXXX - [Title]
 **Status:** NOT STARTED | IN PROGRESS | IMPLEMENTATION COMPLETE
-**SDK Version:** v1.x (Browser-First)
-**Last Updated:** YYYY-MM-DD
+**SDK Package:** {{SDK_PKG}}
+**SDK Version:** [version]
 
 ---
 

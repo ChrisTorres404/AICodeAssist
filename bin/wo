@@ -7,14 +7,17 @@
 #   * four documents are required at creation
 #   * a closeout may not be produced before a verification exists
 #
-#   wo new "<title>" [--size trivial|small|standard|large] [--series N]
+#   wo new "<title>" [--size trivial|small|standard|large] [--area A] [--series N]
 #                    [--priority P0|P1|P2|P3] [--sdk] [--ui]
+#       --area routes the work: backend api database auth rbac frontend ui
+#              styling testing cicd docker security performance docs analysis
 #   wo list [--open|--closed]
 #   wo show <number>                 print the work order's primary document
 #   wo status <number>               which documents exist, which are missing
 #   wo start <number>                mark in progress
 #   wo block <number> "<reason>"     mark blocked
 #   wo note <number> "<text>"        append a dated session note
+#   wo suite <number>                       scaffold a behavioural suite for the work order
 #   wo verify <number> [--run <suite.sh>]   create the VERIFICATION document;
 #                                    with --run, execute the suite and record
 #                                    EXECUTED — PASS/FAIL from its exit code
@@ -38,6 +41,7 @@
 set -euo pipefail
 
 PIPELINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SELF_ROOT="$PIPELINE_ROOT"
 TEMPLATES="$PIPELINE_ROOT/core/templates/workorders"
 
 # Resolve where work orders live: pipeline.config.sh in cwd or any parent.
@@ -53,6 +57,7 @@ CONFIG="$(find_config || true)"
 if [ -n "$CONFIG" ]; then
   # shellcheck disable=SC1090
   . "$CONFIG"
+  PIPELINE_ROOT="$SELF_ROOT"   # the config's PIPELINE_ROOT is the project's install path; ours is where this script lives
   PROJECT_ROOT="${PROJECT_ROOT:-$(dirname "$CONFIG")}"
   WO_DIR="$PROJECT_ROOT/${WORKORDERS_DIR:?WORKORDERS_DIR not set in pipeline.config.sh}"
 else
@@ -131,10 +136,38 @@ render() { # template dest number title priority
       "$1" > "$2"
 }
 
+delegation() { # area -> "primary|backup|validator"  (the orchestrator's table)
+  case "$1" in
+    backend)     echo "BACKEND|architect|project-validator-expert";;
+    api)         echo "rest-expert|BACKEND|openapi-expert";;
+    database|db) echo "DATA|BACKEND|database-validator-expert";;
+    auth)        echo "jwt-expert|BACKEND|iam-rbac-expert";;
+    rbac)        echo "iam-rbac-expert|jwt-expert|project-validator-expert";;
+    frontend|ui) echo "UI|ux-ui-designer-expert|frontend-validator-expert";;
+    styling)     echo "css-expert|UI|ux-ui-designer-expert";;
+    testing)     echo "tdd-guide|e2e-runner|project-validator-expert";;
+    cicd)        echo "github-actions-expert|docker-expert|project-validator-expert";;
+    docker)      echo "docker-expert|github-actions-expert|project-validator-expert";;
+    security)    echo "owasp-top10-expert|jwt-expert|project-validator-expert";;
+    performance) echo "performance-optimizer|BACKEND|project-validator-expert";;
+    docs)        echo "documentation-expert|developer-experience-writer|critical-reviewer";;
+    analysis)    echo "repo-analyst|code-explorer|factuality-validator";;
+    *) return 1;;
+  esac
+}
+resolve_specialists() { # BACKEND / UI / DATA tokens -> the detected stack's agents
+  local be ui da
+  be="$("$PIPELINE_ROOT/bin/stack-specialist" backend "$PROJECT_ROOT" 2>/dev/null || echo rest-expert)"
+  ui="$("$PIPELINE_ROOT/bin/stack-specialist" ui "$PROJECT_ROOT" 2>/dev/null || echo react-expert)"
+  da="$("$PIPELINE_ROOT/bin/stack-specialist" data "$PROJECT_ROOT" 2>/dev/null || echo postgres-expert)"
+  printf '%s' "$1" | sed -e "s/BACKEND/$be/g" -e "s/^UI|/$ui|/" -e "s/|UI|/|$ui|/" -e "s/|UI\$/|$ui/" -e "s/DATA/$da/g"
+}
+
 cmd_new() {
-  local title="" series="" priority="P2" want_sdk=0 want_ui=0 size="standard"
+  local title="" series="" priority="P2" want_sdk=0 want_ui=0 size="standard" area=""
   while [ $# -gt 0 ]; do
     case "$1" in
+      --area)     area="$2"; shift 2;;
       --size)     size="$2"; shift 2;;
       --series)   series="$2"; shift 2;;
       --priority) priority="$2"; shift 2;;
@@ -145,6 +178,13 @@ cmd_new() {
     esac
   done
   case "$size" in trivial|small|standard|large) ;; *) die "size must be trivial, small, standard, or large";; esac
+  local primary="" backup="" validator=""
+  if [ -n "$area" ]; then
+    local deleg; deleg="$(delegation "$area")" || die "unknown area '$area' — backend api database auth rbac frontend ui styling testing cicd docker security performance docs analysis"
+    deleg="$(resolve_specialists "$deleg")"
+    primary="${deleg%%|*}"; backup="$(printf '%s' "$deleg" | cut -d'|' -f2)"; validator="${deleg##*|}"
+    case "$area" in ui|frontend) [ "$size" != trivial ] && want_ui=1;; esac
+  fi
   [ -n "$title" ] || die 'usage: wo new "<title>" [--size S] [--series N] [--priority P0|P1|P2|P3] [--sdk] [--ui]'
   mkdir -p "$WO_DIR"
   local num; num="$(next_number "$series")"
@@ -153,10 +193,12 @@ cmd_new() {
   mkdir -p "$dir"
 
   printf 'size=%s\ntitle=%s\npriority=%s\ncreated=%s\nowner=%s\n' "$size" "$title" "$priority" "$(date +%F)" "$(git config user.name 2>/dev/null || whoami)" > "$dir/.wo-meta"
+  [ -n "$area" ] && printf 'area=%s\nprimary=%s\nbackup=%s\nvalidator=%s\n' "$area" "$primary" "$backup" "$validator" >> "$dir/.wo-meta"
   for k in $(required_docs "$size"); do
     case "$k" in
       MAIN)               render "$TEMPLATES/WO-TEMPLATE-MAIN.md"               "$dir/WO-$num-$(slugify "$title").md" "$num" "$title" "$priority";;
-      SPEC)               render "$TEMPLATES/WO-TEMPLATE-SPEC.md"               "$dir/WO-$num-SPEC.md"           "$num" "$title" "$priority";;
+      SPEC)               case "$area" in analysis|docs) render "$TEMPLATES/WO-TEMPLATE-SPEC-ANALYSIS.md" "$dir/WO-$num-SPEC.md" "$num" "$title" "$priority";;
+                                           *) render "$TEMPLATES/WO-TEMPLATE-SPEC.md" "$dir/WO-$num-SPEC.md" "$num" "$title" "$priority";; esac;;
       CHECKLIST)          render "$TEMPLATES/WO-TEMPLATE-CHECKLIST.md"          "$dir/WO-$num-CHECKLIST.md"      "$num" "$title" "$priority";;
       TASK-BREAKDOWN)     render "$TEMPLATES/WO-TEMPLATE-TASK-BREAKDOWN.md"     "$dir/WO-$num-TASK-BREAKDOWN.md" "$num" "$title" "$priority";;
       Prompt)             render "$TEMPLATES/WO-TEMPLATE-PROMPT.md"             "$dir/WO-$num-Prompt.md"         "$num" "$title" "$priority";;
@@ -167,10 +209,22 @@ cmd_new() {
   [ "$want_sdk" -eq 1 ] && [ ! -f "$dir/WO-$num-sdk-implementation.md" ] && render "$TEMPLATES/WO-TEMPLATE-SDK-IMPLEMENTATION.md" "$dir/WO-$num-sdk-implementation.md" "$num" "$title" "$priority"
   [ "$want_ui"  -eq 1 ] && [ ! -f "$dir/WO-$num-ui-implementation.md" ]  && render "$TEMPLATES/WO-TEMPLATE-UI-IMPLEMENTATION.md"  "$dir/WO-$num-ui-implementation.md"  "$num" "$title" "$priority"
 
+  if [ -n "$area" ]; then
+    local pd; pd="$(primary_doc "$dir" "$num")"
+    [ -n "$pd" ] && AREA="$area" PRIMARY="$primary" BACKUP="$backup" VALIDATOR="$validator" DOC="$pd" python3 - <<'PYEOF'
+import os, pathlib
+p = pathlib.Path(os.environ["DOC"]); s = p.read_text()
+block = "\n> **Area:** %s  \n> **Implement with:** %s  \n> **Backup:** %s  \n> **Validate with:** %s (never the agent that implemented)\n" % (os.environ["AREA"], os.environ["PRIMARY"], os.environ["BACKUP"], os.environ["VALIDATOR"])
+first, rest = (s.split("\n", 1) + [""])[:2]
+p.write_text(first + "\n" + block + "\n" + rest)
+PYEOF
+  fi
   echo "WO-$num created ($size): $dir"
   ls "$dir" | sed 's/^/    /'
+  if [ -n "$area" ]; then echo; echo "Delegation ($area):"; echo "  implement with : $primary"; echo "  backup         : $backup"; echo "  validate with  : $validator"; fi
   echo
-  echo "Next: fill in the SPEC before writing code. Closeout is blocked until"
+  case "$area" in analysis|docs) echo "Next: fill in the SPEC (target, questions, deliverables) before reading the target. Closeout is blocked until";;
+    *) echo "Next: fill in the SPEC before writing code. Closeout is blocked until";; esac
   echo "      WO-$num-VERIFICATION.md exists with real execution evidence."
 }
 
@@ -222,7 +276,13 @@ cmd_close() {
   ls "$d" | grep -qi -- "WO-$n-VERIFICATION" \
     || die "refusing to close WO-$n: no WO-$n-VERIFICATION.md.
     The methodology forbids a closeout without executed-test evidence.
-    Create the verification report first."
+    Create it by running the suite:  wo verify $n --run <suite.sh>"
+  local vstatus; vstatus="$(cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -oE "EXECUTED\s*[—–-]+\s*(PASS|FAIL)|NOT EXECUTED[^*]*" | head -1)"
+  case "$vstatus" in
+    *PASS*) ;;
+    *FAIL*) die "refusing to close WO-$n: verification is EXECUTED — FAIL. Fix the work, re-run:  wo verify $n --run <suite.sh>";;
+    *) die "refusing to close WO-$n: verification is NOT EXECUTED — PLAN ONLY. A plan is not evidence. Run it:  wo verify $n --run <suite.sh>";;
+  esac
   local out="$d/WO-$n-CLOSEOUT.md"
   [ -e "$out" ] && die "$out already exists"
   local title; title="$(basename "$d")"; title="${title#WO-$n-}"
@@ -318,7 +378,7 @@ cmd_show() {
 cmd_start() {
   local n="${1:-}"; [ -n "$n" ] || die "usage: wo start <number>"
   local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n"
-  meta_set "$d" status in-progress; meta_set "$d" started "$(date +%F)"
+  meta_set "$d" status in-progress; meta_set "$d" started "$(date +%F)"; meta_set "$d" blocked_reason ""
   echo "WO-$n: in progress (started $(date +%F))"
 }
 
@@ -337,6 +397,19 @@ cmd_note() {
   grep -q '^## Session Notes' "$pd" || printf '\n---\n\n## Session Notes\n\n' >> "$pd"
   printf -- '- %s — %s\n' "$(date '+%Y-%m-%d %H:%M')" "$text" >> "$pd"
   echo "WO-$n: note added to $(basename "$pd")"
+}
+
+cmd_suite() { # scaffold a behavioural suite for a work order from the shipped template
+  local n="${1:-}"; [ -n "$n" ] || die "usage: wo suite <number>"
+  local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
+  local slug; slug="$(basename "$d")"; slug="${slug#WO-$n-}"
+  local dir="$PROJECT_ROOT/${TESTING_DIR:-Workspace/Testing}/suites" out
+  mkdir -p "$dir"; out="$dir/wo-$n-$slug.sh"
+  [ -e "$out" ] && die "$out already exists"
+  sed -e "s/WO-XXXX/WO-$n/g" -e "s/\[Title\]/$slug/g" -e "s|{{PIPELINE_ROOT}}|${PIPELINE_ROOT#$PROJECT_ROOT/}|g" "$PIPELINE_ROOT/core/templates/testing/SUITE-TEMPLATE.sh" > "$out"
+  chmod +x "$out"
+  echo "Suite scaffolded: ${out#$PROJECT_ROOT/}"
+  echo "Fill in the checks, start the service, then:  wo verify $n --run ${out#$PROJECT_ROOT/}"
 }
 
 cmd_verify() {
@@ -358,6 +431,8 @@ cmd_verify() {
   stamp="$(date +%Y%m%d-%H%M%S)-$$"; log="$d/WO-$n-VERIFICATION-$stamp.log"
   echo "Running: $suite"
   set +e; bash "$suite" >"$log" 2>&1; rc=$?; set -e
+  # Keep evidence portable and shareable: no host paths in the record.
+  perl -pi -e "s|\Q$PROJECT_ROOT/\E||g" "$log" 2>/dev/null || true
   if [ "$rc" -eq 0 ]; then status="EXECUTED — PASS"; else status="EXECUTED — FAIL"; fi
   {
     printf '\n### Run %s\n\n' "$stamp"
@@ -373,25 +448,40 @@ cmd_verify() {
   [ "$rc" -eq 0 ] || return 1
 }
 
+cycle_days() { # created-date closeout-file -> whole days between, empty if either is unreadable
+  # python does the date arithmetic: BSD date parses a date with -j/-f while GNU
+  # date uses -d, and the two stat(1) mtime flags split the same way.
+  WO_CREATED="$1" WO_CLOSEOUT="$2" python3 - <<'PYEOF' 2>/dev/null || true
+import datetime, os, sys
+try:
+    started = datetime.datetime.strptime(os.environ["WO_CREATED"], "%Y-%m-%d")
+    closed = datetime.datetime.fromtimestamp(os.path.getmtime(os.environ["WO_CLOSEOUT"]))
+except (KeyError, ValueError, OSError):
+    sys.exit(1)
+print(int((closed - started).total_seconds() / 86400))
+PYEOF
+}
+
 cmd_stats() {
-  local total=0 closed=0 evidenced=0 drift=0 open=0 inprog=0 blocked=0 days=0 nd=0
-  local sizes_t=0 sizes_s=0 sizes_st=0 sizes_l=0; local -a drift_list=()
+  local total=0 closed=0 evidenced=0 drift=0 open=0 inprog=0 blocked=0 days=0 nd=0 failing=0
+  local sizes_t=0 sizes_s=0 sizes_st=0 sizes_l=0; local -a drift_list=() failing_list=()
   for d in "$WO_DIR"/WO-*; do
     [ -d "$d" ] || continue
     total=$((total+1)); local b n; b="$(basename "$d")"; n="${b#WO-}"; n="${n%%-*}"
     case "$(meta_get "$d" size)" in trivial) sizes_t=$((sizes_t+1));; small) sizes_s=$((sizes_s+1));; large) sizes_l=$((sizes_l+1));; *) sizes_st=$((sizes_st+1));; esac
     if ls "$d" | grep -qi -- "WO-$n-CLOSEOUT"; then
       closed=$((closed+1))
-      if ls "$d" | grep -qi -- "WO-$n-VERIFICATION" && cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*(PASS|FAIL)"; then
+      if ls "$d" | grep -qi -- "WO-$n-VERIFICATION" && cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*PASS"; then
         evidenced=$((evidenced+1))
+      elif ls "$d" | grep -qi -- "WO-$n-VERIFICATION" && cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*FAIL"; then
+        failing=$((failing+1)); failing_list+=("WO-$n")
       else
         drift=$((drift+1)); drift_list+=("WO-$n")
       fi
       local c; c="$(meta_get "$d" created)"
       if [ -n "$c" ]; then
-        local cs ce; cs="$(date -j -f %Y-%m-%d "$c" +%s 2>/dev/null || date -d "$c" +%s 2>/dev/null || echo 0)"
-        ce="$(stat -f %m "$d"/WO-$n-CLOSEOUT.md 2>/dev/null || stat -c %Y "$d"/WO-$n-CLOSEOUT.md 2>/dev/null || echo 0)"
-        [ "$cs" -gt 0 ] && [ "$ce" -gt 0 ] && { days=$((days + (ce-cs)/86400)); nd=$((nd+1)); }
+        local cyc; cyc="$(cycle_days "$c" "$d/WO-$n-CLOSEOUT.md")"
+        [ -n "$cyc" ] && { days=$((days + cyc)); nd=$((nd+1)); }
       fi
     else
       case "$(meta_get "$d" status)" in in-progress) inprog=$((inprog+1));; blocked) blocked=$((blocked+1));; *) open=$((open+1));; esac
@@ -404,25 +494,31 @@ cmd_stats() {
   printf '  %-34s %s\n' "closed" "$closed"
   [ "$closed" -gt 0 ] && printf '  %-34s %s of %s (%s%%)\n' "closed with executed evidence" "$evidenced" "$closed" "$((evidenced*100/closed))"
   [ "$drift" -gt 0 ] && printf '  %-34s %s  %s\n' "closed WITHOUT evidence (drift)" "$drift" "${drift_list[*]}"
+  [ "$failing" -gt 0 ] && printf '  %-34s %s  %s\n' "closed but last run FAILED" "$failing" "${failing_list[*]}"
   [ "$nd" -gt 0 ] && printf '  %-34s %s days\n' "mean open-to-closeout" "$((days/nd))"
   printf '  %-34s trivial %s, small %s, standard %s, large %s\n' "by size" "$sizes_t" "$sizes_s" "$sizes_st" "$sizes_l"
 }
 
 cmd_promote() {
-  local n="" pack="" allow=0
+  local n="" pack="" allow=0 allow_ph=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --pack) pack="$2"; shift 2;;
       --allow-unsanitized) allow=1; shift;;
+      --allow-placeholders) allow_ph=1; shift;;
       -*) die "unknown flag $1";;
       *) n="$1"; shift;;
     esac
   done
-  [ -n "$n" ] || die "usage: wo promote <number> [--pack <name>] [--allow-unsanitized]"
+  [ -n "$n" ] || die "usage: wo promote <number> [--pack <name>] [--allow-unsanitized] [--allow-placeholders]"
   local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
-  ls "$d" | grep -qi -- "WO-$n-VERIFICATION" || die "refusing to promote WO-$n: not verified. Precedent without evidence is folklore."
+  cat "$d"/WO-$n-VERIFICATION*.md 2>/dev/null | grep -qE "EXECUTED\s*[—–-]+\s*PASS" || die "refusing to promote WO-$n: no EXECUTED — PASS verification. Precedent without evidence is folklore."
+  if [ "$allow_ph" -eq 0 ] && [ -f "$d/WO-$n-CLOSEOUT.md" ] && grep -qE "\[Lesson [0-9]\]|\[What was delivered\]|\[Root cause\]|\[Brief|TBD|TODO" "$d/WO-$n-CLOSEOUT.md"; then
+    die "refusing to promote WO-$n: the CLOSEOUT still has template placeholders (e.g. '[Lesson 1]').
+    The pitfalls are the part the next project needs. Fill them in, or pass --allow-placeholders."
+  fi
   pack="${pack:-$PROJECT_SLUG}"
-  local pdir="$PACKS_DIR/$pack" tree="workorders/$PROJECT_SLUG"
+  local pdir="$PACKS_DIR/$pack" tree="workorders"
   [ -x "$PIPELINE_ROOT/bin/sanitize" ] || die "bin/sanitize is missing from $PIPELINE_ROOT/bin — refusing to promote unscanned work. Re-run install.sh."
   if true; then
     rc=0; "$PIPELINE_ROOT/bin/sanitize" "$d" --quiet >/dev/null 2>&1 || rc=$?
@@ -438,6 +534,16 @@ cmd_promote() {
   rm -rf "$pdir/$tree/$b"; cp -R "$d" "$pdir/$tree/$b"
   # --- catalog entry: deterministic extraction from the documents ---
   local cat="$pdir/CATALOG.md" spec close title problem solution pitfalls files
+  if [ -f "$cat" ] && grep -q "^## WO-$n " "$cat"; then
+    python3 - "$cat" "WO-$n" <<'PYEOF'
+import re, sys
+p, wo = sys.argv[1], sys.argv[2]
+t = open(p).read()
+t = re.sub(r"(?ms)^## " + re.escape(wo) + r" .*?(?=^## |\Z)", "", t)
+open(p, "w").write(t.rstrip("\n") + "\n\n")
+PYEOF
+    echo "Catalog entry for WO-$n replaced."
+  fi
   spec="$d/WO-$n-SPEC.md"
   if [ ! -f "$spec" ]; then
     spec=""
@@ -447,7 +553,7 @@ cmd_promote() {
   fi
   close="$d/WO-$n-CLOSEOUT.md"; [ -f "$close" ] || close=""
   title="$(meta_get "$d" title)"; [ -n "$title" ] || title="${b#WO-$n-}"
-  section() { awk -v h="$2" 'BEGIN{p=0} /^## /{p=($0 ~ h)} p&&!/^## /{print}' "$1" | sed -e '/^\s*$/d' -e '/^---*$/d' | head -${3:-6}; }
+  section() { awk -v h="$2" 'BEGIN{p=0} /^## /{p=($0 ~ h)} p&&!/^## /{print}' "$1" | sed -e '/^[[:space:]]*$/d' -e '/^---*$/d' | head -n "${3:-6}"; }
   problem="$( [ -f "$spec" ] && section "$spec" "Problem" 6 || true)"
   solution="$( [ -f "$spec" ] && section "$spec" "Solution" 6 || true)"
   pitfalls="$( [ -f "$close" ] && section "$close" "(Lessons|Pitfalls|Gotchas|What Went Wrong)" 10 || true)"
@@ -469,6 +575,8 @@ cmd_promote() {
   echo "Edit the Pitfalls lines now, while you still remember."
 }
 
+pad() { case "${1:-}" in [0-9]|[0-9][0-9]|[0-9][0-9][0-9]) printf '%04d' "$((10#$1))";; *) printf '%s' "${1:-}";; esac; }
+case "${1:-}" in show|start|block|note|verify|publish|sync|promote|status|close|suite) [ $# -ge 2 ] && set -- "$1" "$(pad "$2")" "${@:3}";; esac
 case "${1:-}" in
   new)     shift; cmd_new "$@";;
   show)    shift; cmd_show "${1:-}";;
@@ -476,6 +584,7 @@ case "${1:-}" in
   block)   shift; cmd_block "${1:-}" "${2:-}";;
   note)    shift; cmd_note "${1:-}" "${2:-}";;
   verify)  shift; cmd_verify "$@";;
+  suite)   shift; cmd_suite "${1:-}";;
   stats)   shift; cmd_stats;;
   publish) shift; cmd_publish "${1:-}";;
   sync)    shift; cmd_sync "${1:-}";;

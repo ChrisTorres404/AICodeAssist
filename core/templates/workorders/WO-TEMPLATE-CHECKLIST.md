@@ -16,7 +16,7 @@
 ### Configuration & Patterns
 - [ ] Using configuration/settings instead of hardcoded values (no magic numbers)
 - [ ] Following existing patterns in the codebase
-- [ ] Using proper Logger service (not console.log)
+- [ ] Using the project's logger (no debug printing)
 - [ ] Error handling with proper exception types and messages
 
 ### Production Mindset
@@ -99,7 +99,7 @@
 
 ### Code Quality Review
 - [ ] Read through ALL changed files line by line
-- [ ] Removed ALL console.log statements (use Logger service)
+- [ ] Removed ALL debug logging (use the project's logger)
 - [ ] No magic numbers - extracted to configuration or constants
 - [ ] Proper typing - no `any` types, proper validation
 - [ ] Error handling complete with clear messages

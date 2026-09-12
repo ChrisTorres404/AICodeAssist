@@ -11,13 +11,16 @@ category decides who investigates, who fixes, and who validates.
 | UI, frontend | `support-engineer-expert` + `react-expert` | the stack's UI specialist | `frontend-validator-expert` |
 | Observability, metrics | `support-engineer-expert` + `prometheus-expert` | `prometheus-expert` or `grafana-expert` | `project-validator-expert` |
 | Security | `owasp-top10-expert` + `support-engineer-expert` | `jwt-expert`, `iam-rbac-expert`, or `owasp-top10-expert` | `owasp-top10-expert`, then `project-validator-expert` |
-| Performance | `support-engineer-expert` + `postgres-expert` | `nodejs-expert`, `postgres-expert`, or `redis-expert` | `project-validator-expert` |
+| Performance | `performance-optimizer` + `postgres-expert` | `nodejs-expert`, `postgres-expert`, or `redis-expert` | `project-validator-expert` |
 | Integration, webhooks, realtime | `support-engineer-expert` + `rest-expert` | the stack's backend specialist or `websocket-expert` | `project-validator-expert` |
 | Configuration, deployment | `support-engineer-expert` + `docker-expert` | `docker-expert` or `github-actions-expert` | `project-validator-expert` |
 | Documentation | `documentation-expert` | `documentation-expert` | `documentation-expert` |
 | A failing test suite | Explore for context, then `support-engineer-expert`, then `database-validator-expert` | the fixing agent for the failure's category | `project-validator-expert` |
+| A failing build or type-check | `build-error-resolver` (fixes, minimal diff) | `build-error-resolver` | `project-validator-expert` |
+| Data missing or wrong with no error | `silent-failure-hunter` | the fixing agent for the area | `project-validator-expert` |
+| Browser flow broken | `e2e-runner` reproduces | the stack's UI specialist | `frontend-validator-expert` |
 
-"The stack's specialist" means whichever base agent matches the detected
+"The stack's specialist" is resolved by `bin/stack-specialist` from the detected
 stack: `nestjs-expert`, `python-expert`, `react-expert`, and so on.
 
 ## How investigation is delegated

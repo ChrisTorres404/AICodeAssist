@@ -9,23 +9,14 @@ paths:
 
 > This file extends [common/security.md](../common/security.md) with Dart, Flutter, and mobile-specific content.
 
+Worked examples: skill `dart-flutter-patterns`.
+
 ## Secrets Management
 
 - Never hardcode API keys, tokens, or credentials in Dart source
 - Use `--dart-define` or `--dart-define-from-file` for compile-time config (values are not truly secret — use a backend proxy for server-side secrets)
 - Use `flutter_dotenv` or equivalent, with `.env` files listed in `.gitignore`
 - Store runtime secrets in platform-secure storage: `flutter_secure_storage` (Keychain on iOS, EncryptedSharedPreferences on Android)
-
-```dart
-// BAD
-const apiKey = 'sk-abc123...';
-
-// GOOD — compile-time config (not secret, just configurable)
-const apiKey = String.fromEnvironment('API_KEY');
-
-// GOOD — runtime secret from secure storage
-final token = await secureStorage.read(key: 'auth_token');
-```
 
 ## Network Security
 
@@ -34,15 +25,6 @@ final token = await secureStorage.read(key: 'auth_token');
 - Set `NSAppTransportSecurity` in `Info.plist` to disallow arbitrary loads
 - Set request timeouts on all HTTP clients — never leave defaults
 - Consider certificate pinning for high-security endpoints
-
-```dart
-// Dio with timeout and HTTPS enforcement
-final dio = Dio(BaseOptions(
-  baseUrl: 'https://api.example.com',
-  connectTimeout: const Duration(seconds: 10),
-  receiveTimeout: const Duration(seconds: 30),
-));
-```
 
 ## Input Validation
 
@@ -81,16 +63,9 @@ if (uri != null && uri.host == 'myapp.com' && _allowedPaths.contains(uri.path)) 
 
 - Declare only required permissions in `AndroidManifest.xml`
 - Export Android components (`Activity`, `Service`, `BroadcastReceiver`) only when necessary; add `android:exported="false"` where not needed
+- Only the launcher activity needs `android:exported="true"`
 - Review intent filters — exported components with implicit intent filters are accessible by any app
 - Use `FLAG_SECURE` for screens displaying sensitive data (prevents screenshots)
-
-```xml
-<!-- AndroidManifest.xml — restrict exported components -->
-<activity android:name=".MainActivity" android:exported="true">
-    <!-- Only the launcher activity needs exported=true -->
-</activity>
-<activity android:name=".SensitiveActivity" android:exported="false" />
-```
 
 ## iOS-Specific
 
@@ -105,27 +80,7 @@ if (uri != null && uri.host == 'myapp.com' && _allowedPaths.contains(uri.path)) 
 - Disable JavaScript unless explicitly required (`JavaScriptMode.disabled`)
 - Validate URLs before loading — never load arbitrary URLs from deep links
 - Never expose Dart callbacks to JavaScript unless absolutely needed and carefully sandboxed
-- Use `NavigationDelegate.onNavigationRequest` to intercept and validate navigation requests
-
-```dart
-// webview_flutter v4+ API (WebViewController + WebViewWidget)
-final controller = WebViewController()
-  ..setJavaScriptMode(JavaScriptMode.disabled) // disabled unless required
-  ..setNavigationDelegate(
-    NavigationDelegate(
-      onNavigationRequest: (request) {
-        final uri = Uri.tryParse(request.url);
-        if (uri == null || uri.host != 'trusted.example.com') {
-          return NavigationDecision.prevent;
-        }
-        return NavigationDecision.navigate;
-      },
-    ),
-  );
-
-// In your widget tree:
-WebViewWidget(controller: controller)
-```
+- Use `NavigationDelegate.onNavigationRequest` to intercept and validate navigation requests, returning `NavigationDecision.prevent` for untrusted hosts
 
 ## Obfuscation and Build Security
 

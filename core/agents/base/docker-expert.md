@@ -74,9 +74,7 @@ services:
 ### Production Dockerfile Template
 
 ```dockerfile
-# [WO-XXXX] YYYY-MM-DD
-# Multi-stage build for {service}
-# Reason: Optimize image size and security
+# WO-####: Multi-stage build for {service}
 
 # BUILD STAGE
 FROM node:20-alpine AS builder
@@ -124,9 +122,7 @@ CMD ["node", "dist/main"]
 ### Development Docker Compose
 
 ```yaml
-# [WO-XXXX] YYYY-MM-DD
-# Development environment setup
-# Reason: Local development with all services
+# WO-####: Development environment setup
 
 version: '3.8'
 

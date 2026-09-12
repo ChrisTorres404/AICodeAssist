@@ -54,11 +54,11 @@
 
 ## File Creation Order
 
-1. `[path/to/foundational/file.ts]` - [Why first]
-2. `[path/to/second/file.ts]` - [Depends on 1]
-3. `[path/to/third/file.ts]` - [Depends on 1, 2]
-4. `[path/to/integration/file.ts]` - [Brings it together]
-5. `[path/to/tests/file.test.ts]` - [Verify everything]
+1. `[path/to/foundational/file]` - [Why first]
+2. `[path/to/second/file]` - [Depends on 1]
+3. `[path/to/third/file]` - [Depends on 1, 2]
+4. `[path/to/integration/file]` - [Brings it together]
+5. `[path/to/the behavioural suite]` - [Verify everything]
 
 ---
 

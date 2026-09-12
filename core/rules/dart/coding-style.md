@@ -8,6 +8,8 @@ paths:
 
 > This file extends [common/coding-style.md](../common/coding-style.md) with Dart and Flutter-specific content.
 
+Worked examples: skill `dart-flutter-patterns`.
+
 ## Formatting
 
 - **dart format** for all `.dart` files — enforced in CI (`dart format --set-exit-if-changed .`)
@@ -20,16 +22,6 @@ paths:
 - Use `const` constructors wherever all fields are `final`
 - Return unmodifiable collections from public APIs (`List.unmodifiable`, `Map.unmodifiable`)
 - Use `copyWith()` for state mutations in immutable state classes
-
-```dart
-// BAD
-var count = 0;
-List<String> items = ['a', 'b'];
-
-// GOOD
-final count = 0;
-const items = ['a', 'b'];
-```
 
 ## Naming
 
@@ -46,50 +38,11 @@ Follow Dart conventions:
 - Avoid `!` (bang operator) — prefer `?.`, `??`, `if (x != null)`, or Dart 3 pattern matching; reserve `!` only where a null value is a programming error and crashing is the right behaviour
 - Avoid `late` unless initialization is guaranteed before first use (prefer nullable or constructor init)
 - Use `required` for constructor parameters that must always be provided
-
-```dart
-// BAD — crashes at runtime if user is null
-final name = user!.name;
-
-// GOOD — null-aware operators
-final name = user?.name ?? 'Unknown';
-
-// GOOD — Dart 3 pattern matching (exhaustive, compiler-checked)
-final name = switch (user) {
-  User(:final name) => name,
-  null => 'Unknown',
-};
-
-// GOOD — early-return null guard
-String getUserName(User? user) {
-  if (user == null) return 'Unknown';
-  return user.name; // promoted to non-null after the guard
-}
-```
+- An early-return null guard promotes the variable to non-null for the rest of the function
 
 ## Sealed Types and Pattern Matching (Dart 3+)
 
-Use sealed classes to model closed state hierarchies:
-
-```dart
-sealed class AsyncState<T> {
-  const AsyncState();
-}
-
-final class Loading<T> extends AsyncState<T> {
-  const Loading();
-}
-
-final class Success<T> extends AsyncState<T> {
-  const Success(this.data);
-  final T data;
-}
-
-final class Failure<T> extends AsyncState<T> {
-  const Failure(this.error);
-  final Object error;
-}
-```
+Use sealed classes to model closed state hierarchies: a `sealed` base class with `final` subclasses carrying the per-state data (`Loading`, `Success(data)`, `Failure(error)`).
 
 Always use exhaustive `switch` with sealed types — no default/wildcard:
 
@@ -112,39 +65,12 @@ return switch (state) {
 - Use `Result`-style types or sealed classes for recoverable errors
 - Avoid using exceptions for control flow
 
-```dart
-// BAD
-try {
-  await fetchUser();
-} catch (e) {
-  log(e.toString());
-}
-
-// GOOD
-try {
-  await fetchUser();
-} on NetworkException catch (e) {
-  log('Network error: ${e.message}');
-} on NotFoundException {
-  handleNotFound();
-}
-```
-
 ## Async / Futures
 
 - Always `await` Futures or explicitly call `unawaited()` to signal intentional fire-and-forget
 - Never mark a function `async` if it never `await`s anything
 - Use `Future.wait` / `Future.any` for concurrent operations
 - Check `context.mounted` before using `BuildContext` after any `await` (Flutter 3.7+)
-
-```dart
-// BAD — ignoring Future
-fetchData(); // fire-and-forget without marking intent
-
-// GOOD
-unawaited(fetchData()); // explicit fire-and-forget
-await fetchData();      // or properly awaited
-```
 
 ## Imports
 

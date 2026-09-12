@@ -27,3 +27,11 @@
 
 Read every changed file, line by line, with one question: would a reviewer
 approve this for production right now? If not, it is not done.
+
+## Work-order header
+
+Every new file opens with one comment line in the language's own syntax:
+`WO-####: <short title>` (`// WO-0412: Rate limiting`, `# WO-0412: Rate limiting`,
+`-- WO-0412: Rate limiting`). Changed regions in existing files get no
+annotation; the commit message references the work order and git history
+carries the rest. This is the only annotation format in this pipeline.

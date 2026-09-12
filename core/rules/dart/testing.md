@@ -8,6 +8,8 @@ paths:
 
 > This file extends [common/testing.md](../common/testing.md) with Dart and Flutter-specific content.
 
+Worked examples: skill `dart-flutter-testing`.
+
 ## Test Framework
 
 - **flutter_test** / **dart:test** — built-in test runner
@@ -29,162 +31,33 @@ paths:
 
 ### BLoC with `bloc_test`
 
-```dart
-group('CartBloc', () {
-  late CartBloc bloc;
-  late MockCartRepository repository;
-
-  setUp(() {
-    repository = MockCartRepository();
-    bloc = CartBloc(repository);
-  });
-
-  tearDown(() => bloc.close());
-
-  blocTest<CartBloc, CartState>(
-    'emits updated items when CartItemAdded',
-    build: () => bloc,
-    act: (b) => b.add(CartItemAdded(testItem)),
-    expect: () => [CartState(items: [testItem])],
-  );
-
-  blocTest<CartBloc, CartState>(
-    'emits empty cart when CartCleared',
-    seed: () => CartState(items: [testItem]),
-    build: () => bloc,
-    act: (b) => b.add(CartCleared()),
-    expect: () => [const CartState()],
-  );
-});
-```
+Build the bloc in `setUp`, close it in `tearDown`, and write one `blocTest` per transition with `build`, `act` and `expect`. Use `seed` to start from an existing state.
 
 ### Riverpod with `ProviderContainer`
 
-```dart
-test('usersProvider loads users from repository', () async {
-  final container = ProviderContainer(
-    overrides: [userRepositoryProvider.overrideWithValue(FakeUserRepository())],
-  );
-  addTearDown(container.dispose);
-
-  final result = await container.read(usersProvider.future);
-  expect(result, isNotEmpty);
-});
-```
+Create a `ProviderContainer` with the repository provider overridden by a fake, register `addTearDown(container.dispose)`, then read the provider's future.
 
 ## Widget Tests
 
-```dart
-testWidgets('CartPage shows item count badge', (tester) async {
-  await tester.pumpWidget(
-    ProviderScope(
-      overrides: [
-        cartNotifierProvider.overrideWith(() => FakeCartNotifier([testItem])),
-      ],
-      child: const MaterialApp(home: CartPage()),
-    ),
-  );
-
-  await tester.pump();
-  expect(find.text('1'), findsOneWidget);
-  expect(find.byType(CartItemTile), findsOneWidget);
-});
-
-testWidgets('shows empty state when cart is empty', (tester) async {
-  await tester.pumpWidget(
-    ProviderScope(
-      overrides: [cartNotifierProvider.overrideWith(() => FakeCartNotifier([]))],
-      child: const MaterialApp(home: CartPage()),
-    ),
-  );
-
-  await tester.pump();
-  expect(find.text('Your cart is empty'), findsOneWidget);
-});
-```
+Pump the widget inside its scope (for example `ProviderScope` with overrides, wrapped in `MaterialApp`), `await tester.pump()`, then assert with `find.text` / `find.byType` and matchers such as `findsOneWidget`. Cover the populated state and the empty state.
 
 ## Fakes Over Mocks
 
-Prefer hand-written fakes for complex dependencies:
-
-```dart
-class FakeUserRepository implements UserRepository {
-  final _users = <String, User>{};
-  Object? fetchError;
-
-  @override
-  Future<User?> getById(String id) async {
-    if (fetchError != null) throw fetchError!;
-    return _users[id];
-  }
-
-  @override
-  Future<List<User>> getAll() async {
-    if (fetchError != null) throw fetchError!;
-    return _users.values.toList();
-  }
-
-  @override
-  Stream<List<User>> watchAll() => Stream.value(_users.values.toList());
-
-  @override
-  Future<void> save(User user) async {
-    _users[user.id] = user;
-  }
-
-  @override
-  Future<void> delete(String id) async {
-    _users.remove(id);
-  }
-
-  void addUser(User user) => _users[user.id] = user;
-}
-```
+Prefer hand-written fakes for complex dependencies: implement the repository interface over an in-memory map, expose a settable error field so failure paths can be exercised, and add helpers for seeding data.
 
 ## Async Testing
 
-```dart
-// Use fake_async for controlling timers and Futures
-test('debounce triggers after 300ms', () {
-  fakeAsync((async) {
-    final debouncer = Debouncer(delay: const Duration(milliseconds: 300));
-    var callCount = 0;
-    debouncer.run(() => callCount++);
-    expect(callCount, 0);
-    async.elapse(const Duration(milliseconds: 200));
-    expect(callCount, 0);
-    async.elapse(const Duration(milliseconds: 200));
-    expect(callCount, 1);
-  });
-});
-```
+Use `fake_async` for controlling timers and Futures: run the code inside `fakeAsync`, advance with `async.elapse(...)`, and assert the behaviour before and after the delay.
 
 ## Golden Tests
 
-```dart
-testWidgets('UserCard golden test', (tester) async {
-  await tester.pumpWidget(
-    MaterialApp(home: UserCard(user: testUser)),
-  );
-
-  await expectLater(
-    find.byType(UserCard),
-    matchesGoldenFile('goldens/user_card.png'),
-  );
-});
-```
+Pump the widget and assert with `expectLater(find.byType(...), matchesGoldenFile('goldens/....png'))`.
 
 Run `flutter test --update-goldens` when intentional visual changes are made.
 
 ## Test Naming
 
-Use descriptive, behavior-focused names:
-
-```dart
-test('returns null when user does not exist', () { ... });
-test('throws NotFoundException when id is empty string', () { ... });
-testWidgets('disables submit button while form is invalid', (tester) async { ... });
-```
+Use descriptive, behavior-focused names that state the expected outcome and the condition — `returns null when user does not exist`, `throws NotFoundException when id is empty string`, `disables submit button while form is invalid`.
 
 ## Test Organization
 

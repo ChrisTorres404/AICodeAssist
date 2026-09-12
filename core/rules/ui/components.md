@@ -24,14 +24,10 @@ paths:
 - **Every new file carries the work-order header:**
 
 ```typescript
-/**
- * WO-####: [Work Order Title]
- * DATE: YYYY-MM-DD
- * WHAT: [What changed]
- * WHY: [Reason]
- * IMPACT: [Impact]
- */
+// WO-####: <short title>
 ```
+
+One line, first in the file, on new files only; see the coding-style rule.
 
 ## Consistency the design system owns
 

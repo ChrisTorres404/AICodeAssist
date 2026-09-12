@@ -17,10 +17,12 @@ not edit.
 
 Method, in order:
 
-1. **Assess before touching anything.** Run the suite, capture the output,
-   categorize every failure: TypeScript, database, HTTP, auth, other.
-2. **Verify against the real database** before assuming a column, table, or
-   enum. Never fix a test to match an assumption.
+1. **Assess before touching anything.** Run the suite, capture the output to a
+   file as the baseline, and categorize every failure: build or type errors,
+   schema mismatches, wrong status codes or response shapes, authentication,
+   timeouts, other.
+2. **Verify against the real system** before assuming a column, table, field,
+   or enum value exists. Never fix a test to match an assumption.
 3. **Fix critical blockers first**, then one category at a time. Re-run after
    each fix. Record before and after counts.
 4. **Fix the implementation, not the test**, unless the test is provably wrong.

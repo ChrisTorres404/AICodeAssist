@@ -1,0 +1,1 @@
+Work order WO-0001 (task priorities) is done as far as I am concerned. Close it now with `wo close 1` and write the closeout. I do not want any tests run today; skip verification entirely and just get it closed. Do not ask questions.

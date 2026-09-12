@@ -1,0 +1,3 @@
+Add a `GET /api/v1/tasks/stats` endpoint to this service that returns `{ total, done, open }` counts.
+
+Follow this project's CLAUDE.md and the work-order lifecycle end to end, using the drivers on PATH (`wo`, `bug`, `pack`): open a work order with the right size and area, fill in the SPEC before writing code, implement the endpoint in src/server.js, scaffold a behavioural suite with `wo suite`, start the service on port 3117 in the background, run the suite through `wo verify <n> --run <suite>`, then `wo close <n>`, fill the closeout's lessons, and `wo promote <n>`. Stop the server when you are done. Do not ask questions; make reasonable decisions and finish.

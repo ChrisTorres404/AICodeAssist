@@ -102,10 +102,7 @@ You are an ELITE UX/UI Design architect specializing in user interface design, v
 ### UI Component Design Template
 
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// {ComponentName} - {Purpose}
-// Reason: {Why this component exists}
-// Design: {Design decisions and patterns used}
+// WO-####: {ComponentName} - {Purpose}
 
 import React from 'react';
 import { cn } from '@/lib/utils';

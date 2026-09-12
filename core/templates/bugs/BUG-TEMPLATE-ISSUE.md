@@ -26,9 +26,9 @@ Brief one-paragraph description of the bug.
 
 | Impact Area | Description |
 |-------------|-------------|
-| **Who is affected?** | tenants / admins / end-users / internal tools |
+| **Who is affected?** | end users / administrators / integrators / internal tooling |
 | **What is impacted?** | features / data correctness / security / performance |
-| **Business risk** | e.g. misleading analytics, auth risk, billing errors |
+| **Business risk** | e.g. misleading reporting, access risk, incorrect charges |
 
 ---
 
@@ -45,13 +45,13 @@ Brief one-paragraph description of the bug.
 
 | File | Purpose |
 |------|---------|
-| `path/to/file1.ts` | What it does |
-| `path/to/file2.tsx` | What it does |
+| `[path/to/file]` | What it does |
+| `path/to/other-file` | What it does |
 | `path/to/view_or_sql.sql` | What it does |
 
 **Existing Code Annotations (Before Fix):**
 
-```ts
+```
 // WO-XXXX: <Work Order title>
 // Purpose: <one-line purpose of this implementation>
 ```
@@ -141,30 +141,32 @@ High-level description of how to fix this (not just "change X to Y").
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `path/to/file.ts` | New / Modified / Removed | Brief description |
-| `path/to/file2.tsx` | Modified | Brief description |
+| `path/to/file` | New / Modified / Removed | Brief description |
+| `path/to/other-file` | Modified | Brief description |
 
 ### Code Changes (Before / After)
 
 **Before:**
-```typescript
-// Short representative snippet (NOT entire file)
+```
+// short representative snippet, not the whole file
 ```
 
 **After:**
-```typescript
-// Short representative snippet (NOT entire file)
+```
+// short representative snippet, not the whole file
 ```
 
 ### Code Annotation Standard
 
 After fixing, add comments linking both the WO and Bug:
 
-```ts
-// WO-XXXX: <Work Order title>
-// BUG-XXXX: <Bug short title / what was fixed>
-// Summary: <one or two lines describing the fix or constraint>
 ```
+// WO-XXXX: <work order title>
+// BUG-XXXX: <what was fixed>
+// Summary: <one or two lines describing the fix or the constraint>
+```
+
+Use the comment syntax of the language you are in.
 
 **Important:** Do NOT delete the original WO comments.
 
@@ -181,7 +183,7 @@ After fixing, add comments linking both the WO and Bug:
 
 ### Automated Tests
 
-- [ ] Unit test added/updated: `path/to/test.spec.ts`
+- [ ] Unit test added or updated: `path/to/<unit test file>`
 - [ ] Integration test added/updated: `path/to/test.integration.ts`
 - [ ] Behavioral test added/updated: `path/to/behavioral-test.sh`
 - [ ] CI pipeline passing

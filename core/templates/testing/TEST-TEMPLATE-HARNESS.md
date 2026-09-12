@@ -12,9 +12,9 @@
 **Purpose:** [Describe what this test harness validates]
 
 **Prerequisites:**
-- API server running at `http://localhost:3001`
-- Database accessible via `psql -d {{PROJECT_NAME}}Dev`
-- Test user account created
+- The application is running and reachable at `{{API_BASE_URL}}`
+- The data store is reachable with the project's database client
+- Test accounts or fixtures exist, created by the project's own seed path
 - [Any other prerequisites]
 
 **Related Work Order:** [Link to WO-XXXX spec/folder]
@@ -37,18 +37,18 @@
 ### Start Services
 
 ```bash
-# Start API server
-cd apps/{{API_APP}} && npm run start:dev
+# Start the application with the project's own run command
+# (recorded in the project CLAUDE.md)
 
-# Verify API is running
-curl -s http://localhost:3001/health | jq
+# Verify it is answering
+curl -s {{API_BASE_URL}}/health | jq
 ```
 
 ### Create Test Data
 
 ```bash
-# Create test user
-curl -X POST http://localhost:3001/api/v1/auth/register \
+# Create a test account
+curl -X POST {{API_BASE_URL}}/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test-wo-XXXX@example.com",
@@ -72,7 +72,7 @@ curl -X POST http://localhost:3001/api/v1/auth/register \
 
 **HTTP Request:**
 ```bash
-curl -X [METHOD] http://localhost:3001/api/v1/[endpoint] \
+curl -X [METHOD] {{API_BASE_URL}}/[endpoint] \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer [TOKEN]" \
   -d '{
@@ -90,7 +90,7 @@ curl -X [METHOD] http://localhost:3001/api/v1/[endpoint] \
 
 **Expected HTTP Status:** [200/201/400/401/etc.]
 
-**SQL Verification (if applicable):**
+**State Verification (if applicable):**
 ```sql
 SELECT column1, column2
 FROM schema.table
@@ -114,7 +114,7 @@ WHERE condition;
 
 **HTTP Request:**
 ```bash
-curl -X [METHOD] http://localhost:3001/api/v1/[endpoint] \
+curl -X [METHOD] {{API_BASE_URL}}/[endpoint] \
   -H "Content-Type: application/json" \
   -d '{
     "key": "value"
@@ -149,7 +149,7 @@ curl -X [METHOD] http://localhost:3001/api/v1/[endpoint] \
 
 **HTTP Request:**
 ```bash
-curl -X [METHOD] http://localhost:3001/api/v1/[endpoint] \
+curl -X [METHOD] {{API_BASE_URL}}/[endpoint] \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -161,13 +161,13 @@ curl -X [METHOD] http://localhost:3001/api/v1/[endpoint] \
 
 **Expected HTTP Status:** [200]
 
-**SQL Verification:**
+**State Verification:**
 ```sql
 -- Verify database state
 SELECT * FROM schema.table WHERE id = [ID];
 ```
 
-**Expected SQL Output:**
+**Expected Output:**
 ```
  column1 | column2
 ---------+---------
@@ -195,13 +195,18 @@ SELECT * FROM schema.table WHERE id = [ID];
 
 ## Execution Instructions
 
-1. **Copy all curl commands** to a terminal
-2. **Execute each test** in order
-3. **Capture actual output** and paste into Evidence section
-4. **Update status** for each test:
-   - `EXECUTED — PASS` if actual matches expected
-   - `EXECUTED — FAIL` if actual differs from expected
-5. **Update Summary** counts
+1. **Copy each command** to a terminal
+2. **Execute the tests** in order
+3. **Capture the actual output** and paste it into the Evidence section
+4. **Set the status** for each test from what actually happened:
+   - `EXECUTED — PASS` if the actual result matches the expected one
+   - `EXECUTED — FAIL` if it differs
+   - `NOT EXECUTED — SKIP` with the environmental reason, if a prerequisite
+     is not configured
+5. **Update the Summary** counts
+
+Never set a status from expectation. If a test was not run, it stays
+`NOT EXECUTED — PLAN ONLY`.
 
 ---
 

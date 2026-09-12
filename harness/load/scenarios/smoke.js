@@ -1,22 +1,30 @@
-// WO-50000 Scenario 0: Smoke. Validates the harness itself — auth, fixtures, endpoints —
-// before any real load. 5 VUs for 1 min. Must be green before running scenarios 1-5.
+// Scenario 0: Smoke. Validates the harness itself — base URL, auth, endpoint
+// mix — before any real load. Small and short on purpose: if this is not green,
+// every number from the other scenarios is noise.
+//
+//   k6 run scenarios/smoke.js
 
-import http from 'k6/http';
-import { check } from 'k6';
-import { login, authHeaders, pickUser, API_BASE } from '../lib/common.js';
-import { vu, iteration } from 'k6/execution';
+import { check, sleep } from 'k6';
+import { endpoints, callEndpoint, tokenFor, AUTH_MODE } from '../lib/common.js';
 
 export const options = {
-  vus: 5,
-  duration: '1m',
+  vus: Number(__ENV.SMOKE_VUS || 5),
+  duration: __ENV.SMOKE_DURATION || '1m',
   thresholds: { http_req_failed: ['rate<0.01'] },
 };
 
 export default function () {
-  const user = pickUser(vu.idInTest, iteration);
-  const token = login(user);
-  check(token, { 'got token': (t) => !!t });
-  if (!token) return;
-  const me = http.get(`${API_BASE}/me`, { headers: authHeaders(token), tags: { name: 'me' } });
-  check(me, { 'me 200': (r) => r.status === 200 });
+  const token = tokenFor();
+  if (AUTH_MODE === 'login') {
+    check(token, { 'got token': (t) => !!t });
+    if (!token) return;
+  }
+
+  // One request per configured endpoint, so a misconfigured path shows up here
+  // rather than halfway through a capacity run.
+  for (const ep of endpoints) {
+    const res = callEndpoint(ep, token);
+    check(res, { [`${ep.name} 2xx/3xx`]: (r) => r.status >= 200 && r.status < 400 });
+  }
+  sleep(1);
 }

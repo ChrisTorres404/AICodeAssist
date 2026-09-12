@@ -79,9 +79,7 @@ tests/e2e/
 ### E2E Test Template
 
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// E2E tests for {feature}
-// Reason: Ensure feature works end-to-end
+// WO-####: E2E tests for {feature}
 
 describe('{Feature} E2E', () => {
   let app: INestApplication;
@@ -351,4 +349,4 @@ npm run test:e2e -- auth
 - [Jest Documentation](https://jestjs.io)
 - [NestJS Testing Guide](https://docs.nestjs.com/fundamentals/testing)
 - [Testing Library](https://testing-library.com)
-- [Example Tests](apps/api-server/test/e2e/)
+- The project's existing end-to-end tests, as the pattern to match

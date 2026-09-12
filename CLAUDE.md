@@ -21,10 +21,10 @@ placeholders that `bin/install.sh` resolves per project.
 Before committing any change to `core/` or `harness/`:
 
 ```bash
-grep -rniE "/Users/|monorepo" core harness bin/dev   # plus the name of any project it came from
+bin/lint && for d in core harness bin docs; do bin/sanitize "$d" --quiet; done   # 0 errors; no critical findings
+bin/maintenance/portability-check.sh                                             # nothing that runs on only one OS
 ```
 
-This must return nothing. (`bin/portability-pass.sh` legitimately contains
 those strings — it is the substitution table. Exclude it.)
 
 ---
@@ -136,21 +136,39 @@ run. Project-specific rules go in `core/agents/overlays/`.
 
 Claude Code selects a subagent from its `description` field alone. It does not
 read file patterns, contexts, or trigger lists — an earlier tool did, and the
-fleet still carried those sections until `bin/agent-normalize.sh` stripped them.
+fleet still carried those sections until `bin/maintenance/agent-normalize.sh` stripped them.
 When adding an agent, put the dispatch signal in `description`: what it does
-**and when to use it**. Run `bin/agent-normalize.sh` after editing the fleet;
+**and when to use it**. Run `bin/maintenance/agent-normalize.sh` after editing the fleet;
 it is idempotent.
 
 ---
 
 ## Shell portability
 
-The drivers and installer target **bash on macOS (BSD userland)** and Linux.
+The drivers, hooks, and harness target **bash 3.2 with a BSD userland (macOS)**
+and **bash 5 with GNU coreutils (Linux)**, and must behave identically on both.
+`.github/workflows/ci.yml` runs every check on `ubuntu-latest` and
+`macos-latest` on every push and pull request, so a one-sided construct fails
+the build rather than someone else's machine.
 
-- BSD `sed` does not support `\+`, `\?`, or `\|`. Use `[x][x]*` forms.
+- BSD `sed` does not support `\s`, `\b`, `\+`, `\?`, or `\|`. Use POSIX classes
+  (`[[:space:]]`) and `[x][x]*` forms. `sed -i` differs on each side entirely —
+  use `perl -pi -e`.
+- macOS ships **bash 3.2**: no `declare -A`, no `mapfile`/`readarray`, no
+  `${var,,}`.
+- `date` and `stat` flags are disjoint. Do date arithmetic in `python3` rather
+  than chaining `||` fallbacks.
+- `timeout`, `realpath`, `nproc`, `sha256sum` and `getopt` are not on a stock
+  macOS; `xargs -r`, `grep -P` and `find -printf` are GNU only.
 - `set -euo pipefail` plus a `grep` that matches nothing kills the script.
   Wrap non-matching greps: `{ grep ... || true; }`.
-- Run `bash -n` on every script you touch.
+- Run `bash -n` on every script you touch, then
+  `bin/maintenance/portability-check.sh`. It greps every shell script in the
+  tree for these constructs and fails if one reappears; `--list` prints the
+  rules. A construct that is genuinely guarded — a GNU form with a BSD fallback
+  on the next line — carries `# portability-ok: <rule-id>` on its line.
+- `bin/dev/dev-toggle.sh` is the one deliberate exception, documented as
+  macOS-only at the top of the file.
 
 ---
 

@@ -48,4 +48,4 @@ bundle exec rspec spec/models/user_spec.rb
 
 ## Reference
 
-See skill: `tdd-workflow` for the repo-wide RED -> GREEN -> REFACTOR loop.
+See skill: `test-first` for the repo-wide RED -> GREEN -> REFACTOR loop.

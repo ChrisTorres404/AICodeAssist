@@ -1,594 +1,148 @@
-# Test Fixing System - Complete Documentation Index
+# The Test-Fixing System
 
-**Created:** 2025-11-14
-**Status:** Production Ready
-**Proven Results:** +2.9% pass rate improvement in 90 minutes ({{PROJECT_NAME}})
+A systematic method for recovering a test suite that is failing at scale,
+together with the command that starts it and the delegation templates it uses.
 
----
-
-## Overview
-
-A complete systematic test-fixing system with slash command, system instructions, agent templates, and proven methodology.
-
-**Key Benefits:**
-- 2-5% pass rate improvement per 90-minute session
-- Database-first verification (prevents assumptions)
-- Agent-driven investigation (saves 95+ minutes per session)
-- Conservative approach (fix → verify → measure → repeat)
-- Complete documentation with metrics
+It exists because the naive approach does not converge: read a failure, guess,
+change something, run everything again, watch a different set of tests break.
+The method replaces guessing with verification and replaces whole-suite churn
+with measured increments.
 
 ---
 
-## Files Created
+## What It Is
 
-### Core System Files
+| File | What it is | Who reads it |
+|---|---|---|
+| `{{PIPELINE_ROOT}}/core/commands/fix-tests.md` | The `/fix-tests` slash command | The user types it |
+| `{{PIPELINE_ROOT}}/core/instructions/03-e2e-test-fix-rules.md` | The authoritative method: five phases, the rules, the checklists | Loaded by the command |
+| `{{PIPELINE_ROOT}}/core/instructions/04-test-fixing-agent-prompts.md` | Delegation templates for the investigation phase | Loaded by the command; used in phase 4 |
+| `{{PIPELINE_ROOT}}/core/instructions/README-TEST-FIXING-SYSTEM.md` | This index | Anyone learning the system |
 
-#### 1. Slash Command
-**File:** `.claude/commands/fix-tests.md`
-**Purpose:** Entry point - type `/fixTests` to start
-**Type:** Command Definition
-**Size:** ~50 lines
-
-**What it does:**
-- References the detailed system instructions
-- Provides workflow overview
-- Ensures Claude follows the methodology
-
-**How to use:**
-```
-/fixTests
-```
+The command loads the `behavioral-testing` skill and both instruction files,
+so nothing has to be pasted by hand.
 
 ---
 
-#### 2. System Instructions
-**File:** `{{WORKSPACE_DIR}}/SystemInstructions/03-fix-tests-rules.md`
-**Purpose:** Complete methodology with exact rules to follow
-**Type:** Authoritative Instructions
-**Size:** ~1000 lines
+## How to Run It
 
-**What it contains:**
-- 5-phase systematic approach
-- Database verification patterns
-- Agent usage strategy
-- Progressive fix methodology
-- Verification checklist
-- Success metrics
-- Quick reference commands
+```
+/fix-tests [suite or path]
+```
 
-**When it's used:**
-- Automatically when `/fixTests` is invoked
-- Claude reads this as authoritative rules
+With no argument it runs the critical suite first and starts from its failures.
+
+The session then moves through five phases:
+
+| Phase | What happens |
+|---|---|
+| 1. Assessment | Read the context, capture a baseline run, check the infrastructure, categorize every failure. Change nothing. |
+| 2. Blockers | Build and type errors, then the schema mismatches that stop the system initializing. Verify names against the live system before editing. |
+| 3. Systematic search | Find every instance of each shared root cause in one pass, verify each, fix them together. |
+| 4. Delegated investigation | Escalate what is left: context, then active debugging, then infrastructure. Investigators return `file:line`; they do not edit. |
+| 5. Validation | Re-run, compare against the baseline, document the delta honestly. |
+
+The agent proposes a plan at the end of phase 1 and waits for approval before
+changing anything.
 
 ---
 
-#### 3. Agent Prompt Library
-**File:** `{{WORKSPACE_DIR}}/SystemInstructions/test-fixing-agent-prompts.md`
-**Purpose:** Ready-to-use templates for 3 agent types
-**Type:** Prompt Templates
-**Size:** ~600 lines
+## Why It Works
 
-**What it contains:**
-- Explore Agent templates (documentation search)
-- Support Engineer Agent templates (debugging)
-- Database Validator Agent templates (infrastructure)
-- Usage guidelines
-- Best practices
-- Copy-paste ready prompts
+**A baseline first.** Without two captured runs there is no delta, only an
+impression. Every session starts and ends with a full run written to a file.
 
-**How to use:**
-```
-1. Identify the problem
-2. Choose appropriate template
-3. Customize placeholders
-4. Ask Claude to launch agent
-5. Review findings
-6. Apply fixes
-```
+**Verification before assumption.** The live schema is the fact; the model is
+the claim. Most large-scale failures come from the two having drifted apart,
+and no amount of reading the code reveals which side is wrong.
+
+**Shared root causes.** Forty failures rarely have forty causes. Categorizing
+before fixing turns an endless queue into three or four pieces of work.
+
+**Delegated investigation.** Specialists return `file:line` faster than a
+manual search, and the escalation order — context, then debugging, then
+infrastructure — resolves most failures at the step people skip.
+
+**Honest measurement.** `NOT EXECUTED — PLAN ONLY` is an acceptable status. A
+false `PASS` is not: every decision made after it is made on a lie.
 
 ---
 
-#### 4. Quick Start Guide
-**File:** `{{DOCS_DIR}}/TEST-FIXING-QUICK-START.md`
-**Purpose:** Step-by-step guide for getting started
-**Type:** User Guide
-**Size:** ~800 lines
+## What It Produces
 
-**What it contains:**
-- How to use the system
-- Expected results per session
-- Critical rules to remember
-- Common issues & solutions
-- Customization guide
-- Success stories
-- FAQ
+Under `{{SESSIONS_DIR}}/active/`:
 
-**For:** Users new to the system
+| Document | Contents |
+|---|---|
+| `<date>-test-fixing-session.md` | Every fix with `file:line`, before and after numbers, what each delegated agent found |
+| `<date>-remaining-issues.md` | The unfixed failures, still categorized, with estimates and a priority order |
+| `<date>-schema-verification.md` | Everything verified against the live system, including discrepancies left unfixed |
+
+If the work belongs to a work order, the same evidence goes into its
+VERIFICATION document through `wo verify --run`, which writes the status from
+the suite's exit code. Nobody types `PASS`.
 
 ---
 
-### Reference Documentation
+## Working With the Rest of the Pipeline
 
-#### 5. Reusable Prompt Template
-**File:** `{{DOCS_DIR}}/REUSABLE-PROMPT-TEST-FIXING.md`
-**Purpose:** Original comprehensive prompt template
-**Type:** Reference Template
-**Size:** ~750 lines
+**With a work order.** Open one for the recovery effort
+(`wo new "<title>" --area testing`), run `/fix-tests` inside it, and close it
+with `wo verify --run` and `wo close`. The closeout rests on the two captured
+runs.
 
-**What it contains:**
-- Complete prompt template
-- All 5 phases in detail
-- Agent prompt templates
-- Verification checklist
-- Anti-patterns to avoid
-- Cheat sheet for common mappings
+**With a session handoff.** `/next-session` writes the handoff from the session
+documents above: fixes applied, current numbers, remaining issues, next steps.
+The next session reads it in phase 1 and continues from there.
 
-**Use case:** Manual prompting or customization
+**With the packs.** `pack search "<symptom>"` before investigating. A failure
+class that has been diagnosed once is usually recorded with the fix and the
+pitfall that caused it.
 
 ---
 
-#### 6. Systematic Methodology
-**File:** `{{DOCS_DIR}}/SYSTEMATIC-TEST-FIXING-METHODOLOGY.md`
-**Purpose:** Detailed case study and proven methodology
-**Type:** Case Study / Methodology
-**Size:** ~830 lines
+## Adapting It to This Project
 
-**What it contains:**
-- Complete session walkthrough
-- Key success factors
-- Agent workflow examples
-- Reusable patterns
-- Lessons learned
-- Metrics & ROI
-- Reproduction steps
+The method is language- and framework-neutral. Two things make it concrete:
 
-**Use case:** Understanding the methodology, learning from real session
-
----
-
-## System Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    User Types                       │
-│                     /fixTests                       │
-└───────────────────┬─────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────┐
-│          .claude/commands/fix-tests.md              │
-│      (Tells Claude to read instructions)            │
-└───────────────────┬─────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────┐
-│    {{WORKSPACE_DIR}}/SystemInstructions/                 │
-│         03-fix-tests-rules.md                       │
-│    (Authoritative methodology - 1000 lines)         │
-└───────────────────┬─────────────────────────────────┘
-                    │
-        ┌───────────┼───────────┐
-        ▼           ▼           ▼
-    Phase 1     Phase 2     Phase 3
-   Assessment  Blockers    Systematic
-                            Search
-        │           │           │
-        └───────────┼───────────┘
-                    ▼
-            ┌───────────────┐
-            │   Phase 4     │
-            │ Agent-Driven  │◄────────────────┐
-            │ Investigation │                 │
-            └───────┬───────┘                 │
-                    │                         │
-                    ▼                         │
-    ┌───────────────────────────────┐        │
-    │   Agent Prompt Library        │        │
-    │test-fixing-agent-prompts.md   │────────┘
-    │  - Explore Agent              │
-    │  - Support Engineer           │
-    │  - Database Validator         │
-    └───────────────┬───────────────┘
-                    │
-                    ▼
-            ┌───────────────┐
-            │   Phase 5     │
-            │  Validation   │
-            │  & Metrics    │
-            └───────┬───────┘
-                    │
-                    ▼
-        ┌───────────────────────┐
-        │  Session Documents    │
-        │  - Fixes applied      │
-        │  - Metrics            │
-        │  - Remaining issues   │
-        │  - Next session       │
-        └───────────────────────┘
-```
-
----
-
-## Quick Start
-
-### 1. Verify Installation
-
-```bash
-# Check slash command exists
-ls -la .claude/commands/fix-tests.md
-
-# Check system instructions exist
-ls -la {{WORKSPACE_DIR}}/SystemInstructions/03-fix-tests-rules.md
-
-# Check agent templates exist
-ls -la {{WORKSPACE_DIR}}/SystemInstructions/test-fixing-agent-prompts.md
-
-# Check quick start guide exists
-ls -la {{DOCS_DIR}}/TEST-FIXING-QUICK-START.md
-```
-
-### 2. First Time Setup
-
-Read the Quick Start Guide:
-```bash
-cat {{DOCS_DIR}}/TEST-FIXING-QUICK-START.md
-```
-
-Customize placeholders in agent templates:
-```bash
-# Edit this file and replace [ProjectName], [DatabaseName], etc.
-vim {{WORKSPACE_DIR}}/SystemInstructions/test-fixing-agent-prompts.md
-```
-
-### 3. Run Your First Session
-
-```bash
-# Step 1: Get baseline metrics
-npm run test:e2e -- --maxWorkers=4 --forceExit 2>&1 | tee /tmp/baseline.txt
-
-# Step 2: Start fixTests in Claude
-# Type: /fixTests
-
-# Step 3: Follow the 5 phases
-# Claude will guide you through each step
-
-# Step 4: Review results
-grep -E "Test Suites:|Tests:" /tmp/fulltest-after-fixes.txt
-```
-
----
-
-## Workflow Comparison
-
-### Before (Manual Approach)
-```
-1. Run tests → see failures
-2. Guess what's wrong
-3. Make changes hoping they work
-4. Run tests again
-5. More failures appear
-6. Repeat endlessly
-7. No improvement tracking
-8. Waste 3+ hours
-```
-
-**Result:** Frustration, no measurable progress
-
-### After (Systematic Approach)
-```
-1. /fixTests
-2. Phase 1: Assess (10 min)
-   - Understand context
-   - Categorize failures
-3. Phase 2: Fix blockers (20 min)
-   - TypeScript errors
-   - Database mismatches
-   - Verify with small tests
-4. Phase 3: Systematic search (30 min)
-   - Find all snake_case
-   - Verify against DB
-   - Fix all mismatches
-5. Phase 4: Agent investigation (20 min)
-   - Use agents for complex issues
-   - Apply fixes
-6. Phase 5: Validation (10 min)
-   - Measure improvement
-   - Document results
-```
-
-**Result:** +2-5% improvement, documented fixes, clear next steps
-
----
-
-## File Usage Guide
-
-### When to Use Each File
-
-| File | When to Use | Who Uses It |
-|------|-------------|-------------|
-| `fix-tests.md` | Starting a session | User (types `/fixTests`) |
-| `03-fix-tests-rules.md` | Automatically used | Claude (reads automatically) |
-| `test-fixing-agent-prompts.md` | During Phase 4 | Claude + User (selecting templates) |
-| `TEST-FIXING-QUICK-START.md` | First time using system | User (learning) |
-| `REUSABLE-PROMPT-TEST-FIXING.md` | Manual prompting | User (advanced use) |
-| `SYSTEMATIC-TEST-FIXING-METHODOLOGY.md` | Understanding methodology | User (learning from case study) |
-
----
-
-## Integration with Other Commands
-
-### Works With `/nextSession`
-
-```bash
-# After test fixing session
-User: nextSession
-
-# Creates handoff document with:
-- All fixes applied
-- Current pass rate
-- Remaining issues
-- Next steps
-
-# Next session:
-User: [Paste handoff]
-User: /fixTests
-# Continues where you left off
-```
-
-### Works With `/wo`
-
-```bash
-# Create work order for test fixing effort
-User: Create a work order for comprehensive test suite fixing
-
-# During execution
-User: /fixTests
-# Tracks progress
-
-# When done
-User: Update WO-#### status to completed
-```
-
----
-
-## Customization Guide
-
-### For Your Project
-
-1. **Update Agent Templates:**
-   ```bash
-   vim {{WORKSPACE_DIR}}/SystemInstructions/test-fixing-agent-prompts.md
-   ```
-   Replace:
-   - `[ProjectName]` → Your project name
-   - `[DatabaseDev]` → Your dev database
-   - `[DatabaseTest]` → Your test database
-   - `[email] / [password]` → Test credentials
-
-2. **Update Column Mappings:**
-   Add your project's specific column mappings to:
-   - `03-fix-tests-rules.md` (section 7)
-   - `test-fixing-agent-prompts.md` (examples)
-
-3. **Adjust Phases:**
-   If needed, modify phase timings in:
-   - `03-fix-tests-rules.md` (sections 3.1-3.5)
-
-### For Different Test Types
-
-**Unit Tests:**
-- Skip database verification (Phase 2.6)
-- Focus on TypeScript errors and imports
-- Reduce agent usage
-
-**Integration Tests:**
-- Keep all phases
-- Increase Phase 4 time for complex debugging
-- Add API contract verification
-
-**E2E Tests (Current):**
-- Use all phases as-is
-- Focus heavily on database verification
-- Use all three agent types
-
----
-
-## Success Metrics
-
-### Per Session (90 minutes)
-- ✅ +2-5% pass rate improvement
-- ✅ Critical blockers resolved
-- ✅ Database schema verified
-- ✅ 1-2 agents used successfully
-- ✅ All fixes documented
-
-### Project Complete (4-6 sessions)
-- ✅ 70%+ pass rate
-- ✅ All critical endpoints tested
-- ✅ Database 100% aligned with code
-- ✅ No snake_case in active code
-- ✅ All modules registered
+1. **The project's own commands** — test, build, type-check, migrate, database
+   client. These live in the project `CLAUDE.md`, filled in at install time by
+   stack detection. The instructions reference them, never a specific tool.
+2. **Recurring patterns worth recording.** When a session uncovers a mismatch
+   class specific to this codebase — a naming convention, a field that is
+   always wrong in the same way — record it in an agent overlay under
+   `{{PIPELINE_ROOT}}/core/agents/overlays/`, so the next session starts
+   knowing it. Overlays survive reinstalls; edits to the instruction files do
+   not.
 
 ---
 
 ## Troubleshooting
 
-### Command Not Working
+**The command does nothing.** Confirm `/fix-tests` is installed and that both
+instruction files are present:
 
-**Symptom:** `/fixTests` doesn't trigger system
-
-**Check:**
 ```bash
-# Verify file exists
-cat .claude/commands/fix-tests.md
-
-# Verify system instructions exist
-cat {{WORKSPACE_DIR}}/SystemInstructions/03-fix-tests-rules.md
-
-# Verify proper reference in command file
-grep "03-fix-tests-rules.md" .claude/commands/fix-tests.md
+ls {{PIPELINE_ROOT}}/core/commands/fix-tests.md
+ls {{PIPELINE_ROOT}}/core/instructions/03-e2e-test-fix-rules.md
+ls {{PIPELINE_ROOT}}/core/instructions/04-test-fixing-agent-prompts.md
 ```
 
-### Agents Not Helping
+**A delegation comes back vague.** The prompt was vague. Use a template from
+the library, name specific files, quote the error verbatim, say what you have
+already ruled out, and ask for `file:line` explicitly.
 
-**Symptom:** Agent returns vague or "not found" results
-
-**Solutions:**
-1. Use more specific prompts from templates
-2. Provide exact file paths
-3. Include database names and credentials
-4. Ask for file:line references explicitly
-
-### No Improvement
-
-**Symptom:** Pass rate not improving
-
-**Check:**
-1. Testing against correct database?
-2. Fixes actually applied? (`git diff`)
-3. Running correct test suite?
-4. Database and code both updated?
+**Nothing improves.** Check, in this order: are you running against the
+environment you think you are; were the fixes actually applied (`git diff`);
+is this the suite that was failing; and did the system pick up the change, or
+is a stale process still serving the old build?
 
 ---
 
 ## Maintenance
 
-### Weekly
-- Review session documents
-- Update column mapping reference
-- Document new patterns discovered
-
-### Monthly
-- Update agent templates with new patterns
-- Refine time estimates based on experience
-- Update success metrics
-
-### After Major Changes
-- Re-verify database schema
-- Update entity-database mappings
-- Run full test suite
-- Document new conventions
-
----
-
-## Support
-
-### Getting Help
-
-1. **Read Quick Start:**
-   ```bash
-   cat {{DOCS_DIR}}/TEST-FIXING-QUICK-START.md
-   ```
-
-2. **Review Methodology:**
-   ```bash
-   cat {{DOCS_DIR}}/SYSTEMATIC-TEST-FIXING-METHODOLOGY.md
-   ```
-
-3. **Check Agent Templates:**
-   ```bash
-   cat {{WORKSPACE_DIR}}/SystemInstructions/test-fixing-agent-prompts.md
-   ```
-
-### Common Questions
-
-**Q: How do I start?**
-A: Type `/fixTests` and follow Claude's guidance
-
-**Q: Which agent should I use?**
-A: Check `test-fixing-agent-prompts.md` for decision tree
-
-**Q: How long will it take?**
-A: 4-6 sessions (6-9 hours) to reach 70% pass rate
-
-**Q: Can I customize it?**
-A: Yes, update the templates with your project values
-
----
-
-## Version History
-
-### Version 1.0 (2025-11-14)
-- Initial release
-- Proven on {{PROJECT_NAME}} (+2.9% in 90min)
-- 6 files created
-- Complete documentation
-- Agent integration
-- Ready for production use
-
----
-
-## Next Steps
-
-### For First-Time Users
-
-1. ✅ Read `TEST-FIXING-QUICK-START.md`
-2. ✅ Customize agent templates
-3. ✅ Run baseline test suite
-4. ✅ Type `/fixTests`
-5. ✅ Follow the 5 phases
-6. ✅ Document results
-
-### For Experienced Users
-
-1. ✅ Type `/fixTests`
-2. ✅ Use agents proactively
-3. ✅ Track metrics session-to-session
-4. ✅ Refine templates based on experience
-5. ✅ Share learnings with team
-
-### For Advanced Customization
-
-1. ✅ Modify phase timings in `03-fix-tests-rules.md`
-2. ✅ Add project-specific patterns to agent templates
-3. ✅ Create custom verification scripts
-4. ✅ Integrate with CI/CD pipeline
-5. ✅ Automate pre-flight checks
-
----
-
-## File Locations Summary
-
-```
-{{PROJECT_ROOT}}/
-├── .claude/
-│   └── commands/
-│       └── fix-tests.md                          [Slash Command]
-│
-├── {{WORKSPACE_DIR}}/
-│   ├── SystemInstructions/
-│   │   ├── 03-fix-tests-rules.md                 [System Instructions - 1000 lines]
-│   │   ├── test-fixing-agent-prompts.md          [Agent Templates - 600 lines]
-│   │   └── README-TEST-FIXING-SYSTEM.md          [This File - Index]
-│   │
-│   └── Docs/
-│       ├── TEST-FIXING-QUICK-START.md            [Quick Start Guide - 800 lines]
-│       ├── REUSABLE-PROMPT-TEST-FIXING.md        [Template Reference - 750 lines]
-│       └── SYSTEMATIC-TEST-FIXING-METHODOLOGY.md [Case Study - 830 lines]
-```
-
-**Total:** 6 files, ~4,800 lines of documentation
-
----
-
-## Credits
-
-**Created:** 2025-11-14
-**Based On:** {{PROJECT_NAME}} test fixing session (90 min, +2.9% improvement)
-**Methodology:** Conservative, database-first, agent-driven approach
-**Proven:** Yes (1408 test suite, 18.8% → 20.7%)
-**Status:** Production Ready
-
----
-
-**Questions?** Read `TEST-FIXING-QUICK-START.md` first, then check `test-fixing-agent-prompts.md` for agent usage.
-
-**Ready to start?** Type `/fixTests` and follow Claude's guidance through the 5 phases.
-
-**Want to customize?** Edit the agent templates and system instructions to match your project.
-
----
-
-**Last Updated:** 2025-11-14
-**Version:** 1.0
-**Status:** ✅ Complete and Ready to Use
+- After a session, record any new mismatch class in an agent overlay
+- When the suite's structure changes, re-check the commands in the project
+  `CLAUDE.md`
+- After a large schema change, re-verify the data model against the live
+  system before the next session, not during it

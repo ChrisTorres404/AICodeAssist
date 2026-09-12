@@ -24,43 +24,33 @@ Fill in the SPEC **before writing code**.
 
 ---
 
-## CRITICAL: Development Flow
+## Development Flow
 
-### Local First, Then Docker
-
-**ALWAYS develop against LOCAL environment first, then promote to Docker.**
+**Local first.** Code and test against the local environment, then verify in
+the next environment up (containers, staging, whatever this project has)
+before calling anything done.
 
 ```
-1. Code changes → 2. Test on LOCAL → 3. Promote to Docker → 4. Final verification
+1. Code changes → 2. Verify locally → 3. Verify in the production-like environment → 4. Closeout
 ```
-
-This ensures:
-- Faster iteration cycles
-- Easier debugging
-- Docker remains production-like
 
 ---
 
----
+## MANDATORY: Contract First (API → client → UI)
 
-## MANDATORY: Development Flow (API → SDK → UI)
-
-**All features MUST follow this implementation order** (where the project has these layers):
+**Where the project has these layers, features are built in this order:**
 
 ```
-1. API (Backend)   → {{API_APP}}
-2. SDK (Client)    → {{SDK_PKG}}
-3. UI (Frontend)   → {{ADMIN_APP}}, {{PORTAL_APP}}
+1. API / service   defines the contract (schema, routes, errors)
+2. Client / SDK    typed access to that contract
+3. UI              consumes the client, never the raw API
 ```
 
-**Why this order?**
-- API defines the contract
-- SDK provides typed client access
-- UI consumes the SDK
+Where each layer lives in this repository is recorded under *Where Things Live*.
 
-**Never skip steps. Never build UI without SDK. Never build SDK without API.**
-
----
+A single-layer project (a CLI, a library, a service with no UI) skips what it
+does not have; the principle stays: the contract is written and tested before
+anything consumes it.
 
 ---
 
@@ -111,8 +101,6 @@ wo promote <number>                                  # carry it into your pack
 
 ---
 
----
-
 ## MANDATORY: Testing Methodology
 
 > **Reference:** `{{PIPELINE_ROOT}}/core/methodology/MANDATORY-TESTING-METHODOLOGY.md`
@@ -121,16 +109,16 @@ wo promote <number>                                  # carry it into your pack
 
 | Type | Purpose | When to Use |
 |------|---------|-------------|
-| **Jest Unit Tests** | Isolated logic, mocked deps | Pure functions, guards, pipes |
-| **Behavioral Tests** | Real system verification | API endpoints, auth flows, DB changes |
+| **Unit tests** (the project's runner) | Isolated logic, mocked dependencies | Pure functions, validators, adapters |
+| **Behavioral tests** | Real system verification | Endpoints, user flows, data changes, jobs |
 
 ### Behavioral Test Structure:
 ```
 {{TESTING_DIR}}/
 ├── suites/                            # test suites (templates: {{PIPELINE_ROOT}}/core/templates/testing/)
 │   └── wo-XXXX-feature-name.sh
-└── test-results/
-    └── behavioral-test-report_*.md    # Execution results
+├── suites.manifest                    # which suites run under --quick / --standard / --full
+└── results/                           # runner reports
 ```
 
 ### Test Status (Be Honest):
@@ -139,8 +127,6 @@ wo promote <number>                                  # carry it into your pack
 - `NOT EXECUTED — PLAN ONLY` - Test not yet run
 
 **NEVER mark PASS without real execution evidence.**
-
----
 
 ---
 
@@ -168,17 +154,16 @@ Open one with `bug new "<title>"`; close with `bug close <number>` (refuses with
 └── BUG-TEMPLATE-PROMPT.md
 ```
 
-### Bug Numbering (edit the themes to fit this project):
-| Range | Theme |
-|-------|-------|
-| 0001-0099 | Auth & Session |
-| 0100-0199 | API & SDK |
-| 0200-0299 | Database & Migration |
-| 0300-0399 | UI & Frontend |
-| 0400-0499 | Observability |
-| 0500-0599 | Security |
+### Bug Numbering (`bug new --category` picks the series and the routing):
+| Series | Category | Series | Category |
+|-------|----------|-------|----------|
+| 0001 | auth | 0500 | security |
+| 0100 | api | 0600 | performance |
+| 0200 | database | 0700 | integration |
+| 0300 | ui | 0800 | config / deployment |
+| 0400 | observability | 0900 | docs |
 
----
+Uncategorised bugs go to the 1000 series.
 
 ---
 
@@ -212,9 +197,9 @@ Before writing any code, verify:
 Before marking any work as complete:
 
 - [ ] **Read through ALL changed files** - Line by line review
-- [ ] **Remove console.log statements** - Use proper Logger service instead
+- [ ] **Remove debug printing** - Use the project's logger
 - [ ] **Check for magic numbers** - Extract to configuration or constants
-- [ ] **Verify proper typing** - No `any` types, proper validation
+- [ ] **Verify proper typing** - No escape-hatch types, validation at the boundary
 - [ ] **Validate error handling** - Clear messages, proper exception types
 
 ### Production Mindset Questions
@@ -257,9 +242,7 @@ When implementing features:
 
 ---
 
----
-
-## CRITICAL: Database Safety Rules
+## CRITICAL: Data Safety Rules (where this project has a database)
 
 > **⛔ NEVER DROP OR DELETE DATABASES UNLESS EXPLICITLY INSTRUCTED BY THE USER ⛔**
 
@@ -273,19 +256,11 @@ When implementing features:
 
 ---
 
-## Database Conventions
+## Data Conventions (edit to fit this project)
 
-### Dual-ID Pattern
-
-All entities use:
-```typescript
-interface Entity {
-  id: number;      // Primary key (integer) - internal use
-  uuid: string;    // UUID for URLs/API - external use
-}
-```
-
-**API URLs use UUID, internal queries use integer ID.**
+- **Identifiers:** state the strategy once (for example an internal integer key plus an external UUID exposed in URLs) and follow it everywhere
+- **Schema changes:** only through migrations that are committed and applied in every environment; seed and reference data ship as migrations too
+- **Timezone and money:** one policy each, in one shared utility
 
 ---
 
@@ -298,6 +273,7 @@ interface Entity {
 | `{{TESTING_DIR}}/suites/` | Behavioral test suites |
 | `{{SESSIONS_DIR}}/active/` | Session handoffs |
 | `{{PIPELINE_ROOT}}/` | The pipeline: agents, skills, hooks, rules, templates, harness |
+| `{{API_APP}}` · `{{SDK_PKG}}` · `{{WEB_APP}}` | API, client, and UI layers as configured in `pipeline.config.sh` (edit to fit) |
 
 ---
 
@@ -316,11 +292,9 @@ interface Entity {
 1. **Read the relevant methodology** (WO, Testing, or Bug)
 2. **Create proper folder structure** with all required documents
 3. **Verify database/files exist** before referencing them
-4. **Follow API → SDK → UI flow** for features
+4. **Contract first** (API → client → UI) for features
 5. **Write behavioral tests** before closeout
-6. **Test locally first**, then Docker
-
----
+6. **Verify locally first**, then in the production-like environment
 
 ---
 

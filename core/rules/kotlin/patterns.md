@@ -7,47 +7,15 @@ paths:
 
 > This file extends [common/patterns.md](../common/patterns.md) with Kotlin and Android/KMP-specific content.
 
+Worked examples: skill `kotlin-patterns`.
+
 ## Dependency Injection
 
-Prefer constructor injection. Use Koin (KMP) or Hilt (Android-only):
-
-```kotlin
-// Koin — declare modules
-val dataModule = module {
-    single<ItemRepository> { ItemRepositoryImpl(get(), get()) }
-    factory { GetItemsUseCase(get()) }
-    viewModelOf(::ItemListViewModel)
-}
-
-// Hilt — annotations
-@HiltViewModel
-class ItemListViewModel @Inject constructor(
-    private val getItems: GetItemsUseCase
-) : ViewModel()
-```
+Prefer constructor injection. Use Koin (KMP) or Hilt (Android-only).
 
 ## ViewModel Pattern
 
-Single state object, event sink, one-way data flow:
-
-```kotlin
-data class ScreenState(
-    val items: List<Item> = emptyList(),
-    val isLoading: Boolean = false
-)
-
-class ScreenViewModel(private val useCase: GetItemsUseCase) : ViewModel() {
-    private val _state = MutableStateFlow(ScreenState())
-    val state = _state.asStateFlow()
-
-    fun onEvent(event: ScreenEvent) {
-        when (event) {
-            is ScreenEvent.Load -> load()
-            is ScreenEvent.Delete -> delete(event.id)
-        }
-    }
-}
-```
+Single state object, event sink, one-way data flow.
 
 ## Repository Pattern
 
@@ -65,48 +33,11 @@ interface ItemRepository {
 
 ## UseCase Pattern
 
-Single responsibility, `operator fun invoke`:
-
-```kotlin
-class GetItemUseCase(private val repository: ItemRepository) {
-    suspend operator fun invoke(id: String): Result<Item> {
-        return repository.getById(id)
-    }
-}
-
-class GetItemsUseCase(private val repository: ItemRepository) {
-    suspend operator fun invoke(): Result<List<Item>> {
-        return repository.getAll()
-    }
-}
-```
+Single responsibility, `operator fun invoke`.
 
 ## expect/actual (KMP)
 
-Use for platform-specific implementations:
-
-```kotlin
-// commonMain
-expect fun platformName(): String
-expect class SecureStorage {
-    fun save(key: String, value: String)
-    fun get(key: String): String?
-}
-
-// androidMain
-actual fun platformName(): String = "Android"
-actual class SecureStorage {
-    actual fun save(key: String, value: String) { /* EncryptedSharedPreferences */ }
-    actual fun get(key: String): String? = null /* ... */
-}
-
-// iosMain
-actual fun platformName(): String = "iOS"
-actual class SecureStorage {
-    actual fun save(key: String, value: String) { /* Keychain */ }
-    actual fun get(key: String): String? = null /* ... */
-}
-```
+Use for platform-specific implementations.
 
 ## Coroutine Patterns
 
@@ -115,30 +46,6 @@ actual class SecureStorage {
 - Use `supervisorScope` when child failures should be independent
 
 ## Builder Pattern with DSL
-
-```kotlin
-class HttpClientConfig {
-    var baseUrl: String = ""
-    var timeout: Long = 30_000
-    private val interceptors = mutableListOf<Interceptor>()
-
-    fun interceptor(block: () -> Interceptor) {
-        interceptors.add(block())
-    }
-}
-
-fun httpClient(block: HttpClientConfig.() -> Unit): HttpClient {
-    val config = HttpClientConfig().apply(block)
-    return HttpClient(config)
-}
-
-// Usage
-val client = httpClient {
-    baseUrl = "https://api.example.com"
-    timeout = 15_000
-    interceptor { AuthInterceptor(tokenProvider) }
-}
-```
 
 ## References
 

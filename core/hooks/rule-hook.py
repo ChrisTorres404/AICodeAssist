@@ -47,7 +47,7 @@ def load_rules():
                     k, v = line.split(":", 1); fm[k.strip()] = v.strip().strip('"').strip("'")
             if fm.get("enabled", "true").lower() not in ("true", "yes", "1"): continue
             if not fm.get("pattern"): continue
-            try: rx = re.compile(fm["pattern"], re.I)
+            try: rx = re.compile(fm["pattern"], re.I | re.M)
             except re.error: continue
             rules.append({"name": fm.get("name", fn[:-3]), "event": fm.get("event", "all"),
                           "rx": rx, "action": fm.get("action", "warn").lower(), "msg": m.group(2).strip()})
@@ -61,7 +61,7 @@ def main():
         event, subject = "bash", ti.get("command", "")
     elif tool in ("Edit", "Write", "MultiEdit"):
         event = "file"
-        subject = "\n".join(str(ti.get(k, "")) for k in ("file_path", "content", "new_string"))
+        subject = "\n".join([str(ti.get(k, "")) for k in ("file_path", "content", "new_string")] + [str(e.get("new_string", "")) for e in (ti.get("edits") or []) if isinstance(e, dict)])
     else:
         return 0
     if not subject: return 0

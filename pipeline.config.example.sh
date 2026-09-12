@@ -18,7 +18,7 @@ export PROJECT_DOMAIN="example.com"        # Primary domain
 export GITHUB_REPO="owner/repo"            # For `gh` commands in instructions
 
 # --- Locations (absolute for PROJECT_ROOT, repo-relative for the rest) -----
-export PROJECT_ROOT="/path/to/project"     # Target repo root
+export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this file lives at the repo root; keep it dynamic so clones work
 export PIPELINE_ROOT=".aicodepipeline"     # Where the pipeline is installed
 export WORKSPACE_DIR="Workspace"           # Umbrella dir for generated artifacts
 export DOCS_DIR="Workspace/Docs"
@@ -36,11 +36,18 @@ export DEV_APP="apps/dev"
 export WEB_APP="apps/web"
 export SDK_PKG="packages/sdk"
 
+# --- Optional domain agent packs (space-separated; see core/agents/domain/) --
+export AGENT_PACKS=""                       # e.g. "identity"  (core/agents/domain/)
+export SKILL_PACKS=""                       # e.g. "healthcare network"  (core/skill-packs/)
+
 # --- Test harness ---------------------------------------------------------
+export API_BASE_URL="http://localhost:3001/api/v1"   # where behavioural suites send requests
+export WEB_ORIGIN="http://localhost:3000"            # the web app's origin (Origin header, UI tests)
 export DB_NAME="my_platform_dev"
 export CLI_NAME="${PROJECT_SLUG}-cli"
 
 # --- Local dev networking (used by bin/dev/dev-toggle.sh) -----------------
 export PROJECT_DOMAIN_RE="example\\.com"      # PROJECT_DOMAIN escaped for awk/regex
 export DEV_SUBDOMAINS="api admin portal dev"  # space-separated, mapped to 127.0.0.1
-export PROD_IP=""                             # production IP for prod-mode toggling
+export PROD_IP=""                             # production IP, shown by dev-toggle status (informational)
+export DEV_PORTS="3000 3001"                  # ports bin/dev/kill-ports.sh frees when called without arguments

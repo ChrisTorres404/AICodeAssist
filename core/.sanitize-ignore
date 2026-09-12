@@ -1,0 +1,4 @@
+# files whose examples legitimately contain the patterns the scanner hunts
+agents/roles/release-sanitizer.md
+agents/roles/opensource-forker.md
+agents/roles/opensource-packager.md

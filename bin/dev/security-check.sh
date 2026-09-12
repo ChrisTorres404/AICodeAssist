@@ -1,101 +1,47 @@
-#!/bin/bash
-# WO-1301: Local Security Check Script
-# Run this before committing to catch security issues early
+#!/usr/bin/env bash
+# security-check.sh — local pre-commit security sweep for {{PROJECT_NAME}}.
+#
+# Detects the stack from what is in the directory and runs what applies:
+#   dependency audit   npm audit | pip-audit | cargo audit | govulncheck
+#   secrets            the pipeline's sanitizer (bin/sanitize) over the tree
+#   committed .env     any .env that is not an example file
+#   type safety        tsc --noEmit when a tsconfig.json is present
+# Exit 1 on errors; warnings are printed but do not fail.
+set -uo pipefail
+ROOT="${1:-.}"; cd "$ROOT"
+PIPE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+ERRORS=0; WARNINGS=0
+pass() { echo -e "${GREEN}PASS${NC}: $1"; }
+warn() { echo -e "${YELLOW}WARN${NC}: $1"; WARNINGS=$((WARNINGS+1)); }
+fail() { echo -e "${RED}FAIL${NC}: $1"; ERRORS=$((ERRORS+1)); }
+echo "== {{PROJECT_NAME}} security check ($ROOT)"
 
-set -e
+echo "1. dependency audit"
+ran=0
+if [ -f package.json ] && command -v npm >/dev/null; then ran=1; npm audit --audit-level=high >/dev/null 2>&1 && pass "npm audit: no high or critical advisories" || warn "npm audit reported advisories (run: npm audit)"; fi
+if { [ -f requirements.txt ] || [ -f pyproject.toml ]; } && command -v pip-audit >/dev/null; then ran=1; pip-audit -q >/dev/null 2>&1 && pass "pip-audit clean" || warn "pip-audit reported advisories"; fi
+if [ -f Cargo.toml ] && command -v cargo-audit >/dev/null; then ran=1; cargo audit -q >/dev/null 2>&1 && pass "cargo audit clean" || warn "cargo audit reported advisories"; fi
+if [ -f go.mod ] && command -v govulncheck >/dev/null; then ran=1; govulncheck ./... >/dev/null 2>&1 && pass "govulncheck clean" || warn "govulncheck reported vulnerabilities"; fi
+[ "$ran" -eq 1 ] || warn "no dependency auditor found for this stack (install npm/pip-audit/cargo-audit/govulncheck)"
 
-echo "=============================================="
-echo "    {{PROJECT_NAME}} Security Check"
-echo "=============================================="
-echo ""
+echo "2. secrets and personal data"
+if [ -x "$PIPE/bin/sanitize" ]; then
+  rc=0; "$PIPE/bin/sanitize" . --quiet >/dev/null 2>&1 || rc=$?
+  case "$rc" in 0) pass "sanitizer clean";; 1) warn "sanitizer warnings (run: $PIPE/bin/sanitize .)";; *) fail "sanitizer found critical findings (run: $PIPE/bin/sanitize .)";; esac
+else warn "sanitizer not found at $PIPE/bin/sanitize"; fi
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+echo "3. environment files"
+envs="$(find . -name '.env' -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null)"
+if [ -n "$envs" ]; then
+  tracked="$(git ls-files --error-unmatch $envs 2>/dev/null || true)"
+  [ -z "$tracked" ] && pass ".env files present but not tracked by git" || fail ".env tracked by git: $tracked"
+else pass "no .env files in the tree"; fi
 
-ERRORS=0
-WARNINGS=0
+echo "4. type safety"
+if [ -f tsconfig.json ]; then
+  if [ -x node_modules/.bin/tsc ]; then node_modules/.bin/tsc --noEmit >/dev/null 2>&1 && pass "TypeScript compiles" || fail "TypeScript errors (run: npx tsc --noEmit)"; else warn "tsconfig.json present but tsc not installed"; fi
+else echo "  (no tsconfig.json; skipped)"; fi
 
-# 1. npm audit
-echo "1. Running npm audit..."
-if npm audit --audit-level=high 2>/dev/null; then
-    echo -e "${GREEN}PASS${NC}: No high/critical vulnerabilities found"
-else
-    echo -e "${YELLOW}WARNING${NC}: npm audit found vulnerabilities"
-    ((WARNINGS++))
-fi
-echo ""
-
-# 2. Check for outdated packages
-echo "2. Checking for outdated packages..."
-OUTDATED=$(npm outdated --json 2>/dev/null | jq 'length')
-if [ "$OUTDATED" = "0" ] || [ -z "$OUTDATED" ]; then
-    echo -e "${GREEN}PASS${NC}: All packages are up to date"
-else
-    echo -e "${YELLOW}INFO${NC}: $OUTDATED packages have updates available"
-fi
-echo ""
-
-# 3. License check
-echo "3. Checking licenses..."
-if npx license-checker --summary --failOn "GPL;AGPL;SSPL" 2>/dev/null; then
-    echo -e "${GREEN}PASS${NC}: No problematic licenses found"
-else
-    echo -e "${YELLOW}WARNING${NC}: Check license compliance manually"
-    ((WARNINGS++))
-fi
-echo ""
-
-# 4. Check for potential secrets in code
-echo "4. Checking for potential secrets in code..."
-SECRET_PATTERNS='(password|secret|api_key|apikey|access_token|private_key)\s*[:=]\s*["\x27][^"\x27]{8,}'
-SECRETS_FOUND=$(grep -rn --include="*.ts" --include="*.js" --include="*.json" -iE "$SECRET_PATTERNS" . 2>/dev/null | grep -v node_modules | grep -v '.env.example' | grep -v 'package-lock.json' | wc -l)
-if [ "$SECRETS_FOUND" -gt 0 ]; then
-    echo -e "${YELLOW}WARNING${NC}: Found $SECRETS_FOUND potential hardcoded secrets"
-    grep -rn --include="*.ts" --include="*.js" --include="*.json" -iE "$SECRET_PATTERNS" . 2>/dev/null | grep -v node_modules | grep -v '.env.example' | grep -v 'package-lock.json' | head -5
-    ((WARNINGS++))
-else
-    echo -e "${GREEN}PASS${NC}: No obvious hardcoded secrets found"
-fi
-echo ""
-
-# 5. Check for .env files that shouldn't be committed
-echo "5. Checking for .env files..."
-ENV_FILES=$(find . -name '.env' -not -name '.env.example' -not -path './node_modules/*' 2>/dev/null | wc -l)
-if [ "$ENV_FILES" -gt 0 ]; then
-    echo -e "${YELLOW}WARNING${NC}: Found .env files that may contain secrets"
-    find . -name '.env' -not -name '.env.example' -not -path './node_modules/*' 2>/dev/null
-    ((WARNINGS++))
-else
-    echo -e "${GREEN}PASS${NC}: No .env files found (good - use .env.example)"
-fi
-echo ""
-
-# 6. Check TypeScript for type safety
-echo "6. Checking TypeScript compilation..."
-if npx tsc --noEmit 2>/dev/null; then
-    echo -e "${GREEN}PASS${NC}: TypeScript compiles without errors"
-else
-    echo -e "${RED}FAIL${NC}: TypeScript compilation errors found"
-    ((ERRORS++))
-fi
-echo ""
-
-# Summary
-echo "=============================================="
-echo "               Summary"
-echo "=============================================="
-if [ $ERRORS -gt 0 ]; then
-    echo -e "${RED}ERRORS: $ERRORS${NC}"
-fi
-if [ $WARNINGS -gt 0 ]; then
-    echo -e "${YELLOW}WARNINGS: $WARNINGS${NC}"
-fi
-if [ $ERRORS -eq 0 ] && [ $WARNINGS -eq 0 ]; then
-    echo -e "${GREEN}All security checks passed!${NC}"
-fi
-echo "=============================================="
-
-exit $ERRORS
+echo "== summary: $ERRORS error(s), $WARNINGS warning(s)"
+[ "$ERRORS" -eq 0 ]

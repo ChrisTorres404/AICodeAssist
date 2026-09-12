@@ -42,6 +42,16 @@ This is the most important rule in this entire project:
 
 Loose `.md` files in the parent directory are NOT acceptable. This is lazy and violates project standards.
 
+The `bug` driver creates the folder, numbers it in the right series, and
+records who investigates, who fixes, and who validates:
+
+```bash
+bug new "<title>" --category <category> [--prompt]
+bug verify <number> --run <suite.sh>
+bug close <number>            # refuses without a VERIFICATION document
+bug promote <number>          # carry the investigation into a pack
+```
+
 ---
 
 ## Required Documents (ALL MANDATORY)
@@ -93,13 +103,19 @@ All templates are in:
 
 ---
 
-## Gold Standard Examples
+## Good Examples
 
-When in doubt, reference these properly structured bug reports:
+There is no canonical list. Find the nearest precedent before writing a new
+investigation:
 
-1. **BUG-0001-login-analytics-timezone-mismatch/** - Complete with issue + closeout
-2. **BUG-0007-rate-limit-forced-logout/** - Complete with issue + closeout
-3. **BUG-0006-health-check-pool-saturation/** - Includes addendum for known behavior
+```bash
+pack bug "<symptom>"        # bug investigations across every installed pack
+pack search "<symptom>"     # everything, including the work order behind it
+```
+
+A promoted bug carries its reproduction, its root cause, its fix, and the
+pitfall that made it possible. That is worth far more than a blank template.
+Failing that, read the most recently closed bug in `{{BUGS_DIR}}` and follow it.
 
 ---
 
@@ -179,34 +195,47 @@ Before you consider a bug report "created", you MUST verify:
 
 When asked to document or fix a bug:
 
-1. **FIRST**: Create the folder: `BUG-XXXX-[slug]/`
-2. **THEN**: Create `BUG-XXXX-[slug].md` using `BUG-TEMPLATE-ISSUE.md`
-3. **IF COMPLEX**: Create `BUG-XXXX-Prompt.md` using `BUG-TEMPLATE-PROMPT.md`
-4. **ON COMPLETION**: Create `BUG-XXXX-[slug]-CLOSEOUT.md` using `BUG-TEMPLATE-CLOSEOUT.md`
-5. **USE**: The templates in `_TEMPLATES/`
-6. **NEVER**: Create loose `.md` files in parent directories
-7. **ALWAYS**: Fill in all sections - no placeholders left behind
-8. **ALWAYS**: Link to related Work Order(s)
+1. **Search for precedent**: `pack bug "<symptom>"`. The same failure has
+   often been investigated before.
+2. **Open it with the driver**: `bug new "<title>" --category <category>`,
+   adding `--prompt` for a complex investigation. This creates the folder,
+   picks the number from the category's series, renders the issue document,
+   and writes the routing at the top of it.
+3. **Reproduce before theorising.** An investigation with no reproduction is
+   a guess.
+4. **Investigate, then fix, as separate steps.** Investigators return findings
+   with `file:line` references and what would disprove their theory; they do
+   not edit. The fix is a separate delegation, and a third agent validates it.
+5. **Fill in every section** with verified content.
+6. **Never create a loose `.md`** beside the bug directory.
+7. **Link the related work order(s).**
 
 ---
 
-## Bug Numbering
+## Bug Numbering and Routing
 
-| Range | Theme |
-|-------|-------|
-| 0001-0099 | Auth & Session bugs |
-| 0100-0199 | API & SDK bugs |
-| 0200-0299 | Database & Migration bugs |
-| 0300-0399 | UI & Frontend bugs |
-| 0400-0499 | Observability & Metrics bugs |
-| 0500-0599 | Security bugs |
-| 0600-0699 | Performance bugs |
-| 0700-0799 | Integration bugs |
-| 0800-0899 | Configuration bugs |
-| 0900-0999 | Documentation bugs |
-| 1000+ | Overflow / Misc |
+The number is not decorative: `--category` picks the series *and* records who
+investigates, who fixes, and who validates. This is the driver's table.
 
-**Current highest bug number:** Check existing bugs and increment.
+| Category | Series | Investigate with | Fix with | Validate with |
+|---|---|---|---|---|
+| `auth` | 0001 | `support-engineer-expert` + `jwt-expert` | `jwt-expert`, `oauth-oidc-expert`, or `iam-rbac-expert` | `owasp-top10-expert`, then `project-validator-expert` |
+| `api` | 0100 | `support-engineer-expert` + `rest-expert` | the stack's backend specialist | `project-validator-expert` |
+| `database` (`db`) | 0200 | `database-validator-expert` + `postgres-expert` | `postgres-expert` or `typeorm-expert` | `database-validator-expert` |
+| `ui` (`frontend`) | 0300 | `support-engineer-expert` + `react-expert` | the stack's UI specialist | `frontend-validator-expert` |
+| `observability` | 0400 | `support-engineer-expert` + `prometheus-expert` | `prometheus-expert` or `grafana-expert` | `project-validator-expert` |
+| `security` | 0500 | `owasp-top10-expert` + `support-engineer-expert` | `jwt-expert`, `iam-rbac-expert`, or `owasp-top10-expert` | `owasp-top10-expert`, then `project-validator-expert` |
+| `performance` (`perf`) | 0600 | `performance-optimizer` + `postgres-expert` | `nodejs-expert`, `postgres-expert`, or `redis-expert` | `project-validator-expert` |
+| `integration` | 0700 | `support-engineer-expert` + `rest-expert` | the stack's backend specialist or `websocket-expert` | `project-validator-expert` |
+| `config` (`deployment`) | 0800 | `support-engineer-expert` + `docker-expert` | `docker-expert` or `github-actions-expert` | `project-validator-expert` |
+| `docs` (`documentation`) | 0900 | `documentation-expert` | `documentation-expert` | `documentation-expert` |
+| *(no category given)* | 1000 | decide the routing before investigating | — | — |
+
+"The stack's specialist" is resolved from the detected stack when the bug is
+opened, so the routing printed on the bug names a real agent. The validator is
+never the agent that wrote the fix.
+
+The next free number in the series is chosen by the driver. Do not pick one.
 
 ---
 
@@ -234,11 +263,13 @@ Create a WO if the fix:
 
 After fixing a bug, add comments linking both the original WO and the bug:
 
-```typescript
-// WO-XXXX: Original feature implementation
-// BUG-YYYY: Fixed [brief description of what was fixed]
-// Summary: [one line explaining the fix or constraint]
 ```
+// WO-XXXX: original feature implementation
+// BUG-YYYY: fixed [brief description of what was fixed]
+// Summary: [one line explaining the fix or the constraint it now respects]
+```
+
+Use the comment syntax of the language you are in.
 
 ---
 
@@ -265,30 +296,38 @@ Before ANY closeout can be completed:
    - Run affected test suites
    - Document any side effects
 
-4. **Create Verification Document**
-   - Include before/after evidence
-   - Reference test execution output
-   - Use: `{{PIPELINE_ROOT}}/core/templates/testing/TEST-TEMPLATE-VERIFICATION.md`
+4. **Let the driver record the verification**
+
+   ```bash
+   bug verify <number> --run {{TESTING_DIR}}/suites/bug-XXXX-<slug>.sh
+   ```
+
+   It executes the suite and writes `EXECUTED — PASS` or `EXECUTED — FAIL`
+   from the exit code. Include the before and after evidence in the document;
+   format: `{{PIPELINE_ROOT}}/core/templates/testing/TEST-TEMPLATE-VERIFICATION.md`.
 
 ### Closeout Blockers
 
-A bug closeout WILL BE REJECTED if:
+`bug close` refuses to produce a closeout without a VERIFICATION document. A
+closeout is also rejected in review if:
 
-- [ ] No reproduction evidence captured
-- [ ] No fix verification evidence
-- [ ] Verification was assumed, not executed
-- [ ] Regression tests not run
-- [ ] Evidence is hallucinated (not real execution)
+- [ ] No reproduction evidence was captured
+- [ ] No fix verification evidence exists
+- [ ] Verification was assumed rather than executed
+- [ ] Regression tests were not run
+- [ ] The evidence was written rather than captured
 
-### Testing Documentation Location
+### Where testing material lives
 
 ```
 {{TESTING_DIR}}/
-├── MANDATORY-TESTING-METHODOLOGY.md   # READ THIS FIRST
-├── _TEMPLATES/                         # Test templates
-├── suites/                             # Test suites
-└── test-results/                       # Execution reports
+├── suites/                             # test suites
+└── test-results/                       # execution reports
 ```
+
+Methodology and templates come from the pipeline:
+`{{PIPELINE_ROOT}}/core/methodology/MANDATORY-TESTING-METHODOLOGY.md` and
+`{{PIPELINE_ROOT}}/core/templates/testing/`.
 
 ---
 

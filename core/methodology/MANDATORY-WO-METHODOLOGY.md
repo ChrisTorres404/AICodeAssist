@@ -44,7 +44,7 @@ This is the most important rule in this entire project:
 ### Configuration & Patterns
 - [ ] **Using configuration/settings instead of hardcoded values** - No magic numbers
 - [ ] **Following existing patterns in the codebase** - Consistency matters
-- [ ] **Using proper Logger service** - Not console.log
+- [ ] **Using the project's logger** - No debug printing left in source
 - [ ] **Error handling with proper exception types** - Clear error messages
 
 ### Production Mindset Questions
@@ -60,7 +60,7 @@ This is the most important rule in this entire project:
 
 ### Code Quality Review
 - [ ] **Read through ALL changed files** - Line by line review
-- [ ] **Removed ALL console.log statements** - Use Logger service instead
+- [ ] **Removed ALL debug logging** - Use the project's logger at the right level
 - [ ] **No magic numbers** - Extracted to configuration or constants
 - [ ] **Proper typing** - No `any` types, proper validation
 - [ ] **Error handling complete** - Clear messages, proper exception types
@@ -93,7 +93,7 @@ These mistakes have caused rework on this project. **Do not repeat them:**
 - Each fix should improve the overall quality, not just solve one issue
 
 ### 3. Expedience Over Quality
-- Don't leave debug logging (console.log) in place
+- Don't leave debug logging in place
 - Don't copy-paste values; abstract them properly
 - Don't skip cleanup after fixing bugs
 
@@ -110,11 +110,33 @@ These mistakes have caused rework on this project. **Do not repeat them:**
 
 Loose `.md` files in the parent directory are NOT acceptable. This is lazy and violates project standards.
 
+The `wo` driver creates the folder and every document the work order's size
+requires. Do not assemble one by hand:
+
+```bash
+wo new "<title>" --size trivial|small|standard|large --area <area> --priority P1
+```
+
+---
+
+## Size Sets the Ceremony
+
+A two-line fix does not need four documents. State the size you chose and why.
+
+| Size | Created at open | Always required to close |
+|---|---|---|
+| `trivial` | one document | VERIFICATION |
+| `small` | SPEC | VERIFICATION |
+| `standard` (default) | SPEC, CHECKLIST, TASK-BREAKDOWN, Prompt | VERIFICATION |
+| `large` | the standard set plus the SDK and UI implementation documents | VERIFICATION |
+
+The verification requirement never relaxes at any size.
+
 ---
 
 ## Required Documents (ALL MANDATORY)
 
-When creating ANY work order, you MUST create ALL of these files:
+At `standard` size, all of these exist:
 
 ### Core Documents (ALWAYS REQUIRED)
 
@@ -178,26 +200,26 @@ Any promoted work order in your pack with a complete `SCTPVC` lifecycle. `pack i
 
 ---
 
-## Validation Before Creating a Work Order
+## Validation Before a Work Order Counts as Created
 
-Before you consider a work order "created", you MUST verify:
+`wo status <number>` prints which documents exist and which are missing. Use
+it; do not eyeball the folder.
 
-### Core Documents (ALWAYS)
-1. [ ] Created folder: `WO-XXXX-[Descriptive-Name]/`
-2. [ ] Created technical spec: `WO-XXXX-SPEC.md`
-3. [ ] Created checklist: `WO-XXXX-CHECKLIST.md`
-4. [ ] Created task breakdown: `WO-XXXX-TASK-BREAKDOWN.md`
-5. [ ] Created prompt: `WO-XXXX-Prompt.md`
+### Structure
+1. [ ] Folder exists: `WO-XXXX-[Descriptive-Name]/`
+2. [ ] Every document the chosen size requires is present
+3. [ ] The SDK implementation document exists, if the work has an SDK layer
+4. [ ] The UI implementation document exists, if the work has a UI layer
 
-### Specialized Documents (when applicable)
-6. [ ] Created SDK implementation: `WO-XXXX-sdk-implementation.md` (if SDK work)
-7. [ ] Created UI implementation: `WO-XXXX-ui-implementation.md` (if UI work)
+### Content quality
+5. [ ] Every placeholder is replaced with real content
+6. [ ] Dependencies are named
+7. [ ] Success criteria are stated in terms someone else could test
+8. [ ] File locations are real paths that exist, or are explicitly new
+9. [ ] The area, priority, and owner are recorded
 
-### Content Quality
-8. [ ] All placeholders filled in with real content
-9. [ ] Dependencies documented
-10. [ ] Success criteria defined
-11. [ ] File locations specified
+A folder full of unfilled template headings is not a work order. It is a
+folder.
 
 ---
 
@@ -223,40 +245,41 @@ Before you consider a work order "created", you MUST verify:
 
 When asked to create a work order:
 
-1. **FIRST**: Create the folder: `WO-XXXX-[Descriptive-Name]/`
-2. **THEN**: Create `WO-XXXX-SPEC.md` using `WO-TEMPLATE-SPEC.md`
-3. **THEN**: Create `WO-XXXX-CHECKLIST.md` using `WO-TEMPLATE-CHECKLIST.md`
-4. **THEN**: Create `WO-XXXX-TASK-BREAKDOWN.md` using `WO-TEMPLATE-TASK-BREAKDOWN.md`
-5. **THEN**: Create `WO-XXXX-Prompt.md` using `WO-TEMPLATE-PROMPT.md`
-6. **IF SDK WORK**: Also create `WO-XXXX-sdk-implementation.md` using `WO-TEMPLATE-SDK-IMPLEMENTATION.md`
-7. **IF UI WORK**: Also create `WO-XXXX-ui-implementation.md` using `WO-TEMPLATE-UI-IMPLEMENTATION.md`
-8. **USE**: The templates in `_TEMPLATES/`
-9. **NEVER**: Create loose `.md` files in parent directories
-10. **ALWAYS**: Fill in all sections - no placeholders left behind
+1. **Search first.** `pack search "<problem>"`. A solved, tested, closed-out
+   work order beats a blank template, and its pitfalls are already written
+   down.
+2. **Open it with the driver.** `wo new "<title>" --size <size> --area <area>`
+   creates the folder, numbers it, renders every required document, and
+   records the routing. Never hand-assemble the folder.
+3. **Fill in the SPEC before writing any code.** A spec written afterwards is
+   a description, not a specification.
+4. **Add the specialized documents** when the work has an SDK layer
+   (`--sdk`) or a UI layer (`--ui`).
+5. **Replace every placeholder** with real, verified content.
+6. **Never create a loose `.md`** beside the work-order directory.
+7. **Track state with the driver**: `wo start`, `wo block <n> "<reason>"`,
+   `wo note <n> "<text>"`, `wo status <n>`.
 
 ---
 
-## Series Work Orders
+## Numbering and Series
 
-For work order SERIES (e.g., WO-3200 Series):
+Work orders are numbered by the driver. `wo new` takes the next free number;
+`--series N` starts or continues a numbered band, so related work stays
+together without any index file to maintain:
 
-1. Create a series folder: `WO-1200-Series-[Theme]/`
-2. Create a series index: `WO-1200-SERIES-INDEX.md`
-3. **EACH individual WO still needs its own folder within:**
-
+```bash
+wo new "Report data model"        --series 1200
+wo new "Report ingestion service" --series 1200    # becomes the next 12xx
 ```
-WO-1200-Series-Reporting/
-├── WO-1200-SERIES-INDEX.md
-├── WO-1201-Report-Data-Model/
-│   ├── WO-1201-Report-Data-Model.md
-│   ├── WO-1201-CHECKLIST.md
-│   ├── WO-1201-TASK-BREAKDOWN.md
-│   └── WO-1201-Prompt.md
-├── WO-1202-Report-Ingestion-Service/
-│   ├── WO-1202-Report-Ingestion-Service.md
-│   ├── WO-1202-CHECKLIST.md
-│   └── ...
-```
+
+`wo list` and `wo stats` are the index. There is no separate series document
+to keep in sync, and no folder nests inside another — every work order is a
+sibling directory with its own number.
+
+Bugs work the same way, except that the band is chosen for you by the
+category, which also records the routing. See
+`{{PIPELINE_ROOT}}/core/methodology/MANDATORY-BUG-METHODOLOGY.md`.
 
 ---
 
@@ -268,46 +291,58 @@ Before ANY closeout can be completed:
 
 ### Testing Requirements
 
-1. **Create Behavioral Tests**
-   - Create test suite: `{{TESTING_DIR}}/suites/wo-XXXX-feature-name.sh`
-   - Follow the Behavioral Testing Methodology
-   - Reference: `{{TESTING_DIR}}/MANDATORY-TESTING-METHODOLOGY.md`
+1. **Create behavioral tests**
+   - Suite path: `{{TESTING_DIR}}/suites/wo-XXXX-feature-name.sh`
+   - Follow `{{PIPELINE_ROOT}}/core/methodology/MANDATORY-TESTING-METHODOLOGY.md`
 
-2. **Execute Tests**
-   - Run tests against live system (API + database)
-   - Capture real output as evidence
-   - Document in execution report
+2. **Execute them**
+   - Against the running system and its real data store
+   - Capture the real output as evidence
 
-3. **Create Verification Report**
-   - Use template: `{{PIPELINE_ROOT}}/core/templates/testing/TEST-TEMPLATE-VERIFICATION.md`
-   - Map test results to WO requirements
-   - Include in WO folder as `WO-XXXX-VERIFICATION.md`
+3. **Let the driver record the result**
 
-4. **All Tests Must Pass**
+   ```bash
+   wo verify <number> --run {{TESTING_DIR}}/suites/wo-XXXX-feature-name.sh
+   ```
+
+   `wo verify --run` executes the suite and writes `EXECUTED — PASS` or
+   `EXECUTED — FAIL` into `WO-XXXX-VERIFICATION.md` from the exit code, so
+   nobody types a status by hand. Format:
+   `{{PIPELINE_ROOT}}/core/templates/testing/TEST-TEMPLATE-VERIFICATION.md`.
+
+4. **Map results to requirements.** Every success criterion in the SPEC points
+   at the test that proves it.
+
+5. **All tests pass**
    - `EXECUTED — PASS` with real evidence
-   - No `NOT EXECUTED — PLAN ONLY` for critical paths
-   - No `EXECUTED — FAIL` without remediation
+   - No `NOT EXECUTED — PLAN ONLY` on a critical path
+   - No `EXECUTED — FAIL` left unremediated
 
 ### Closeout Blockers
 
-A closeout WILL BE REJECTED if:
+`wo close` refuses to produce a closeout without a VERIFICATION document. Do
+not route around the guard — it is the only thing making evidence
+non-optional. A closeout is rejected in review if:
 
-- [ ] No behavioral tests created
-- [ ] Tests not executed (PLAN ONLY status)
-- [ ] Tests failed without remediation
-- [ ] No verification report in WO folder
-- [ ] Evidence is hallucinated (not real execution)
+- [ ] No behavioral tests were created
+- [ ] Tests were never executed (PLAN ONLY)
+- [ ] Tests failed and nothing was done about it
+- [ ] There is no verification document in the folder
+- [ ] The evidence was written rather than captured
 
-### Testing Documentation Location
+### Where testing material lives
 
 ```
 {{TESTING_DIR}}/
-├── MANDATORY-TESTING-METHODOLOGY.md   # READ THIS FIRST
-├── _TEMPLATES/                         # Test templates
-├── suites/                             # Test suites
-│   └── wo-XXXX-feature-name.sh        # Your WO test suite
-└── test-results/                       # Execution reports
+├── suites/                             # test suites
+│   └── wo-XXXX-feature-name.sh
+└── test-results/                       # execution reports
 ```
+
+Methodology, templates, and the shared framework come from the pipeline:
+`{{PIPELINE_ROOT}}/core/methodology/MANDATORY-TESTING-METHODOLOGY.md`,
+`{{PIPELINE_ROOT}}/core/templates/testing/`, and
+`{{PIPELINE_ROOT}}/harness/`.
 
 ---
 

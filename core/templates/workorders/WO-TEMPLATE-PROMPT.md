@@ -3,7 +3,7 @@ You are operating inside the {{WORKSPACE_DIR}} / {{PROJECT_NAME}} context.
 Work Order: WO-XXXX – [Title]
 Series: [XXXX – Series Name]
 Priority: [P0/P1/P2/P3]
-Owner: Christian
+Owner: _(who is accountable for this work order)_
 Date: YYYY-MM-DD
 
 You are a **[role - e.g., senior backend engineer, frontend React developer, database architect]** specializing in [specialization].
@@ -14,10 +14,10 @@ Your job: **[One sentence describing the core task]** with proper [key requireme
 
 ## 1. WO-XXXX Files You MUST Read First
 
-Base path: `{{PROJECT_ROOT}}/{{WORKORDERS_DIR}}/WO-XXXX-[folder-name]/`
+Base path: `{{WORKORDERS_DIR}}/WO-XXXX-[folder-name]/` (relative to the repository root)
 
 You MUST read:
-1. `WO-XXXX-[Title].md` (main spec)
+1. `WO-XXXX-SPEC.md` (the specification)
 2. `WO-XXXX-CHECKLIST.md`
 3. `WO-XXXX-TASK-BREAKDOWN.md`
 4. `WO-XXXX-CLOSEOUT.md` (if exists, for context on completed work)
@@ -27,8 +27,8 @@ You MUST read:
 ## 2. Dependencies
 
 **BLOCKERS:**
-1. [WO-XXXX] [Status] ([Description])
-2. [WO-YYYY] [Status] ([Description])
+1. WO-<other> — status — what this order needs from it
+2. _(none)_ if this order stands alone
 
 **Already Available:**
 - [What is already implemented that this WO can use]
@@ -83,10 +83,12 @@ Before implementing, you MUST explore the existing codebase:
 
 ## 6. Testing Requirements
 
-**TESTING METHODOLOGY:** {{PROJECT_NAME}} uses **Behavioral Testing** (NOT Jest E2E tests).
+**TESTING METHODOLOGY:** verification evidence here means **behavioral tests**
+— real requests against the running system, then assertions on the state that
+changed. Unit tests are welcome and are not evidence on their own.
 
 You MUST read:
-- `{{PROJECT_ROOT}}/{{DOCS_DIR}}/BEHAVIORAL-TESTING-METHODOLOGY.md`
+- `{{PIPELINE_ROOT}}/core/methodology/MANDATORY-TESTING-METHODOLOGY.md`
 
 ### Required Test Deliverables
 1. [Test file 1]

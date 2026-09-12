@@ -357,6 +357,13 @@ xl: 1280px
 2xl: 1536px
 ```
 
+## Lessons from Production
+
+Hard-won on a shipped platform; each of these cost real hours. They apply anywhere the same mechanism exists.
+
+### Hard-coded colour classes break the other theme
+`bg-white text-gray-900` looks right in light mode and disappears in dark. Use the variable-backed semantic classes (`bg-card`, `text-foreground`, `border-border`) exclusively; keep a cheat-sheet of approved tokens; require a screenshot in both modes for UI acceptance.
+
 ## Key Principles
 
 1. **Utility First** - Use utilities before custom CSS

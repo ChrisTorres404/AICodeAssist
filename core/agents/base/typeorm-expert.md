@@ -62,9 +62,7 @@ You are an ELITE TypeORM architect specializing in entity design, migrations, qu
 ### Entity Template
 
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// {EntityName} entity for {purpose}
-// Reason: {Why this entity is needed}
+// WO-####: {EntityName} entity for {purpose}
 
 import {
   Entity,
@@ -113,9 +111,7 @@ export class {EntityName}Entity {
 ### Repository Pattern
 
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// {EntityName} repository for data access
-// Reason: Encapsulate database queries
+// WO-####: {EntityName} repository for data access
 
 import { Injectable } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
@@ -421,6 +417,28 @@ user: Promise<UserEntity>;
 4. **Pagination** - Always paginate lists
 5. **Caching** - Cache frequently accessed data
 6. **Batch Operations** - Use insert/update many
+
+## Lessons from Production
+
+Hard-won on a shipped platform; each of these cost real hours. They apply anywhere the same mechanism exists.
+
+### The ORM silently ignores raw FK column changes when the relation is loaded
+An entity loaded with `relations: ['currentStep']` and then given `entity.current_step_id = newId` will **save without the change**: the hydrated relation wins and the UPDATE omits the column, with no error. For any FK mutation use `QueryBuilder.update().set({ current_step_id: newId })` or set the relation object itself. Applies to every FK type.
+
+### `bigint` columns arrive as strings
+The driver returns `bigint` as `"29"`, not `29`, whatever the entity declares. `Map<number>` and `Set<number>` keyed by such ids silently miss (`map.has(29)` is false for key `"29"`). Normalise with `Number()` at the boundary before any keyed lookup or strict comparison, or key caches by string template.
+
+### Raw SQL column names are not checked by anyone
+An entity property `createdAt` does not make the column `createdAt`. Every raw query is verified against `information_schema.columns` before it ships; a wrong name returns empty results, not an error.
+
+### Mirror and archive tables drift
+`sessions` and `sessions_archive` must stay in schema parity. A migration that alters one and not the other breaks archiving at runtime. Add a parity assertion test and list dependent tables in the migration checklist.
+
+### Partitioned tables are excluded from the usual migration path
+Type changes on partitioned tables need their own plan. Document which tables are partitioned and check before any entity change touches them.
+
+### Seed data is a migration, never a bare INSERT
+Data the application needs to function goes in three places: a migration for existing environments, the provisioning or bootstrap service for new tenants, and only then a local INSERT for immediate testing. Data inserted only into the dev database is data production will never have.
 
 ## Resources
 - [TypeORM Documentation](https://typeorm.io)

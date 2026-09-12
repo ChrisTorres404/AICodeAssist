@@ -3,18 +3,33 @@
 # dev-toggle.sh — Toggle between LOCAL and PRODUCTION modes
 # ============================================================
 #
-# LOCAL mode:  /etc/hosts points *.{{PROJECT_DOMAIN}} → 127.0.0.1
-#              Caddy reverse proxy active on port 80
-#              Browser hits local dev servers
+# macOS ONLY. This is the one script in the pipeline that is not portable:
+# it writes /etc/resolver/<domain> and flushes the resolver cache with
+# dscacheutil and mDNSResponder, neither of which exists on Linux. On Linux,
+# edit /etc/hosts (or your resolver of choice) and start the proxy by hand.
+# Everything else under bin/, core/hooks/, and harness/ runs on both.
 #
-# PROD mode:   /etc/hosts entries commented out
-#              Caddy stopped
-#              Browser hits real DNS → EC2 (${PROD_IP:?set PROD_IP})
+# Why this exists: browsers treat `localhost` as a public suffix, so cookies
+# cannot be shared across subdomains of it. Real subdomains of your own domain
+# pointed at 127.0.0.1, fronted by a local reverse proxy, make cross-subdomain
+# sessions, OAuth callbacks, and tenant subdomains testable locally.
 #
-# Usage:
-#   sudo ./scripts/dev-toggle.sh local    # Switch to local dev
-#   sudo ./scripts/dev-toggle.sh prod     # Switch to production
-#   sudo ./scripts/dev-toggle.sh status   # Show current mode
+# LOCAL mode:  /etc/hosts points {{PROJECT_DOMAIN}} and DEV_SUBDOMAINS → 127.0.0.1
+#              the local reverse proxy is started (Caddy by default)
+#              the browser hits your local dev servers
+#
+# PROD mode:   the hosts entries are removed, the proxy stopped
+#              the browser hits real DNS → production (PROD_IP, informational)
+#
+# Configuration (pipeline.config.sh or env):
+#   PROJECT_DOMAIN, DEV_SUBDOMAINS, PROD_IP
+#   PROXY_CONFIG   reverse-proxy config file   (default: {{PROJECT_ROOT}}/Caddyfile.local)
+#   PROXY_START / PROXY_STOP / PROXY_CHECK   commands to override the Caddy defaults
+#
+# Usage (macOS; the resolver step is macOS-specific):
+#   sudo bin/dev/dev-toggle.sh local    # switch to local dev
+#   sudo bin/dev/dev-toggle.sh prod     # switch to production
+#   bin/dev/dev-toggle.sh status        # show current mode
 #
 # ============================================================
 
@@ -23,15 +38,22 @@ set -euo pipefail
 HOSTS_FILE="/etc/hosts"
 RESOLVER_FILE="/etc/resolver/{{PROJECT_DOMAIN}}"
 RESOLVER_BACKUP="/etc/resolver/{{PROJECT_DOMAIN}}.bak"
-CADDY_CONFIG="{{PROJECT_ROOT}}/Caddyfile.local"
+PROXY_CONFIG="${PROXY_CONFIG:-{{PROJECT_ROOT}}/Caddyfile.local}"
+PROXY_START="${PROXY_START:-caddy start --config $PROXY_CONFIG}"
+PROXY_STOP="${PROXY_STOP:-caddy stop}"
+PROXY_CHECK="${PROXY_CHECK:-pgrep -f caddy}"
+DEV_SUBDOMAINS="${DEV_SUBDOMAINS:-{{DEV_SUBDOMAINS}}}"
+PROD_IP="${PROD_IP:-{{PROD_IP}}}"
 MARKER_START="# >>> {{PROJECT_NAME}}-LOCAL-DEV-START"
 MARKER_END="# >>> {{PROJECT_NAME}}-LOCAL-DEV-END"
 
 # The full block of hosts entries for local dev
 HOSTS_BLOCK="$MARKER_START
 # {{PROJECT_NAME}} Local Development
-127.0.0.1 {{PROJECT_DOMAIN}}
-# Subdomains come from DEV_SUBDOMAINS in pipeline.config.sh
+127.0.0.1 {{PROJECT_DOMAIN}}"
+for sub in $DEV_SUBDOMAINS; do HOSTS_BLOCK="$HOSTS_BLOCK
+127.0.0.1 $sub.{{PROJECT_DOMAIN}}"; done
+HOSTS_BLOCK="$HOSTS_BLOCK
 $MARKER_END"
 
 RED='\033[0;31m'
@@ -52,8 +74,8 @@ has_active_block() {
     grep -q "$MARKER_START" "$HOSTS_FILE" 2>/dev/null
 }
 
-is_caddy_running() {
-    pgrep -f "caddy run.*Caddyfile.local" >/dev/null 2>&1
+is_proxy_running() {
+    eval "$PROXY_CHECK" >/dev/null 2>&1
 }
 
 flush_dns() {
@@ -97,7 +119,7 @@ show_status() {
     elif grep -q "{{PROJECT_DOMAIN}}" "$HOSTS_FILE" 2>/dev/null; then
         echo -e "  /etc/hosts:  ${YELLOW}LEGACY${NC} (old-style entries, run 'local' or 'prod' to clean up)"
     else
-        echo -e "  /etc/hosts:  ${RED}PROD${NC} (*.{{PROJECT_DOMAIN}} → DNS → ${PROD_IP:?set PROD_IP})"
+        echo -e "  /etc/hosts:  ${RED}PROD${NC} (*.{{PROJECT_DOMAIN}} → DNS${PROD_IP:+ → $PROD_IP})"
     fi
 
     # Check resolver
@@ -107,11 +129,11 @@ show_status() {
         echo -e "  Resolver:    ${CYAN}PROD${NC} (/etc/resolver/{{PROJECT_DOMAIN}} removed → real DNS)"
     fi
 
-    # Check Caddy
-    if is_caddy_running; then
-        echo -e "  Caddy:       ${GREEN}RUNNING${NC} (reverse proxy active on port 80)"
+    # Check the reverse proxy
+    if is_proxy_running; then
+        echo -e "  Proxy:       ${GREEN}RUNNING${NC}"
     else
-        echo -e "  Caddy:       ${RED}STOPPED${NC}"
+        echo -e "  Proxy:       ${RED}STOPPED${NC}"
     fi
 
     # Quick DNS check
@@ -151,22 +173,22 @@ switch_local() {
     flush_dns
     echo -e "  ${GREEN}✓${NC} /etc/hosts updated (*.{{PROJECT_DOMAIN}} → 127.0.0.1)"
 
-    # Start Caddy if not running
-    if ! is_caddy_running; then
-        echo "  Starting Caddy..."
-        caddy start --config "$CADDY_CONFIG" 2>/dev/null
+    # Start the reverse proxy if not running
+    if ! is_proxy_running; then
+        echo "  Starting the reverse proxy..."
+        eval "$PROXY_START" 2>/dev/null || true
         sleep 1
-        if is_caddy_running; then
-            echo -e "  ${GREEN}✓${NC} Caddy started on port 80"
+        if is_proxy_running; then
+            echo -e "  ${GREEN}✓${NC} proxy started"
         else
-            echo -e "  ${YELLOW}!${NC} Caddy may not have started — try: sudo caddy run --config $CADDY_CONFIG"
+            echo -e "  ${YELLOW}!${NC} proxy did not start — try by hand: $PROXY_START"
         fi
     else
-        echo -e "  ${GREEN}✓${NC} Caddy already running"
+        echo -e "  ${GREEN}✓${NC} proxy already running"
     fi
 
     echo ""
-    echo -e "${GREEN}LOCAL mode active.${NC} Browser → localhost via Caddy."
+    echo -e "${GREEN}LOCAL mode active.${NC} Browser → local servers via the reverse proxy."
     show_status
 }
 
@@ -191,17 +213,17 @@ switch_prod() {
     flush_dns
     echo -e "  ${GREEN}✓${NC} /etc/hosts cleaned (*.{{PROJECT_DOMAIN}} → DNS → production)"
 
-    # Stop Caddy if running
-    if is_caddy_running; then
-        caddy stop 2>/dev/null || pkill -f "caddy run.*Caddyfile" 2>/dev/null || true
+    # Stop the reverse proxy if running
+    if is_proxy_running; then
+        eval "$PROXY_STOP" 2>/dev/null || true
         sleep 1
-        echo -e "  ${GREEN}✓${NC} Caddy stopped"
+        echo -e "  ${GREEN}✓${NC} proxy stopped"
     else
-        echo -e "  ${GREEN}✓${NC} Caddy already stopped"
+        echo -e "  ${GREEN}✓${NC} proxy already stopped"
     fi
 
     echo ""
-    echo -e "${CYAN}PROD mode active.${NC} Browser → ${PROD_IP:?set PROD_IP} (EC2)."
+    echo -e "${CYAN}PROD mode active.${NC} Browser → real DNS${PROD_IP:+ ($PROD_IP)}."
     show_status
 }
 
@@ -224,8 +246,8 @@ case "${1:-status}" in
     *)
         echo "Usage: sudo $0 {local|prod|status}"
         echo ""
-        echo "  local   Switch to local dev (hosts → 127.0.0.1, start Caddy)"
-        echo "  prod    Switch to production (hosts cleaned, stop Caddy)"
+        echo "  local   Switch to local dev (hosts → 127.0.0.1, start the proxy)"
+        echo "  prod    Switch to production (hosts cleaned, stop the proxy)"
         echo "  status  Show current mode (no sudo needed)"
         exit 1
         ;;

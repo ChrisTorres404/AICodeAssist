@@ -2,7 +2,7 @@
 
 ## MANDATORY: Work Order Methodology
 
-**ALL work orders in the {{PROJECT_NAME}} MUST follow this structure. No exceptions.**
+**Every work order in {{PROJECT_NAME}} follows this structure. No exceptions.**
 
 ---
 
@@ -52,38 +52,43 @@ WO-XXXX-[Descriptive-Name]/
 
 ## How to Create a New Work Order
 
-### Step 1: Create the Folder
+Do not copy these templates by hand. The driver renders the right set for the
+size you choose, numbers the work order, and records the routing.
+
 ```bash
-mkdir -p {{WORKORDERS_DIR}}/WO-XXXX-[Descriptive-Name]
+pack search "<problem>"                      # precedent first, always
+wo new "<title>" --size standard --area backend --priority P1
+wo new "<title>" --size large --sdk --ui     # adds the specialized documents
 ```
 
-### Step 2: Copy Core Templates (REQUIRED)
-Copy all core template files to the new folder and rename them:
-- `WO-TEMPLATE-SPEC.md` → `WO-XXXX-SPEC.md` (technical spec with code)
-- `WO-TEMPLATE-CHECKLIST.md` → `WO-XXXX-CHECKLIST.md`
-- `WO-TEMPLATE-TASK-BREAKDOWN.md` → `WO-XXXX-TASK-BREAKDOWN.md`
-- `WO-TEMPLATE-PROMPT.md` → `WO-XXXX-Prompt.md`
+Then:
 
-**Alternative:** For simple WOs without code, use `WO-TEMPLATE-MAIN.md` → `WO-XXXX-[Title].md`
+1. **Fill in the SPEC before writing code.** A spec written afterwards is a
+   description, not a specification.
+2. **Replace every `[placeholder]`** with verified content. A heading with a
+   bracket left in it is an unfinished document.
+3. **Track state with the driver**: `wo start`, `wo block`, `wo note`,
+   `wo status`.
+4. **Close with evidence**: `wo verify <n> --run <suite>` then `wo close <n>`.
+   The closeout is generated; it is refused without a verification document.
 
-### Step 3: Copy Specialized Templates (if applicable)
-If the WO involves SDK or UI work, also copy:
-- `WO-TEMPLATE-SDK-IMPLEMENTATION.md` → `WO-XXXX-sdk-implementation.md` (for SDK work)
-- `WO-TEMPLATE-UI-IMPLEMENTATION.md` → `WO-XXXX-ui-implementation.md` (for UI work)
-
-### Step 4: Fill In Details
-Replace all `[placeholders]` with actual content.
-
-### Step 5: On Completion
-Create `WO-XXXX-CLOSEOUT.md` using `WO-TEMPLATE-CLOSEOUT.md`.
+`WO-TEMPLATE-MAIN.md` is the lighter alternative to the SPEC for a work order
+with no code design to record; `--size trivial` and `--size small` use the
+lighter shapes automatically.
 
 ---
 
-## Gold Standard Examples
+## Good Examples
 
-Reference these completed work orders for best practices:
+There is no canonical list. Search for the nearest precedent:
 
-- Any work order in your pack with a full `SCTPVC` lifecycle. `pack index` lists them.
+```bash
+pack wo "<problem>"      # work orders across every installed pack
+pack index               # everything, by completeness
+```
+
+A promoted work order carries its spec, its verification, and the pitfalls
+found along the way. Start from one whenever the problem rhymes.
 
 ---
 
@@ -97,39 +102,34 @@ Reference these completed work orders for best practices:
 
 ---
 
-## Work Order Numbering
+## Numbering and Areas
 
-| Series | Range | Theme |
-|--------|-------|-------|
-| 0000-0099 | Foundation | Core platform setup |
-| 0100-0199 | Auth Core | Authentication fundamentals |
-| 0200-0299 | RBAC | Role-based access control |
-| 0300-0399 | API/SDK | Public API and SDK |
-| 0400-0499 | Auth Flows | Login, logout, refresh |
-| 0500-0599 | Frontend SDK | Browser-first SDK |
-| 0600-0699 | SDK Completion | Extended SDK features |
-| 0700-0799 | Notifications | Email, push, webhooks |
-| 0800-0899 | Integrations | Third-party integrations |
-| 0900-0999 | Settings | Configuration system |
-| 1000-1099 | Security | Security hardening |
-| 1100-1199 | Validation | Input validation |
-| 1200-1299 | Sessions | Session management |
-| 1300-1399 | GDPR | Privacy compliance |
-| 1400-1499 | Observability | Logging, metrics, dashboards |
-| 1500-1599 | User Management | User CRUD, profiles |
-| 1600-1699 | Registration | Signup flows |
-| 1700-1799 | Tenancy | Multi-tenant features |
-| 1800-1899 | Licensing | Subscription management |
-| 1900-1999 | Provisioning | Customer provisioning |
-| 2000-2099 | API Keys | API key management |
-| 2100-2199 | Admin UI | Admin dashboard |
-| 2200-2299 | User Profile | Profile enhancements |
-| 2300-2399 | Organizations | Org management |
-| 2400-2499 | Control Plane | Platform separation |
-| 2500-2599 | IAM Security | Tenant isolation, limits |
-| 3000-3099 | Reserved | Future use |
-| 3100-3199 | Reserved | Future use |
-| 3200-3299 | Usage/Billing | API usage, rate limiting |
+The driver assigns the number. `--series N` keeps related work in one band, so
+a multi-part effort stays together without an index document to maintain:
+
+```bash
+wo new "Report data model"        --series 1200
+wo new "Report ingestion service" --series 1200     # the next free 12xx
+```
+
+Choose the bands to match this project's own domains, and write them down in
+the project `CLAUDE.md` once you have. There is no universal scheme.
+
+`--area` is the other half: it records who implements, who backs them up, and
+who validates, and prints the routing when the work order is opened.
+
+| Area | Records |
+|---|---|
+| `backend`, `api`, `database` | The stack's backend, API, and data specialists |
+| `auth`, `rbac`, `security` | The security and identity specialists |
+| `frontend`, `ui`, `styling` | The stack's UI specialist and a UI validator |
+| `testing`, `performance` | The testing and performance specialists |
+| `cicd`, `docker` | The build and deployment specialists |
+| `docs` | The documentation role |
+
+`--area ui` and `--area frontend` also add the UI implementation document. The
+validator is never the agent that implemented. Full routing table:
+`{{PIPELINE_ROOT}}/core/rules/common/agents.md`.
 
 ---
 

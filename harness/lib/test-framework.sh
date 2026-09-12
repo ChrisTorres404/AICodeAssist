@@ -1,13 +1,22 @@
 #!/bin/bash
 # ============================================================================
-# {{PROJECT_NAME}}ID Enhanced Test Framework v3.0
+# {{PROJECT_NAME}} Enhanced Test Framework v3.0
 # ============================================================================
-# Core testing utilities with enhanced reporting, navigation, and UX
-# For non-technical users: Clear prompts, summaries, and guidance
+# Core testing utilities with enhanced reporting, navigation, and UX.
+# Application-agnostic: the database and metric sections of a summary are
+# driven by DB_STATS_QUERIES and API_STAT_METRICS and print nothing when those
+# are unset. Load the configuration first:
+#
+#   ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+#   source "$ROOT/{{PIPELINE_ROOT}}/harness/config/test-config.env"
+#   source "$ROOT/{{PIPELINE_ROOT}}/harness/lib/test-framework.sh"
+#   ...
+#   end_test_suite        # prints the summary and exits 1 if anything failed
 # ============================================================================
 
-# Strict mode
-set -eo pipefail
+# pipefail only: a library must not abort the suite that sourced it on the first
+# failed assertion. End every suite with end_test_suite so the exit code is honest.
+set -o pipefail
 
 # ============================================================================
 # COLORS & STYLING
@@ -49,14 +58,40 @@ SKIPPED_TESTS=0
 START_TIME=0
 END_TIME=0
 
-# Database connection
+# Milliseconds since the epoch. GNU date and current BSD date both understand
+# %N; older BSD date prints a literal "N" instead, so fall back to whole
+# seconds rather than producing a nonsense duration.
+now_ms() {
+  local t; t="$(date +%s%N)"   # portability-ok: date-flags — the case below catches BSD's literal N
+  case "$t" in
+    ''|*[!0-9]*) echo "$(( $(date +%s) * 1000 ))";;
+    *)           echo "$(( t / 1000000 ))";;
+  esac
+}
+
+# Database connection (optional — SQL helpers are inert without DB_NAME)
 DB_HOST="${DB_HOST:-localhost}"
-DB_USER="${DB_USER:-{{PROJECT_SLUG}}}"
-DB_NAME="${DB_NAME:-{{DB_NAME}}}"
-export PGPASSWORD="${PGPASSWORD:-password}"
+DB_PORT="${DB_PORT:-5432}"
+DB_USER="${DB_USER:-$USER}"
+DB_NAME="${DB_NAME:-}"
+export PGPASSWORD="${PGPASSWORD:-${DB_PASS:-}}"
 
 # API connection
-API_BASE="${API_BASE:-http://localhost:3001/api/v1}"
+API_BASE="${API_BASE:-{{API_BASE_URL}}}"
+HEALTH_PATH="${HEALTH_PATH:-/health}"
+# The health endpoint is usually at the host root (/health), not under the API
+# prefix. Try both and use the first that answers 200.
+health_url() {
+  local host; host="$(printf '%s' "$API_BASE" | sed -E 's|^(https?://[^/]+).*|\1|')"
+  local u
+  for u in "${API_BASE%/}${HEALTH_PATH}" "${host}${HEALTH_PATH}"; do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' -A "${TEST_USER_AGENT:-harness}" "$u" 2>/dev/null)" = "200" ] && { printf '%s' "$u"; return 0; }
+  done
+  printf '%s' "${API_BASE%/}${HEALTH_PATH}"; return 1
+}
+
+METRICS_PATH="${METRICS_PATH:-/metrics}"
+TEST_USER_AGENT="${TEST_USER_AGENT:-Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36}"
 
 # ============================================================================
 # NAVIGATION SYSTEM
@@ -81,8 +116,9 @@ pop_menu() {
 # ============================================================================
 
 clear_screen() {
-  clear
-  tput cup 0 0
+  [ -t 1 ] || return 0            # no terminal (wo verify --run, CI): never emit escape codes
+  clear 2>/dev/null || true
+  tput cup 0 0 2>/dev/null || true
 }
 
 draw_box() {
@@ -141,7 +177,7 @@ begin_test_suite() {
   echo ""
   draw_box 70 "$suite_name" "$CYAN"
   echo -e "${CYAN}${BOX_V}${NC}  Started: $(date '+%Y-%m-%d %H:%M:%S')"
-  echo -e "${CYAN}${BOX_V}${NC}  Database: $DB_NAME @ $DB_HOST"
+  echo -e "${CYAN}${BOX_V}${NC}  Database: ${DB_NAME:-none} @ $DB_HOST"
   echo -e "${CYAN}${BOX_V}${NC}  API: $API_BASE"
   draw_box_bottom 70 "$CYAN"
   echo ""
@@ -154,7 +190,7 @@ run_test() {
   local expected="${4:-}"
 
   TOTAL_TESTS=$((TOTAL_TESTS + 1))
-  local test_start=$(date +%s%N)
+  local test_start; test_start=$(now_ms)
 
   echo -e "${YELLOW}[$test_id]${NC} $test_name"
 
@@ -163,8 +199,8 @@ run_test() {
   local exit_code=0
   result=$(eval "$test_command" 2>&1) || exit_code=$?
 
-  local test_end=$(date +%s%N)
-  local duration_ms=$(( (test_end - test_start) / 1000000 ))
+  local test_end; test_end=$(now_ms)
+  local duration_ms=$(( test_end - test_start ))
 
   TEST_NAMES+=("$test_name")
   TEST_DURATIONS+=("$duration_ms")
@@ -223,14 +259,20 @@ skip_test() {
 # SQL HELPERS
 # ============================================================================
 
+db_configured() {
+  [ -n "${DB_NAME:-}" ] && command -v psql > /dev/null 2>&1
+}
+
 query_db() {
   local query="$1"
-  psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -t -A -c "$query" 2>/dev/null
+  db_configured || return 1
+  psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "$query" 2>/dev/null
 }
 
 query_db_verbose() {
   local query="$1"
-  psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>/dev/null
+  db_configured || return 1
+  psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>/dev/null
 }
 
 assert_sql() {
@@ -254,7 +296,8 @@ count_rows() {
 
 http_get() {
   local url="$1"
-  curl -s -w "\nHTTP_CODE:%{http_code}" "$url" 2>/dev/null
+  curl -s -w "\nHTTP_CODE:%{http_code}" -A "$TEST_USER_AGENT" \
+    ${ORIGIN:+-H "Origin: $ORIGIN"} "$url" 2>/dev/null
 }
 
 http_post() {
@@ -262,6 +305,8 @@ http_post() {
   local data="$2"
   curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "$url" \
     -H "Content-Type: application/json" \
+    -A "$TEST_USER_AGENT" \
+    ${ORIGIN:+-H "Origin: $ORIGIN"} \
     -d "$data" 2>/dev/null
 }
 
@@ -282,7 +327,7 @@ assert_http() {
   local data="${6:-}"
 
   TOTAL_TESTS=$((TOTAL_TESTS + 1))
-  local test_start=$(date +%s%N)
+  local test_start; test_start=$(now_ms)
 
   echo -e "${YELLOW}[$test_id]${NC} $test_name"
 
@@ -296,8 +341,8 @@ assert_http() {
   local http_code=$(extract_http_code "$response")
   local body=$(extract_http_body "$response")
 
-  local test_end=$(date +%s%N)
-  local duration_ms=$(( (test_end - test_start) / 1000000 ))
+  local test_end; test_end=$(now_ms)
+  local duration_ms=$(( test_end - test_start ))
 
   TEST_NAMES+=("$test_name")
   TEST_DURATIONS+=("$duration_ms")
@@ -321,42 +366,41 @@ assert_http() {
 # DATA COLLECTION FOR SUMMARIES
 # ============================================================================
 
+# DB_STATS_QUERIES holds "label=SQL" lines, one per statistic, each returning a
+# single value. Unset (the default) means no database section is printed.
 collect_database_stats() {
-  local stats=""
+  [ -n "${DB_STATS_QUERIES:-}" ] || return 0
+  db_configured || return 0
 
-  # Users count
-  local user_count=$(count_rows "auth.users")
-  stats+="Users: $user_count\n"
-
-  # Active sessions
-  local session_count=$(count_rows "auth.sessions" "is_revoked = false AND not_after > NOW()")
-  stats+="Active Sessions: $session_count\n"
-
-  # Recent audit events
-  local audit_count=$(count_rows "auth.audit_events" "created_at > NOW() - INTERVAL '24 hours'")
-  stats+="Audit Events (24h): $audit_count\n"
-
-  # Tenants
-  local tenant_count=$(count_rows "auth.tenants")
-  stats+="Tenants: $tenant_count\n"
-
-  echo -e "$stats"
+  local line label query value
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in \#*) continue;; esac
+    label="${line%%=*}"
+    query="${line#*=}"
+    [ -n "$query" ] && [ "$query" != "$line" ] || continue
+    value=$(query_db "$query" | head -1)
+    echo "$label: ${value:-n/a}"
+  done <<< "$DB_STATS_QUERIES"
 }
 
+# API_STAT_METRICS is a space-separated list of Prometheus-format metric names.
+# Unset (the default) means no metrics section is printed.
 collect_api_stats() {
-  local metrics=$(curl -s "$API_BASE/metrics" 2>/dev/null || echo "")
+  [ -n "${API_STAT_METRICS:-}" ] || return 0
 
-  if [ -n "$metrics" ]; then
-    local logins=$(echo "$metrics" | grep "auth_logins_total" | grep "success" | awk '{print $2}' | head -1)
-    local rotations=$(echo "$metrics" | grep "auth_token_rotations_total" | awk '{print $2}' | head -1)
-    local lockouts=$(echo "$metrics" | grep "auth_account_lockouts_total" | awk '{print $2}' | head -1)
-
-    echo -e "Successful Logins: ${logins:-0}"
-    echo -e "Token Rotations: ${rotations:-0}"
-    echo -e "Account Lockouts: ${lockouts:-0}"
-  else
-    echo -e "API metrics unavailable"
+  local metrics
+  metrics=$(curl -s -A "$TEST_USER_AGENT" "${API_BASE}${METRICS_PATH}" 2>/dev/null || echo "")
+  if [ -z "$metrics" ]; then
+    echo "metrics endpoint unavailable at ${API_BASE}${METRICS_PATH}"
+    return 0
   fi
+
+  local name value
+  for name in $API_STAT_METRICS; do
+    value=$(echo "$metrics" | grep "^$name" | head -1 | awk '{print $NF}')
+    echo "$name: ${value:-0}"
+  done
 }
 
 # ============================================================================
@@ -381,6 +425,7 @@ generate_summary_report() {
   fi
 
   echo -e "  ${BOLD}Overall Status:${NC} ${status_color}${BOLD}$status_icon${NC}"
+  SUITE_EXIT_CODE=$(( FAILED_TESTS > 0 ? 1 : 0 ))
   echo ""
 
   # Statistics box
@@ -434,17 +479,27 @@ generate_summary_report() {
     draw_box_bottom 70 "$RED"
   fi
 
-  # Real data summary
-  echo ""
-  draw_box 70 "ACTUAL DATA SUMMARY" "$GREEN"
-  echo ""
-  echo -e "  ${BOLD}Database Statistics:${NC}"
-  collect_database_stats | while read line; do echo "  $line"; done
-  echo ""
-  echo -e "  ${BOLD}API Metrics:${NC}"
-  collect_api_stats | while read line; do echo "  $line"; done
-  echo ""
-  draw_box_bottom 70 "$GREEN"
+  # Real data summary — only when the project configured something to show
+  local db_stats api_stats
+  db_stats="$(collect_database_stats)"
+  api_stats="$(collect_api_stats)"
+
+  if [ -n "$db_stats" ] || [ -n "$api_stats" ]; then
+    echo ""
+    draw_box 70 "ACTUAL DATA SUMMARY" "$GREEN"
+    echo ""
+    if [ -n "$db_stats" ]; then
+      echo -e "  ${BOLD}Database Statistics:${NC}"
+      echo "$db_stats" | while read -r line; do echo "  $line"; done
+      echo ""
+    fi
+    if [ -n "$api_stats" ]; then
+      echo -e "  ${BOLD}Metrics:${NC}"
+      echo "$api_stats" | while read -r line; do echo "  $line"; done
+      echo ""
+    fi
+    draw_box_bottom 70 "$GREEN"
+  fi
 }
 
 # ============================================================================
@@ -453,10 +508,10 @@ generate_summary_report() {
 
 show_welcome_message() {
   echo ""
-  echo -e "  ${CYAN}${BOLD}Welcome to the {{PROJECT_NAME}}ID Test Suite!${NC}"
+  echo -e "  ${CYAN}${BOLD}Welcome to the {{PROJECT_NAME}} Test Suite!${NC}"
   echo ""
-  echo -e "  This tool helps you verify that your authentication system"
-  echo -e "  is working correctly. Each test checks a specific feature."
+  echo -e "  This tool runs real requests against a running system and"
+  echo -e "  checks the state that changed. Each test covers one behaviour."
   echo ""
   echo -e "  ${BOLD}Quick Tips:${NC}"
   echo -e "  ${DIM}- Type the number next to an option to select it${NC}"
@@ -538,13 +593,13 @@ wait_for_key() {
 # ============================================================================
 
 check_server_status() {
-  local url="${1:-$API_BASE/metrics}"
+  local url="${1:-$(health_url || true)}"
   local max_wait="${2:-10}"
 
   echo -e "${CYAN}Checking server status...${NC}"
 
   for i in $(seq 1 $max_wait); do
-    if curl -s "$url" > /dev/null 2>&1; then
+    if curl -s -A "$TEST_USER_AGENT" "$url" > /dev/null 2>&1; then
       echo -e "${GREEN}Server is ready!${NC}"
       return 0
     fi
@@ -554,11 +609,16 @@ check_server_status() {
 
   echo ""
   echo -e "${RED}Server not responding at $url${NC}"
-  echo -e "${YELLOW}Please start the server with: npm run start:dev${NC}"
+  echo -e "${YELLOW}Start the service under test, then run this again.${NC}"
   return 1
 }
 
 check_database_status() {
+  if ! db_configured; then
+    echo -e "${DIM}No database configured — skipping database check${NC}"
+    return 0
+  fi
+
   echo -e "${CYAN}Checking database connection...${NC}"
 
   if query_db "SELECT 1;" > /dev/null 2>&1; then
@@ -581,6 +641,12 @@ export -f query_db query_db_verbose assert_sql count_rows
 export -f http_get http_post extract_http_code extract_http_body assert_http
 export -f generate_summary_report
 export -f show_welcome_message show_help prompt_user confirm_action wait_for_key
-export -f check_server_status check_database_status
+export -f check_server_status check_database_status db_configured
 export -f push_menu pop_menu clear_screen
 export -f collect_database_stats collect_api_stats
+
+# End the suite honestly: summary, then the exit code wo verify --run records.
+end_test_suite() {
+  generate_summary_report
+  exit "${SUITE_EXIT_CODE:-$(( ${FAILED_TESTS:-0} > 0 ? 1 : 0 ))}"
+}

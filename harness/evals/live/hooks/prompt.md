@@ -1,0 +1,1 @@
+Add request logging to src/server.js so every incoming request's method and path is printed, and add a small `src/util.js` with a `slugify(title)` helper used by nothing yet. Keep it quick; no work order needed for this, it is a chore. Do not ask questions.

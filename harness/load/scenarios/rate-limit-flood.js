@@ -1,44 +1,54 @@
-// WO-50000 Scenario 4: Rate-limit flood.
-// Floods a FREE-tier tenant (load-charlie, 100 req/min limit) at 500 req/s.
-// PASS = over-limit requests get 429 (not 5xx, not latency collapse). This is a
-// security + stability test: the limiter must shed load gracefully.
-// Run CONCURRENTLY with a low-rate scenario-1 on an enterprise tenant to prove isolation
-// (the flooded tenant must not degrade the well-behaved one).
+// Scenario 3: Rate-limit flood. Hammers one endpoint far past any sane limit.
+// PASS = over-limit requests are rejected cleanly (429) rather than erroring
+// (5xx) or collapsing latency. This is a stability test, not a capacity test:
+// a limiter must shed load gracefully.
+//
+// Run it alongside a low steady-state run to prove isolation — the well-behaved
+// traffic must not degrade while this one is being refused.
+//
+//   FLOOD_RATE=500 FLOOD_PATH=/health k6 run scenarios/rate-limit-flood.js
+//
+// Env: FLOOD_RATE (default 500), FLOOD_DURATION (default 2m),
+//      FLOOD_PATH / FLOOD_METHOD (default: the first entry in LOAD_ENDPOINTS)
 
 import http from 'k6/http';
 import { check } from 'k6';
-import { headers, users, API_BASE } from '../lib/common.js';
+import { headers, endpoints, API_BASE } from '../lib/common.js';
+
+const target = {
+  method: (__ENV.FLOOD_METHOD || endpoints[0].method).toUpperCase(),
+  path: __ENV.FLOOD_PATH || endpoints[0].path,
+};
 
 export const options = {
   scenarios: {
     flood: {
       executor: 'constant-arrival-rate',
-      rate: 500,
+      rate: Number(__ENV.FLOOD_RATE || 500),
       timeUnit: '1s',
-      duration: '2m',
-      preAllocatedVUs: 200,
-      maxVUs: 500,
+      duration: __ENV.FLOOD_DURATION || '2m',
+      preAllocatedVUs: Number(__ENV.PRE_VUS || 200),
+      maxVUs: Number(__ENV.MAX_VUS || 500),
     },
   },
   thresholds: {
-    // The limiter must return 429s, never 5xx. We assert NO server errors.
-    'http_req_failed{kind:server_error}': ['rate==0'],
+    // The limiter must answer, never fall over: no server errors at all.
+    'checks{kind:no_5xx}': ['rate==1'],
   },
 };
 
-const charlie = users.filter((u) => u.tenant_slug === 'load-charlie');
-
 export default function () {
-  const u = charlie[Math.floor(Math.random() * charlie.length)];
-  const res = http.post(
-    `${API_BASE}/auth/login`,
-    JSON.stringify({ email: u.email, password: __ENV.LOAD_USER_PASSWORD, tenant_id: u.tenant_id }),
-    { headers: headers(), tags: { name: 'flood' } },
+  const res = http.request(target.method, `${API_BASE}${target.path}`, null, {
+    headers: headers(),
+    tags: { name: 'flood' },
+  });
+
+  check(
+    res,
+    { 'no 5xx': (r) => r.status < 500 },
+    { kind: 'no_5xx' },
   );
-  // 200 (under limit), 401 (bad cred — shouldn't happen), 429 (shed) are all "not server error".
-  const serverError = res.status >= 500;
   check(res, {
-    'no 5xx': () => !serverError,
-    'limited or served': (r) => r.status === 429 || r.status === 200,
+    'limited or served': (r) => r.status === 429 || (r.status >= 200 && r.status < 400),
   });
 }

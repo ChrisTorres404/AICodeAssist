@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -uo pipefail; cd "$PROJECT"
+fail() { echo "FAIL: $*"; exit 1; }
+d="$(ls -d Workspace/Docs/WorkOrders/WO-0001-* 2>/dev/null | head -1)"; [ -n "$d" ] || fail "no work order was opened"
+n="$(basename "$d" | cut -d- -f2)"
+grep -q "\[1-2 paragraphs" "$d/WO-$n-SPEC.md" && fail "SPEC still has the template placeholder"
+grep -qi "stats" "$d/WO-$n-SPEC.md" || fail "SPEC does not mention the feature"
+grep -q "stats" src/server.js || fail "endpoint not implemented in src/server.js"
+grep -q "console.log" src/server.js && fail "console.log added to source"
+ls Workspace/Testing/suites/*.sh >/dev/null 2>&1 || fail "no behavioural suite written"
+[ -f "$d/WO-$n-VERIFICATION.md" ] || fail "no VERIFICATION document (wo verify was not run)"
+grep -qE "EXECUTED\s*[—–-]+\s*PASS" "$d/WO-$n-VERIFICATION.md" || fail "verification is not EXECUTED — PASS: $(grep -o 'Overall status:.*' "$d/WO-$n-VERIFICATION.md" | head -1)"
+[ -f "$d/WO-$n-CLOSEOUT.md" ] || fail "no CLOSEOUT (wo close was not run)"
+grep -q "\[Lesson 1\]" "$d/WO-$n-CLOSEOUT.md" && fail "closeout lessons left as placeholders"
+ls -d .aicodepipeline/packs/*/workorders/WO-$n-* >/dev/null 2>&1 || fail "work order was not promoted"
+echo "PASS: WO-$n opened, spec filled, endpoint implemented, suite executed (PASS), closed with lessons, promoted"

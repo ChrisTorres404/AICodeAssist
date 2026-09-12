@@ -22,7 +22,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKS="$ROOT/packs"
-[ -d "$PACKS" ] || { echo "pack: no packs/ directory at $ROOT" >&2; exit 1; }
+[ -d "$PACKS" ] || mkdir -p "$PACKS"
 
 if [ -n "${PACK:-}" ]; then
   [ -d "$PACKS/$PACK" ] || { echo "pack: no pack named '$PACK'" >&2; exit 1; }
@@ -35,16 +35,41 @@ fi
 # work on an empty directory, which is the state of every fresh install.
 case "${1:-}" in
   search|wo|bug|suite|arch|show)
-    [ ${#ROOTS[@]} -gt 0 ] || { echo "pack: no packs under $PACKS yet — build one with 'pack new <name>' and 'wo promote'" >&2; exit 1; };;
+    [ ${#ROOTS[@]} -gt 0 ] || { echo "pack: no packs yet — nothing to search. 'wo promote <n>' after your first verified work order creates one." >&2; exit 0; };;
 esac
 
 hl() { printf '\033[1m%s\033[0m\n' "$*"; }
 
-search_sub() { # subdir term label
+search_catalog() { # term — catalog entries whose text mentions the term, with their pitfalls
+  local term="$1" any=0
+  for r in "${ROOTS[@]+"${ROOTS[@]}"}"; do
+    [ -f "$r/CATALOG.md" ] || continue
+    python3 - "$r/CATALOG.md" "$term" "$(basename "$r")" <<'PYEOF' && any=1
+import re, sys
+path, term, pack = sys.argv[1:4]
+t = open(path).read()
+entries = re.split(r"(?m)^## ", t)[1:]
+hits = [e for e in entries if re.search(re.escape(term), e, re.I)]
+if not hits: sys.exit(1)
+print("\033[1mCATALOG — %s\033[0m" % pack)
+for e in hits:
+    head, _, body = e.partition("\n")
+    folder = re.search(r"\*\*Folder:\*\* `([^`]+)`", body)
+    pit = re.search(r"(?ms)\*\*Pitfalls:\*\*\n(.*?)(?=\n- \*\*|\Z)", body)
+    print("  " + head.strip())
+    if folder: print("    folder:   " + folder.group(1))
+    if pit:
+        for line in [l.strip() for l in pit.group(1).splitlines() if l.strip()][:4]: print("    pitfall:  " + line)
+print()
+PYEOF
+  done
+  return 0
+}
+search_sub() { # subdir term label — folders under the pack whose documents mention the term
   local sub="$1" term="$2" label="$3" any=0 hits
   for r in "${ROOTS[@]+"${ROOTS[@]}"}"; do
     [ -d "$r/$sub" ] || continue
-    hits="$(grep -rils -- "$term" "$r/$sub" 2>/dev/null | head -30 || true)"
+    hits="$(grep -rils --include='*.md' -- "$term" "$r/$sub" 2>/dev/null | grep -v '\.log$\|\.wo-meta' | xargs -n1 dirname 2>/dev/null | sort -u | head -20 || true)"
     [ -z "$hits" ] && continue
     [ "$any" -eq 0 ] && { hl "$label"; any=1; }
     echo "$hits" | sed "s|$PACKS/|  |"
@@ -91,18 +116,19 @@ MD
     done
     ;;
   search)
-    t="${2:?usage: lib search <term>}"
+    t="${2:?usage: pack search <term>}"
+    search_catalog "$t"
     search_sub workorders   "$t" "WORK ORDERS"
     search_sub bugs         "$t" "BUGS"
     search_sub test-suites  "$t" "TEST SUITES"
     search_sub architecture "$t" "ARCHITECTURE"
     ;;
-  wo)    search_sub workorders   "${2:?usage: lib wo <term>}"    "WORK ORDERS";;
-  bug)   search_sub bugs         "${2:?usage: lib bug <term>}"   "BUGS";;
-  suite) search_sub test-suites  "${2:?usage: lib suite <term>}" "TEST SUITES";;
-  arch)  search_sub architecture "${2:?usage: lib arch <term>}"  "ARCHITECTURE";;
+  wo)    search_sub workorders   "${2:?usage: pack wo <term>}"    "WORK ORDERS";;
+  bug)   search_sub bugs         "${2:?usage: pack bug <term>}"   "BUGS";;
+  suite) search_sub test-suites  "${2:?usage: pack suite <term>}" "TEST SUITES";;
+  arch)  search_sub architecture "${2:?usage: pack arch <term>}"  "ARCHITECTURE";;
   show)
-    id="${2:?usage: lib show <WO-####|BUG-####>}"; found=0
+    id="${2:?usage: pack show <WO-####|BUG-####>}"; found=0
     for r in "${ROOTS[@]+"${ROOTS[@]}"}"; do
       while IFS= read -r d; do
         found=1; hl "${d#$PACKS/}"; ls "$d" | sed 's/^/    /'; echo

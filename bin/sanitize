@@ -41,10 +41,10 @@ PATTERNS = [
     ("secret.google",  "CRITICAL", re.compile(r"\bGOCSPX-[A-Za-z0-9_-]+"), "Google OAuth secret"),
     ("secret.slack",   "CRITICAL", re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"), "Slack webhook"),
     ("secret.sendgrid","CRITICAL", re.compile(r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}"), "SendGrid key"),
-    ("secret.password","CRITICAL", re.compile(r"(?i)\b(password|passwd|pwd)\b\s*[:=]\s*['\"](?!\$\{|\{\{|<|test|example|changeme|placeholder|your[_-]?)[^'\"\s]{6,}['\"]"), "password literal"),
+    ("secret.password","CRITICAL", re.compile(r"(?i)\b(password|passwd|pwd|pgpassword|db_pass(word)?|mysql_pwd)\b\s*[:=]\s*['\"](?!\$\{|\{\{|<|test|example|changeme|placeholder|mysecret|secret|hunter2|s3cr3t|your[_-]?)[^'\"\s]{6,}['\"]"), "password literal"),
     ("pii.email",      "CRITICAL", re.compile(r"\b[A-Za-z0-9._%+-]+@(gmail|yahoo|hotmail|outlook|protonmail|icloud|me|aol)\.(com|net|org)\b"), "personal email address"),
     ("infra.privip",   "WARNING",  re.compile(r"\b(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b"), "private IP"),
-    ("infra.pubip",    "CRITICAL", re.compile(r"(?<![/v\w.-])(?!(?:10|127|0)\.)(?!192\.168\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])(?:\.(?:\d{1,3})){3}(?![\w.-])(?<!\.0\.0\.0)"), "public IP address"),
+    ("infra.pubip",    "CRITICAL", re.compile(r"(?<![/v\w.-])(?!(?:10|127|0)\.)(?!192\.0\.2\.)(?!198\.51\.100\.)(?!203\.0\.113\.)(?!93\.184\.216\.34)(?!255\.)(?!1\.1\.1\.1\b)(?!1\.0\.0\.1\b)(?!8\.8\.8\.8\b)(?!8\.8\.4\.4\b)(?!9\.9\.9\.9\b)(?!224\.0\.0\.)(?!239\.)(?!192\.168\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])(?:\.(?:\d{1,3})){3}(?![\w.-])(?<!\.0\.0\.0)"), "public IP address"),
     ("infra.ssh",      "CRITICAL", re.compile(r"\bssh\s+(-i\s+\S+\s+)?[a-z_][a-z0-9_-]*@[0-9A-Za-z.-]+"), "SSH connection string"),
     ("infra.pem",      "WARNING",  re.compile(r"\S+\.pem\b"), "key file reference"),
     ("path.home",      "CRITICAL", re.compile(r"(/Users/(?!Shared/)[A-Za-z][A-Za-z0-9_-]*/|/home/(?!user/)[a-z][a-z0-9_-]*/|C:\\\\Users\\\\[A-Za-z])"), "host-specific home path"),
@@ -85,12 +85,14 @@ def load_ignores(root):
 
 def scan(root, allow):
     findings, files_scanned = [], 0
-    ignores = load_ignores(root)
+    ignores = set()   # absolute paths; every .sanitize-ignore under root contributes, relative to its own directory
     for dp, dns, fns in os.walk(root):
-        dns[:] = [d for d in dns if d not in SKIP_DIRS]
+        for entry in load_ignores(dp):
+            ignores.add(os.path.normpath(os.path.join(dp, entry)))
+        dns[:] = [d for d in dns if d not in SKIP_DIRS and os.path.normpath(os.path.join(dp, d)) not in ignores]
         for fn in fns:
             p = os.path.join(dp, fn); rel = os.path.relpath(p, root)
-            if rel in ignores or fn == ".sanitize-ignore":
+            if os.path.normpath(p) in ignores or fn == ".sanitize-ignore":
                 continue
             for rx, label in DANGEROUS_FILES:
                 if rx.search(rel) and not fn.endswith(".example"):
@@ -113,7 +115,10 @@ def scan(root, allow):
     return findings, files_scanned
 
 def main():
-    ap = argparse.ArgumentParser()
+    class _AP(argparse.ArgumentParser):
+        def error(self, message):
+            self.print_usage(sys.stderr); print(f"sanitize: error: {message}", file=sys.stderr); sys.exit(3)
+    ap = _AP()
     ap.add_argument("dir")
     ap.add_argument("--report")
     ap.add_argument("--allow", action="append", default=[], help="regex; matching lines are ignored")

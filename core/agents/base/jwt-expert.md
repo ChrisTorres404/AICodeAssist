@@ -81,9 +81,7 @@ interface JwtPayload {
 ### Authentication Guard
 
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// Implemented JWT authentication guard
-// Reason: Validate JWT tokens on protected routes
+// WO-####: Implemented JWT authentication guard
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -289,6 +287,31 @@ if (error.name === 'JsonWebTokenError') {
   logout();
 }
 ```
+
+## Lessons from Production
+
+Hard-won on a shipped platform; each of these cost real hours. They apply anywhere the same mechanism exists.
+
+### A cookie scope change needs a sweep of the old cookies
+Narrowing a cookie from the parent domain to a subdomain, or widening its path, leaves the browser holding both old and new. The server reads the stale one first and every refresh fails with "invalid token" until the user clears cookies. Every login and logout must clear the old domain and every path the cookie was ever set at. Audit existing cookies before shipping a scoping change.
+
+### Set-cookie operations must clean up on failure
+If token validation fails after cookies were written, the cookies must be cleared in the `finally` or `catch`, or the next request carries a half-written session. Test the failure path, not only the success path.
+
+### Refresh has a race
+Two requests with an expired access token trigger two refreshes; the second invalidates the first's rotation. One in-flight refresh per client with an async lock, requests queued behind it, and a cross-tab lock via `BroadcastChannel` for browsers.
+
+### Per-user rate-limit buckets include the endpoint
+A user bucket shared across endpoints lets one endpoint's legitimate burst lock the user out of everything, including refresh, which looks like a forced logout. Key buckets by user **and** endpoint, as IP buckets already are, and declare explicit limits for every client-called endpoint.
+
+### HttpOnly cookies and response bodies are alternatives, not both
+If tokens are set as `HttpOnly` cookies, the same tokens must not also appear in the JSON body; a response sanitiser on auth endpoints enforces it and a test asserts the fields are absent.
+
+### Time arithmetic has units
+An idle timeout computed in days when the config is minutes truncates to zero. Name units in variable names (`idleTimeoutMinutes`) and test the boundary.
+
+### Cookie and header auth must agree between client and guard
+An SDK that sends cookies to a guard that reads only headers fails every request. Document the supported auth method per endpoint group and test the actual client against the actual guard, not each in isolation.
 
 ## Key Principles
 

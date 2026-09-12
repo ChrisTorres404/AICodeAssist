@@ -9,6 +9,8 @@ it could find. Used by bin/install.sh and bin/new-project to choose which rule
 sets to install and to fill in the project's CLAUDE.md. Read-only.
 """
 import json, os, re, sys
+if any(a in ("-h", "--help") for a in sys.argv[1:]):
+    print("usage: detect-stack [project-dir] [--json] [--write [CLAUDE.md]]\n  Detects languages, frameworks, package manager, run/test/build/lint commands, and the rule sets to install.\n  --write refreshes the Stack / Run / Test / Build lines of the project's CLAUDE.md in place."); sys.exit(0)
 
 MARKERS = [  # (language, marker files, extensions)
     ("typescript", ["tsconfig.json", "tsconfig.base.json"], [".ts", ".tsx"]),
@@ -26,12 +28,14 @@ MARKERS = [  # (language, marker files, extensions)
     ("dart", ["pubspec.yaml"], [".dart"]),
     ("cpp", ["CMakeLists.txt"], [".cpp", ".cc", ".hpp"]),
     ("perl", [], [".pl", ".pm"]),
+    ("arkts", ["oh-package.json5", "build-profile.json5"], [".ets"]),
 ]
 FRAMEWORKS = [  # (framework, rule dir or None, marker files, package.json deps)
     ("nextjs", None, ["next.config.js", "next.config.mjs", "next.config.ts"], ["next"]),
     ("react", "react", [], ["react"]),
     ("react-native", "react-native", ["app.json"], ["react-native", "expo"]),
-    ("vue", "vue", ["vue.config.js", "vite.config.ts"], ["vue"]),
+    ("vue", "vue", ["vue.config.js"], ["vue"]),
+    ("remix", None, ["remix.config.js", "remix.config.ts"], ["@remix-run/react", "@remix-run/node"]),
     ("nuxt", "nuxt", ["nuxt.config.ts", "nuxt.config.js"], ["nuxt"]),
     ("angular", "angular", ["angular.json"], ["@angular/core"]),
     ("svelte", None, ["svelte.config.js"], ["svelte"]),
@@ -99,19 +103,25 @@ def detect(root):
           else "bun" if exists(root, "bun.lockb") else "npm" if pkg else
           "poetry" if exists(root, "poetry.lock") else "pip" if "python" in languages else
           "cargo" if "rust" in languages else "go" if "golang" in languages else
-          "bundler" if "ruby" in languages else "composer" if "php" in languages else "")
+          "bundler" if "ruby" in languages else "composer" if "php" in languages else
+          "gradle" if (exists(root, "build.gradle") or exists(root, "build.gradle.kts")) else "maven" if exists(root, "pom.xml") else
+          "pub" if "dart" in languages else "dotnet" if "csharp" in languages else "swiftpm" if "swift" in languages else "")
     scripts = pkg.get("scripts", {})
     def npm(s): return f"{pm} run {s}" if pm in ("npm", "pnpm", "yarn", "bun") else ""
     primary = languages[0] if languages else ""
     BY_LANG = {  # per-language defaults, chosen by the PRIMARY language only
-        "python": {"run": "python manage.py runserver" if "django" in frameworks else "uvicorn main:app --reload" if "fastapi" in frameworks else "",
-                   "test": "pytest", "lint": "ruff check ."},
-        "golang": {"run": "go run .", "test": "go test ./...", "build": "go build ./...", "lint": "golangci-lint run"},
+        "python": {"run": "python manage.py runserver" if "django" in frameworks else ("uvicorn app.main:app --reload" if exists(root, "app/main.py") else "uvicorn main:app --reload" if exists(root, "main.py") else "") if "fastapi" in frameworks else "",
+                   "test": "python manage.py test" if "django" in frameworks else "pytest" if (exists(root, "tests") or exists(root, "test") or exists(root, "pytest.ini") or exists(root, "conftest.py") or ("[tool.pytest" in open(os.path.join(root, "pyproject.toml")).read() if exists(root, "pyproject.toml") else False)) else "",
+                   "lint": "ruff check ." if (exists(root, "ruff.toml") or exists(root, ".ruff.toml") or ("[tool.ruff" in open(os.path.join(root, "pyproject.toml")).read() if exists(root, "pyproject.toml") else False)) else ""},
+        "golang": {"run": ("go run ./cmd/" + sorted(os.listdir(os.path.join(root, "cmd")))[0]) if os.path.isdir(os.path.join(root, "cmd")) and any(os.path.isdir(os.path.join(root, "cmd", d)) for d in os.listdir(os.path.join(root, "cmd"))) and not exists(root, "main.go") else "go run .",
+                   "test": "go test ./...", "build": "go build ./...", "lint": "golangci-lint run"},
         "rust":   {"run": "cargo run", "test": "cargo test", "build": "cargo build", "lint": "cargo clippy"},
         "ruby":   {"run": "bundle exec rails server" if "rails" in frameworks else "", "test": "bundle exec rspec", "lint": "bundle exec rubocop"},
         "php":    {"run": "php artisan serve" if "laravel" in frameworks else "", "test": "vendor/bin/phpunit", "lint": ""},
         "java":   {"run": "./mvnw spring-boot:run" if "spring" in frameworks else "", "test": "./mvnw test" if exists(root, "mvnw") else "./gradlew test", "build": "./mvnw package" if exists(root, "mvnw") else "./gradlew build"},
         "swift":  {"run": "swift run", "test": "swift test", "build": "swift build"},
+        "kotlin": {"run": "./gradlew run" if exists(root, "gradlew") else "gradle run", "test": "./gradlew test" if exists(root, "gradlew") else "gradle test", "build": "./gradlew build" if exists(root, "gradlew") else "gradle build"},
+        "csharp": {"run": "dotnet run", "test": "dotnet test", "build": "dotnet build"},
         "dart":   {"run": "flutter run" if "flutter" in frameworks else "dart run", "test": "flutter test" if "flutter" in frameworks else "dart test"},
     }
     lang_defaults = BY_LANG.get(primary, {})
@@ -143,6 +153,43 @@ def main():
     root = args[0] if args else "."
     if not os.path.isdir(root): print(f"detect-stack: {root} is not a directory", file=sys.stderr); return 3
     r = detect(root)
+    if "--write" in sys.argv:
+        i = sys.argv.index("--write"); target = sys.argv[i + 1] if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith("--") else os.path.join(root, "CLAUDE.md")
+        if not os.path.exists(target): print(f"detect-stack: {target} not found", file=sys.stderr); return 1
+        rules_dir = os.path.join(os.path.dirname(os.path.abspath(target)), ".claude", "rules")
+        installed = sorted(set((os.listdir(rules_dir) if os.path.isdir(rules_dir) else [])) | set(r["rule_sets"]))
+        c = r.get("commands", {})
+        lines = {"- **Stack:**": "- **Stack:** " + (", ".join(r["languages"] + r["frameworks"]) + (" (" + r["package_manager"] + ")" if r["package_manager"] else "") if not r.get("empty") else "_(empty project)_"),
+                 "- **Run locally:**": "- **Run locally:** `" + c.get("run", "_(the command)_") + "`",
+                 "- **Run tests:**": "- **Run tests:** `" + c.get("test", "_(the command)_") + "`",
+                 "- **Build:**": ("- **Build:** `" + c["build"] + "`") if c.get("build") else None,
+                 "- **Rule sets installed:**": "- **Rule sets installed:** " + ", ".join(installed)}
+        text = open(target, encoding="utf-8").read().splitlines()
+        out, seen = [], set()
+        for line in text:
+            key = next((k for k in lines if line.startswith(k)), None)
+            if key:
+                seen.add(key)
+                if lines[key]: out.append(lines[key])
+                continue
+            out.append(line)
+        # add missing lines right after the Run tests line (or after Stack)
+        for key in ("- **Build:**", "- **Rule sets installed:**"):
+            if key not in seen and lines[key]:
+                anchor = next((i for i, l in enumerate(out) if l.startswith("- **Run tests:**")), None)
+                if anchor is not None: out.insert(anchor + 1, lines[key])
+        open(target, "w", encoding="utf-8").write("\n".join(out) + "\n")
+        print(f"updated {target}: " + lines["- **Stack:**"][2:])
+        # install rule sets the project now needs from the pipeline copy this script ships in
+        here = os.path.dirname(os.path.abspath(__file__)); src_rules = os.path.join(here, "..", "core", "rules")
+        added = []
+        if os.path.isdir(src_rules):
+            for rs in r["rule_sets"]:
+                dst = os.path.join(rules_dir, rs); srcd = os.path.join(src_rules, rs)
+                if os.path.isdir(srcd) and not os.path.isdir(dst):
+                    import shutil; shutil.copytree(srcd, dst); added.append(rs)
+        if added: print("installed rule sets: " + ", ".join(added))
+        return 0
     if "--json" in sys.argv: print(json.dumps(r, indent=2)); return 0
     if r["empty"]: print("empty project (no source files yet)"); return 0
     print(f"languages : {', '.join(r['languages']) or '-'}")

@@ -1,10 +1,10 @@
 # UI Test Suite: [FEATURE-NAME]
 
 > **Suite ID**: ui-[feature-slug]
-> **Created**: YYYY-MM-DD
 > **Related WO/BUG**: WO-XXXX / BUG-XXXX
-> **Application**: {{ADMIN_APP}} | {{PORTAL_APP}}
-> **Base URL**: http://localhost:8600 | http://localhost:8604
+> **Application**: {{WEB_APP}}
+> **Base URL**: {{WEB_ORIGIN}}
+> **API**: {{API_BASE_URL}}
 
 ---
 
@@ -17,9 +17,8 @@
 - [ ] Database seeded with test data
 - [ ] Test user credentials available
 
-**Test User**:
-- Email: `test@example.com`
-- Password: `TestPass123!`
+**Test account**: taken from the harness configuration, never written here.
+A credential in a checked-in runbook is a credential leak.
 
 ---
 
@@ -31,7 +30,7 @@
 
 #### Steps
 
-| Step | Action | MCP Command | Expected Result |
+| Step | Action | Browser command | Expected Result |
 |------|--------|-------------|-----------------|
 | 1 | Navigate to page | `new_page(url="...")` | Page loads |
 | 2 | Take snapshot | `take_snapshot()` | Get element UIDs |
@@ -44,9 +43,9 @@
 
 - [ ] Page URL matches expected
 - [ ] Element [X] is visible with correct text
-- [ ] Network request [Y] returns 200
+- [ ] The request the action triggers returns a success status
 - [ ] No console errors logged
-- [ ] No 500 errors in network
+- [ ] No server errors in the network list
 
 #### Execution Record
 
@@ -62,7 +61,7 @@
 
 #### Steps
 
-| Step | Action | MCP Command | Expected Result |
+| Step | Action | Browser command | Expected Result |
 |------|--------|-------------|-----------------|
 | 1 | ... | ... | ... |
 
@@ -86,7 +85,7 @@
 
 #### Steps
 
-| Step | Action | MCP Command | Expected Result |
+| Step | Action | Browser command | Expected Result |
 |------|--------|-------------|-----------------|
 | 1 | Trigger error condition | ... | Error displayed |
 | 2 | Verify error message | `take_snapshot()` | Error text visible |

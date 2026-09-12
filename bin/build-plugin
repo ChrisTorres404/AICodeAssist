@@ -13,19 +13,20 @@
 # validation on current Claude Code. Do not add them.
 # ---------------------------------------------------------------------------
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0;; esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="1.0.0"
+VERSION="1.1.0"
 [ "${1:-}" = "--version" ] && VERSION="$2"
 OUT="$ROOT/dist/plugin"
 rm -rf "$OUT"; mkdir -p "$OUT"/{agents,skills,commands,hooks,bin,rules,workflows,.claude-plugin}
 
 cp -p "$ROOT"/core/agents/base/*.md "$ROOT"/core/agents/roles/*.md "$OUT/agents/"
 rm -f "$OUT/agents/README.md"
-for d in "$ROOT"/core/skills/*/; do mkdir -p "$OUT/skills/$(basename "$d")"; cp -p "$d"/*.md "$OUT/skills/$(basename "$d")/"; done
+for d in "$ROOT"/core/skills/*/; do cp -R "$d" "$OUT/skills/$(basename "$d")"; done
 cp -p "$ROOT"/core/commands/*.md "$OUT/commands/"
 cp -R "$ROOT"/core/rules/. "$OUT/rules/"
 cp -p "$ROOT"/core/workflows/*.js "$OUT/workflows/" 2>/dev/null || true
-cp -p "$ROOT"/bin/acp "$ROOT"/bin/wo "$ROOT"/bin/bug "$ROOT"/bin/pack "$ROOT"/bin/sanitize "$ROOT"/bin/detect-stack "$OUT/bin/"
+cp -p "$ROOT"/bin/acp "$ROOT"/bin/wo "$ROOT"/bin/bug "$ROOT"/bin/pack "$ROOT"/bin/sanitize "$ROOT"/bin/detect-stack "$ROOT"/bin/stack-specialist "$OUT/bin/"
 mkdir -p "$OUT/hooks/scripts" "$OUT/hooks/rules"
 cp -p "$ROOT"/core/hooks/*.py "$ROOT"/core/hooks/*.sh "$OUT/hooks/scripts/"
 cp -p "$ROOT"/core/hooks/rules/*.md "$OUT/hooks/rules/"
@@ -39,7 +40,7 @@ chmod +x "$OUT"/bin/* "$OUT"/hooks/scripts/*.py "$OUT"/hooks/scripts/*.sh
 render() {
   perl -pi -e 's/\{\{PIPELINE_ROOT\}\}/\$\{CLAUDE_PLUGIN_ROOT\}/g; s/\{\{PROJECT_ROOT\}\}\/\$\{CLAUDE_PLUGIN_ROOT\}/\$\{CLAUDE_PLUGIN_ROOT\}/g; s/\{\{WORKORDERS_DIR\}\}/Workspace\/Docs\/WorkOrders/g; s/\{\{BUGS_DIR\}\}/Workspace\/Docs\/Bugs/g; s/\{\{TESTING_DIR\}\}/Workspace\/Testing/g; s/\{\{SESSIONS_DIR\}\}/Workspace\/Sessions/g; s/\{\{DOCS_DIR\}\}/Workspace\/Docs/g; s/\{\{WORKSPACE_DIR\}\}/Workspace/g; s/\{\{PROJECT_NAME\}\}/the project/g; s/\{\{PROJECT_SLUG\}\}/project/g; s/\{\{[A-Z_]+\}\}//g' "$@"
 }
-while IFS= read -r f; do render "$f"; done < <(find "$OUT/skills" "$OUT/commands" "$OUT/agents" "$OUT/templates" -type f -name '*.md')
+while IFS= read -r f; do render "$f"; done < <(find "$OUT/skills" "$OUT/commands" "$OUT/agents" "$OUT/templates" "$OUT/hooks" "$OUT/rules" "$OUT/workflows" -type f \( -name '*.md' -o -name '*.py' -o -name '*.sh' -o -name '*.js' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name '*.txt' \))
 
 # hooks.json: same graph as core/config/settings.hooks.json, rooted at the plugin
 python3 - "$ROOT/core/config/settings.hooks.json" "$OUT/hooks/hooks.json" <<'PY'
@@ -59,7 +60,7 @@ cat > "$OUT/.claude-plugin/plugin.json" <<JSON
 {
   "name": "aicodepipeline",
   "version": "$VERSION",
-  "description": "Christian Torres's AI engineering pipeline: an evidence-gated work-order lifecycle, a bug lifecycle, packs of precedent, a behavioral test harness, 47 agents, skills, hooks with profiles, and per-language rules.",
+  "description": "Christian Torres's AI engineering pipeline: an evidence-gated work-order lifecycle, a bug lifecycle, packs of precedent, a behavioral test harness, 95 agents, skills, hooks with profiles, per-language rules, and a source-traced documentation lifecycle.",
   "author": { "name": "Christian Torres", "url": "https://github.com/ChrisTorres404" },
   "homepage": "https://github.com/ChrisTorres404/AICodePipeline",
   "repository": "https://github.com/ChrisTorres404/AICodePipeline",
@@ -80,7 +81,7 @@ cat > "$OUT/.claude-plugin/marketplace.json" <<JSON
   "metadata": { "description": "AICodePipeline — evidence-gated engineering with AI agents" },
   "plugins": [ {
     "name": "aicodepipeline", "source": "./", "version": "$VERSION",
-    "description": "Work orders that close only on executed evidence, packs of precedent, a behavioral harness, 46 agents, skills, hooks, and per-language rules.",
+    "description": "Work orders that close only on executed evidence, packs of precedent, a behavioral harness, 95 agents, skills, hooks, per-language rules, and source-traced documentation.",
     "author": { "name": "Christian Torres" }, "license": "MIT", "category": "workflow",
     "keywords": ["work-orders", "evidence", "testing", "agents", "hooks", "rules"], "strict": false
   } ]
@@ -101,5 +102,5 @@ Rules are not auto-installed in plugin mode; copy the sets you need from
 full repository for the managed layout.
 MD
 echo "built $OUT ($(find "$OUT" -type f | wc -l | tr -d ' ') files)"
-echo "  agents=$(ls "$OUT/agents" | wc -l | tr -d ' ') skills=$(ls "$OUT/skills" | wc -l | tr -d ' ') commands=$(ls "$OUT/commands" | wc -l | tr -d ' ') rules=$(ls "$OUT/rules" | wc -l | tr -d ' ') hooks=$(python3 -c "import json;print(sum(len(v) for v in json.load(open('$OUT/hooks/hooks.json'))['hooks'].values()))")"
-unresolved="$(grep -rhoE '\{\{[A-Z_]+\}\}' "$OUT" | sort -u || true)"; [ -n "$unresolved" ] && echo "  WARNING unresolved: $unresolved" || echo "  no unresolved template variables"
+echo "  agents=$(ls "$OUT/agents" | wc -l | tr -d ' ') skills=$(ls "$OUT/skills" | wc -l | tr -d ' ') commands=$(ls "$OUT/commands" | wc -l | tr -d ' ') rules=$(ls "$OUT/rules" | wc -l | tr -d ' ') hooks=$(python3 -c "import json;print(sum(len(h.get('hooks',[])) for v in json.load(open('$OUT/hooks/hooks.json'))['hooks'].values() for h in v))")"
+unresolved="$(grep -rhoE '\{\{[A-Z_]+\}\}' "$OUT" --exclude-dir=project | sort -u || true)"; [ -n "$unresolved" ] && echo "  WARNING unresolved: $unresolved" || echo "  no unresolved template variables"

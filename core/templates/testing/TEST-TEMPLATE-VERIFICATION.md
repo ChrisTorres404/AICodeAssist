@@ -33,7 +33,7 @@
 **Evidence Summary:**
 - HTTP 200 returned with expected payload
 - Database record created correctly
-- Audit log captured event
+- Activity recorded for the event
 
 **Status:** VERIFIED
 
@@ -92,7 +92,7 @@
 
 | Document | Location |
 |----------|----------|
-| Test Harness | `{{TESTING_DIR}}/docs/wo-XXXX-test-harness.md` |
+| Test Harness | `{{WORKORDERS_DIR}}/WO-XXXX-<name>/wo-XXXX-test-harness.md` |
 | Execution Results | `{{TESTING_DIR}}/test-results/wo-XXXX-execution-YYYYMMDD.md` |
 | Test Suite Script | `{{TESTING_DIR}}/suites/wo-XXXX-feature-name.sh` |
 
@@ -105,7 +105,7 @@
 1. User performs [action] — VERIFIED
 2. System responds with [response] — VERIFIED
 3. Database updated with [state] — VERIFIED
-4. Audit log captures [event] — VERIFIED
+4. Activity recorded for [event] — VERIFIED
 
 ### Error Path: [Error Scenario]
 
@@ -117,13 +117,15 @@
 
 ## Security Verification
 
+<!-- Every row is [status] until something ran. Write N/A where a check does not apply; never leave a PASS you did not execute. -->
+
 | Check | Status | Evidence |
 |-------|--------|----------|
-| Authentication required | PASS | 401 returned without token |
-| Authorization enforced | PASS | 403 returned for wrong role |
-| Input validation | PASS | 400 returned for invalid input |
-| SQL injection prevented | PASS | Parameterized queries used |
-| XSS prevented | PASS | Output encoded correctly |
+| Authentication required | [status] | [evidence, or N/A] |
+| Authorization enforced | [status] | [evidence, or N/A] |
+| Input validation | [status] | [evidence, or N/A] |
+| Injection prevented | [status] | [evidence, or N/A] |
+| XSS prevented | [status] | [evidence, or N/A] |
 
 ---
 
@@ -131,9 +133,9 @@
 
 | Metric | Expected | Actual | Status |
 |--------|----------|--------|--------|
-| Response time (p50) | < 100ms | 45ms | PASS |
-| Response time (p99) | < 500ms | 180ms | PASS |
-| Throughput | > 100 req/s | 250 req/s | PASS |
+| Response time (p50) | [target] | [measured, or not measured] | [status] |
+| Response time (p99) | [target] | [measured, or not measured] | [status] |
+| Throughput | [target] | [measured, or not measured] | [status] |
 
 ---
 
@@ -169,10 +171,11 @@ None — All critical requirements verified.
 
 ### Code Quality Verification (MANDATORY)
 
-> **Per MANDATORY-WO-METHODOLOGY.md — Tests passing ≠ Production-ready code**
+> Per `{{PIPELINE_ROOT}}/core/methodology/MANDATORY-WO-METHODOLOGY.md`:
+> passing tests are not production readiness.
 
 - [ ] **Read through ALL changed files** — Line by line review completed
-- [ ] **No console.log statements** — Uses Logger service
+- [ ] **No debug logging** — uses the project's logger
 - [ ] **No magic numbers** — Extracted to configuration or constants
 - [ ] **Proper typing** — No `any` types, proper validation
 - [ ] **Error handling complete** — Clear messages, proper exception types
@@ -197,4 +200,7 @@ None — All critical requirements verified.
 **Notes:**
 [Any final notes for the closeout]
 
-**This verification report confirms that WO-XXXX has been tested according to the Behavioral Testing Methodology. All PASS statuses represent actual execution evidence, not assumptions.**
+**This verification report confirms that WO-XXXX was tested according to the
+Behavioral Testing Methodology. Every PASS represents captured execution
+evidence, not an assumption. `wo verify --run` writes the status from the
+suite's exit code; a status typed by hand is not evidence.**

@@ -1,0 +1,161 @@
+name: CI
+
+# The pipeline has to behave the same under bash 3.2 with a BSD userland and
+# bash 5 with GNU coreutils. The only way to know that is to run it on both on
+# every commit, so this job is the matrix, not a Linux-only smoke test.
+#
+# Nothing is cached. A cache that survives a broken change would hide exactly
+# the failure this workflow exists to catch.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Toolchain — python3, perl, node, git
+        run: |
+          if ! command -v python3 >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq python3
+          fi
+          if ! command -v perl >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq perl
+          fi
+          missing=0
+          for t in python3 perl node git; do
+            command -v "$t" >/dev/null 2>&1 || { echo "missing: $t"; missing=1; }
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "system    : $(uname -s) $(uname -r)"
+          echo "bash      : $BASH_VERSION at $(command -v bash)"
+          echo "/bin/bash : $(/bin/bash -c 'echo $BASH_VERSION')"
+          echo "python3   : $(python3 --version 2>&1)"
+          echo "perl      : $(perl -e 'print "$^V"')"
+          echo "node      : $(node --version)"
+          echo "sed       : $(sed --version 2>/dev/null | head -1 || echo 'BSD sed (no --version)')"
+
+      - name: Git identity — the drivers commit inside their scratch projects
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "AICodePipeline CI"
+          git config --global init.defaultBranch main
+
+      # The file lists every later step uses. Discovery is by extension, then by
+      # shebang for the extension-less drivers, and it never shells out per file.
+      - name: Inventory the scripts
+        run: |
+          all="$RUNNER_TEMP/all.txt"
+          find . \( -name .git -o -name node_modules -o -name __pycache__ \
+                    -o -name dist -o -name Examples_for_claude \) -prune \
+               -o -type f -print > "$all" 2>/dev/null || true
+          : > "$RUNNER_TEMP/shell.txt"; : > "$RUNNER_TEMP/python.txt"; : > "$RUNNER_TEMP/js.txt"
+          while IFS= read -r f; do
+            case "$f" in
+              *.sh|*.bash) echo "$f" >> "$RUNNER_TEMP/shell.txt"; continue;;
+              *.py)        echo "$f" >> "$RUNNER_TEMP/python.txt"; continue;;
+              *.js|*.cjs)  echo "$f" >> "$RUNNER_TEMP/js.txt"; continue;;
+              *.md|*.json|*.mjs|*.ts|*.sql|*.env|*.txt|*.yml|*.yaml|*.lock) continue;;
+            esac
+            line=""
+            IFS= read -r line < "$f" 2>/dev/null || true
+            case "$line" in
+              '#!'*python*) echo "$f" >> "$RUNNER_TEMP/python.txt";;
+              '#!'*sh*)     echo "$f" >> "$RUNNER_TEMP/shell.txt";;
+            esac
+          done < "$all"
+          echo "shell : $(wc -l < "$RUNNER_TEMP/shell.txt" | tr -d ' ')"
+          echo "python: $(wc -l < "$RUNNER_TEMP/python.txt" | tr -d ' ')"
+          echo "js    : $(wc -l < "$RUNNER_TEMP/js.txt" | tr -d ' ')"
+
+      # /bin/bash is 3.2 on the macOS runner and 5.x on the Linux runner, so the
+      # two legs together prove the scripts parse under both.
+      - name: bash -n every shell script (system bash)
+        run: |
+          echo "parsing with $(/bin/bash -c 'echo $BASH_VERSION')"
+          rc=0
+          while IFS= read -r f; do
+            /bin/bash -n "$f" || { echo "  SYNTAX ERROR: $f"; rc=1; }
+          done < "$RUNNER_TEMP/shell.txt"
+          [ "$rc" -eq 0 ] && echo "  all shell scripts parse"
+          exit "$rc"
+
+      - name: py_compile every python file
+        run: |
+          rc=0
+          while IFS= read -r f; do
+            python3 -m py_compile "$f" || { echo "  COMPILE ERROR: $f"; rc=1; }
+          done < "$RUNNER_TEMP/python.txt"
+          [ "$rc" -eq 0 ] && echo "  all python files compile"
+          exit "$rc"
+
+      - name: node --check every javascript file
+        run: |
+          rc=0
+          while IFS= read -r f; do
+            node --check "$f" || { echo "  PARSE ERROR: $f"; rc=1; }
+          done < "$RUNNER_TEMP/js.txt"
+          [ "$rc" -eq 0 ] && echo "  all javascript files parse"
+          exit "$rc"
+
+      - name: Portability check
+        run: bin/maintenance/portability-check.sh
+
+      # lint exits 0 clean, 1 warnings only, 2 errors. Warnings do not fail CI;
+      # errors do.
+      - name: bin/lint
+        run: |
+          rc=0
+          out="$(bin/lint)" || rc=$?
+          printf '%s\n' "$out" | tail -25
+          [ "$rc" -lt 2 ] || { echo "lint reported errors"; exit 1; }
+
+      # sanitize exits 0 PASS, 1 PASS WITH WARNINGS, 2 FAIL. Only a FAIL is fatal.
+      - name: bin/sanitize
+        run: |
+          rc=0
+          for d in core bin docs harness packs; do
+            [ -d "$d" ] || { echo "  $d absent — skipped"; continue; }
+            r=0
+            bin/sanitize "$d" --quiet >/dev/null 2>&1 || r=$?
+            if [ "$r" -lt 2 ]; then
+              echo "  $d clean (exit $r)"
+            else
+              echo "  $d FAIL"
+              bin/sanitize "$d" | grep -A 20 '^## Critical' || true
+              rc=1
+            fi
+          done
+          exit "$rc"
+
+      # The behavioural evaluations. `eval live` is deliberately not here: it
+      # drives real model sessions and needs credentials.
+      - name: bin/eval run
+        run: bin/eval run
+
+      - name: Evaluation report
+        if: always()
+        run: |
+          f="$(ls -t harness/evals/results/*.md 2>/dev/null | head -1 || true)"
+          [ -n "$f" ] && cat "$f" || echo "no evaluation report was written"

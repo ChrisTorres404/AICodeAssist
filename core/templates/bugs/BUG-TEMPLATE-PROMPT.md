@@ -2,7 +2,7 @@ You are operating inside the {{WORKSPACE_DIR}} / {{PROJECT_NAME}} context.
 
 Bug: BUG-XXXX – [Short Title]
 Severity: [Critical / High / Medium / Low]
-Owner: Christian
+Owner: _(who is accountable for this fix)_
 Date: YYYY-MM-DD
 
 You are a **[role - e.g., senior backend engineer, frontend React developer]** specializing in [specialization].
@@ -13,13 +13,13 @@ Your job: **Fix BUG-XXXX** while maintaining code quality, adding proper test co
 
 ## 1. Bug Files You MUST Read First
 
-Base path: `{{PROJECT_ROOT}}/{{BUGS_DIR}}/BUG-XXXX-[slug]/`
+Base path: `{{BUGS_DIR}}/BUG-XXXX-[slug]/` (relative to the repository root)
 
 You MUST read:
 1. `BUG-XXXX-[slug].md` (bug issue document)
 
 Also read the related Work Order(s):
-- `{{PROJECT_ROOT}}/{{WORKORDERS_DIR}}/WO-XXXX-[folder]/`
+- `{{WORKORDERS_DIR}}/WO-XXXX-[folder]/`
 
 ---
 
@@ -50,7 +50,7 @@ Before fixing, examine these files:
 |------|---------|
 | `path/to/problematic/file.ts` | Where the bug manifests |
 | `path/to/related/file.ts` | Related code that may be affected |
-| `path/to/test/file.spec.ts` | Existing tests (if any) |
+| `path/to/<existing test file>` | Existing tests (if any) |
 
 ---
 
@@ -80,10 +80,12 @@ After fixing, add comments in the affected code:
 
 ## 6. Testing Requirements
 
-**TESTING METHODOLOGY:** {{PROJECT_NAME}} uses **Behavioral Testing** (NOT Jest E2E tests).
+**TESTING METHODOLOGY:** verification evidence here means **behavioral tests**
+— reproduce the defect against the running system, fix it, then prove the same
+steps now succeed. Unit tests are welcome and are not evidence on their own.
 
 You MUST read:
-- `{{PROJECT_ROOT}}/{{DOCS_DIR}}/BEHAVIORAL-TESTING-METHODOLOGY.md`
+- `{{PIPELINE_ROOT}}/core/methodology/MANDATORY-TESTING-METHODOLOGY.md`
 
 ### Required Tests
 - [ ] Unit test covering the fix
@@ -93,8 +95,8 @@ You MUST read:
 ### Test Locations
 | Test Type | File Path |
 |-----------|-----------|
-| Unit test | `path/to/test.spec.ts` |
-| Behavioral test | `path/to/behavioral-test.sh` |
+| Unit test | `path/to/<the project's unit test file>` |
+| Behavioral test | `{{TESTING_DIR}}/suites/bug-XXXX-<slug>.sh` |
 
 ---
 
@@ -122,7 +124,6 @@ If the fix involves:
 - **Type changes**: Update types in both backend and SDK
 
 Read the full architecture rules:
-- `{{PROJECT_ROOT}}/{{BUGS_DIR}}/Bug-Prompts/Bug-API-SDK-UI-Standardization-prompt.md`
 
 ---
 

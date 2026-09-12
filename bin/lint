@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""
+lint — validate the pipeline's own surface before it ships or installs.
+
+    bin/lint [<pipeline-root>] [--strict]
+
+Checks agents (frontmatter, model, tools scalar, dispatchable description,
+minimum depth), skills (SKILL.md with name and description), hook rules
+(frontmatter and compilable pattern), hooks JSON, rule files (non-empty,
+paths frontmatter well-formed), personal or host paths anywhere, invisible or
+bidirectional unicode that can hide instructions, and unresolved template
+variables outside templates. Exit 0 clean, 1 warnings only, 2 errors.
+"""
+import json, os, re, sys, pathlib
+if any(a in ("-h", "--help") for a in sys.argv[1:]):
+    print("usage: lint [--strict]\n  Validates agents, skills, hook rules, hooks JSON, rules, personal paths, invisible unicode, and cross-skill links. --strict makes warnings fail."); sys.exit(0)
+
+ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else pathlib.Path(__file__).resolve().parents[1])
+STRICT = "--strict" in sys.argv
+E, W = [], []
+err = lambda f, m: E.append(f"{f}: {m}")
+warn = lambda f, m: W.append(f"{f}: {m}")
+VALID_MODELS = {"sonnet", "opus", "haiku", "inherit"}
+BAD_UNICODE = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069\u180e\u115f\u1160\u2061-\u2064\u3164]|[\U000e0000-\U000e007f]")
+PERSONAL = re.compile(r"(/Users/(?!Shared/)[A-Za-z][A-Za-z0-9_-]*/|/home/(?!user/)[a-z][a-z0-9_-]*/|C:\\\\Users\\\\[A-Za-z])")
+
+def fm_of(text):
+    m = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n", text.lstrip("\ufeff"), re.S)
+    if not m: return None
+    d = {}
+    for line in m.group(1).splitlines():
+        if re.match(r"^\w[\w-]*:", line):
+            k, v = line.split(":", 1); k = k.strip()
+            if k in d: err("frontmatter", f"duplicate key {k}")
+            d[k] = v.strip()
+    return d
+
+def check_agent(p):
+    rel = p.relative_to(ROOT); t = p.read_text(errors="replace"); fm = fm_of(t)
+    if fm is None: err(rel, "missing frontmatter"); return
+    for k in ("name", "description", "model"):
+        if k not in fm: err(rel, f"missing {k}")
+    if fm.get("name") and fm["name"] != p.stem: err(rel, f"name '{fm['name']}' != filename '{p.stem}'")
+    if fm.get("model") and fm["model"] not in VALID_MODELS: err(rel, f"model '{fm['model']}' not in {sorted(VALID_MODELS)}")
+    if fm.get("tools", "").startswith("["): err(rel, "tools must be a comma-separated scalar, not a YAML list")
+    if fm.get("description") and not re.search(r"\bUse\b|\buse when\b|PROACTIVE", fm["description"]): warn(rel, "description gives no dispatch signal (no 'Use …')")
+    if len(t.splitlines()) < 100: warn(rel, f"only {len(t.splitlines())} lines; the fleet standard is 100+")
+    if "## Activation Triggers" in t: err(rel, "dead 'Activation Triggers' section")
+
+def check_skill(d):
+    rel = d.relative_to(ROOT); p = d / "SKILL.md"
+    if not p.exists(): err(rel, "no SKILL.md"); return
+    fm = fm_of(p.read_text(errors="replace"))
+    if fm is None: err(rel, "SKILL.md missing frontmatter"); return
+    if fm.get("name") != d.name: err(rel, f"skill name '{fm.get('name')}' != directory '{d.name}'")
+    if not fm.get("description"): err(rel, "SKILL.md missing description")
+    elif not re.search(r"\bUse\b|\buse when\b", fm["description"]): warn(rel, "description gives no trigger ('Use when …')")
+
+def check_hook_rule(p):
+    rel = p.relative_to(ROOT); fm = fm_of(p.read_text(errors="replace"))
+    if fm is None: err(rel, "missing frontmatter"); return
+    for k in ("name", "event", "pattern"):
+        if k not in fm: err(rel, f"missing {k}")
+    if fm.get("event") not in ("bash", "file", "all"): err(rel, f"event must be bash|file|all, got {fm.get('event')}")
+    if fm.get("action", "warn") not in ("warn", "block"): err(rel, f"action must be warn|block")
+    try: re.compile(fm.get("pattern", ""))
+    except re.error as e: err(rel, f"pattern does not compile: {e}")
+
+def check_hooks_json(p):
+    rel = p.relative_to(ROOT)
+    try: d = json.load(open(p))
+    except Exception as e: err(rel, f"invalid JSON: {e}"); return
+    for ev, entries in d.get("hooks", {}).items():
+        for e in entries:
+            for h in e.get("hooks", []):
+                if h.get("type") != "command": err(rel, f"{ev}: unsupported hook type {h.get('type')}")
+                if not h.get("command"): err(rel, f"{ev}: hook without command")
+                elif "run-hook.sh acp:" not in h["command"]: warn(rel, f"{ev}: hook not routed through run-hook.sh with an acp: id")
+
+def check_rule(p):
+    rel = p.relative_to(ROOT); t = p.read_text(errors="replace")
+    if not t.strip(): err(rel, "empty rule file"); return
+    if t.startswith("---") and "paths:" in t.split("---")[1] and not re.search(r"paths:\s*\n(\s+- .+\n)+", t.split("---")[1] + "\n"): err(rel, "paths frontmatter malformed")
+    if len(t.splitlines()) > 120: warn(rel, f"{len(t.splitlines())} lines; rules are meant to be short, move detail to a skill")
+
+def ignored(p):
+    for anc in [p.parent] + list(p.parents):
+        ig = anc / ".sanitize-ignore"
+        if ig.exists():
+            names = {l.strip() for l in ig.read_text().splitlines() if l.strip() and not l.startswith("#")}
+            if str(p.relative_to(anc)) in names: return True
+        if anc == ROOT: break
+    return False
+
+def check_text(p):
+    rel = p.relative_to(ROOT)
+    if ignored(p): return
+    try: t = p.read_text()
+    except UnicodeDecodeError: return
+    if BAD_UNICODE.search(t): err(rel, "invisible or bidirectional unicode present")
+    m = PERSONAL.search(t)
+    if m and "sanitize" not in p.name and "lint" not in p.name: err(rel, f"personal path {m.group(0)!r}")
+    if str(rel).startswith(("core/agents", "core/skills", "core/rules", "docs")) and "{{STACK_SECTION}}" in t: err(rel, "unresolved {{STACK_SECTION}} outside templates")
+
+for p in sorted((ROOT / "core/agents").rglob("*.md")):
+    if p.name != "README.md": check_agent(p)
+for d in sorted(x for x in (ROOT / "core/skills").iterdir() if x.is_dir()): check_skill(d)
+_skill_names = {d.name for d in (ROOT / "core/skills").iterdir() if d.is_dir()}
+if (ROOT / "core/skill-packs").exists():
+    _skill_names |= {d.name for pk in (ROOT / "core/skill-packs").iterdir() if pk.is_dir() for d in pk.iterdir() if d.is_dir()}
+for f in list((ROOT / "core/skills").rglob("*.md")) + list((ROOT / "core/skill-packs").rglob("*.md")):
+    for m in re.finditer(r"\]\(\.\./([a-z0-9-]+)/SKILL\.md\)", f.read_text(errors="ignore")):
+        if m.group(1) not in _skill_names: err(f.relative_to(ROOT), f"cross-skill link to missing skill '{m.group(1)}'")
+for pack in sorted(x for x in (ROOT / "core/skill-packs").iterdir() if x.is_dir()) if (ROOT / "core/skill-packs").exists() else []:
+    for d in sorted(x for x in pack.iterdir() if x.is_dir()): check_skill(d)
+for p in sorted((ROOT / "core/hooks/rules").glob("*.md")): check_hook_rule(p)
+for p in [ROOT / "core/config/settings.hooks.json"]:
+    if p.exists(): check_hooks_json(p)
+for p in sorted((ROOT / "core/rules").rglob("*.md")): check_rule(p)
+for sub in ("core", "harness", "bin", "docs"):
+    for p in sorted((ROOT / sub).rglob("*")):
+        if "harness/evals/results" in str(p) or "__pycache__" in str(p): continue
+        if p.is_file() and p.suffix in (".md", ".sh", ".py", ".js", ".json", ".env", ".sql", "") and ".sanitize-ignore" not in p.name: check_text(p)
+
+for e in E: print(f"ERROR  {e}")
+for w in W: print(f"WARN   {w}")
+print(f"\n{len(E)} error(s), {len(W)} warning(s) across the pipeline")
+sys.exit(2 if E else (1 if W and STRICT else 0))

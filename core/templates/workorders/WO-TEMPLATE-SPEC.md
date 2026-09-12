@@ -2,8 +2,8 @@
 
 **Priority:** P0 | P1 | P2 | P3
 **Effort:** [X hours/days]
-**Dependencies:** [WO-XXXX, WO-YYYY or None]
-**Blocks:** [WO-ZZZZ or None]
+**Dependencies:** [WO-<other>, WO-<other> or None]
+**Blocks:** [WO-<other> or None]
 
 ---
 
@@ -12,8 +12,8 @@
 [1-2 paragraphs describing the problem this work order solves]
 
 **Current State:**
-```typescript
-// Code showing the current problematic implementation (if applicable)
+```
+// the current implementation, in the project's own language (if applicable)
 ```
 
 **Impact:**
@@ -25,66 +25,44 @@
 
 ## Solution
 
-### 1. [Solution Component 1 - e.g., Database Changes]
+Write each component in the project's own language and idiom. Show real
+signatures, not prose about them — a spec that cannot be implemented from its
+own contents is not finished.
 
-**File:** `[path/to/file.ts]`
+### 1. [Solution Component 1 — e.g. the data-model change]
 
-```typescript
-// Code showing the solution implementation
+**File:** `[path/to/file]`
+
+```
+// the changed model or schema definition
 ```
 
-### 2. [Solution Component 2 - e.g., Create Migration]
+### 2. [Solution Component 2 — e.g. the migration]
 
-**File:** `[path/to/migration.ts]`
+**File:** `[path/to/migration]`
 
-```typescript
-import { MigrationInterface, QueryRunner } from 'typeorm';
-
-export class [MigrationName]TIMESTAMP implements MigrationInterface {
-  name = '[MigrationName]TIMESTAMP';
-
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
-      -- SQL here
-    `);
-  }
-
-  public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
-      -- Rollback SQL here
-    `);
-  }
-}
+```sql
+-- forward
+-- rollback
 ```
 
-### 3. [Solution Component 3 - e.g., Service Implementation]
+Follow the naming and structure of the migrations already in that directory.
 
-**File:** `[path/to/service.ts]`
+### 3. [Solution Component 3 — e.g. the service or handler]
 
-```typescript
-import { Injectable } from '@nestjs/common';
+**File:** `[path/to/file]`
 
-@Injectable()
-export class [ServiceName] {
-  constructor(
-    // Dependencies
-  ) {}
-
-  /**
-   * [Method description]
-   */
-  async [methodName]([params]): Promise<[ReturnType]> {
-    // Implementation
-  }
-}
+```
+// the new or changed function, with its real signature,
+// its error handling, and its dependencies
 ```
 
-### 4. [Solution Component 4 - e.g., Guard/Controller Update]
+### 4. [Solution Component 4 — e.g. the endpoint or entry point]
 
-**File:** `[path/to/file.ts]`
+**File:** `[path/to/file]`
 
-```typescript
-// Code showing the implementation
+```
+// how it is wired in, and what protects it
 ```
 
 ### 5. [Continue as needed...]
@@ -95,10 +73,10 @@ export class [ServiceName] {
 
 | File | Changes |
 |------|---------|
-| `[path/to/file1.ts]` | [Description of changes] |
-| `[path/to/file2.ts]` | [Description of changes] |
-| `[path/to/file3.ts]` | [Description of changes] |
-| `[path/to/migrations/index.ts]` | Register new migration |
+| `[path/to/file1]` | [Description of changes] |
+| `[path/to/file2]` | [Description of changes] |
+| `[path/to/file3]` | [Description of changes] |
+| `[path/to/migrations/]` | Register the new migration, if this project requires it |
 
 ---
 
@@ -115,15 +93,19 @@ Add to `.env` (if applicable):
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests (the project's unit runner)
 - [ ] [Test case 1]
 - [ ] [Test case 2]
 - [ ] [Test case 3]
 
-### Integration Tests
-- [ ] [Test case 1]
-- [ ] [Test case 2]
-- [ ] [Test case 3]
+### Behavioral Tests (verification evidence)
+Suite: `{{TESTING_DIR}}/suites/wo-XXXX-[feature].sh`
+- [ ] [Journey 1 — request, response, and the state it changed]
+- [ ] [Journey 2 — the error path, and that no state changed]
+- [ ] [Journey 3]
+
+A green unit suite is necessary and not sufficient. Only the behavioral suite
+closes the work order.
 
 ### Security Tests (if applicable)
 - [ ] [Security test 1]
@@ -202,22 +184,18 @@ Response ([error_status]):
 
 ### New Methods
 
-```typescript
-// packages/{{SDK_PKG}}/src/[path]/[file].ts
+```
+// {{SDK_PKG}}/[path]/[file]
 
-/**
- * [Method description]
- */
-async [methodName]([params]: [ParamType]): Promise<[ReturnType]> {
-  // Implementation
-}
+// [Method description]
+[methodName]([params]) -> [ReturnType]
 ```
 
 ### Type Definitions
 
-```typescript
-export interface [TypeName] {
-  [field]: [type];
+```
+[TypeName] {
+  [field]: [type]
 }
 ```
 
@@ -229,7 +207,7 @@ export interface [TypeName] {
 
 | Component | Location | Changes |
 |-----------|----------|---------|
-| `[ComponentName]` | `[path/to/component.tsx]` | [Description] |
+| `[ComponentName]` | `[feature directory]/components/[Name]` | [Description] |
 
 ### User Flow
 
@@ -246,3 +224,20 @@ export interface [TypeName] {
 - [ ] [Criterion 4]
 - [ ] All existing tests pass
 - [ ] New tests pass
+
+---
+
+## Cross-Cutting Checks
+
+Answer each; "N/A" is an answer, blank is not. Every item here is a bug that shipped once.
+
+- **Contract:** if a client and an API both change, which is the source of truth, and is the other generated or contract-tested against it?
+- **Scoping:** which queries are scoped to the caller's data, and where is that filter enforced — in one place, or repeated per query?
+- **Security:** machine auth is opt-in per endpoint; every new endpoint names what authenticates it and what authorizes it; any credential set as a cookie is absent from response bodies.
+- **Dependencies:** what must be registered or imported for this code's dependencies to resolve at runtime?
+- **Data:** does seed or reference data need a migration and a bootstrap change as well as a dev insert? Any partitioned or mirrored tables involved?
+- **Failure:** for multi-step operations, what is rolled back or compensated when a step fails mid-way?
+- **Time:** timezone behaviour and units for any date or duration.
+- **UI:** light, dark, and system themes; loading, empty, and error states; list and detail parity; phone width.
+- **Deletion:** if this extracts or clones code, what is removed?
+- **Tests:** which existing suites must run in addition to new ones?

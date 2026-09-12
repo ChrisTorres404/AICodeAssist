@@ -13,6 +13,8 @@ paths:
 
 > This file extends [common/coding-style.md](../common/coding-style.md) with Angular specific content.
 
+Worked examples: skill `angular-patterns`.
+
 ## Version Awareness
 
 Always check the project's Angular version before writing code — features differ significantly between versions. Run `ng version` or inspect `package.json`. When creating a new project, do not pin a version unless the user specifies one.
@@ -30,96 +32,31 @@ Follow Angular CLI conventions — one artifact per file:
 
 ## Components
 
-Prefer standalone components (v17+ default). Use `OnPush` change detection on all new components.
-
-```typescript
-@Component({
-  selector: 'app-user-card',
-  standalone: true,
-  imports: [RouterModule],
-  templateUrl: './user-card.component.html',
-  changeDetection: ChangeDetectionStrategy.OnPush,
-})
-export class UserCardComponent {
-  user = input.required<User>();
-  select = output<string>();
-}
-```
+Prefer standalone components (v17+ default). Use `OnPush` change detection on all new components. Declare inputs with `input.required<T>()` and outputs with `output<T>()`.
 
 ## Dependency Injection
 
-Use `inject()` over constructor injection. Keep constructors empty or remove them entirely.
+Use `inject()` over constructor injection. Keep constructors empty or remove them entirely — constructor injection is verbose and harder to tree-shake.
 
-```typescript
-// CORRECT
-@Injectable({ providedIn: 'root' })
-export class UserService {
-  private http = inject(HttpClient);
-  private router = inject(Router);
-}
-
-// WRONG: Constructor injection is verbose and harder to tree-shake
-constructor(private http: HttpClient, private router: Router) {}
-```
-
-Use `InjectionToken` for non-class dependencies:
-
-```typescript
-const API_URL = new InjectionToken<string>('API_URL');
-
-// Provide:
-{ provide: API_URL, useValue: 'https://api.example.com' }
-
-// Consume:
-private apiUrl = inject(API_URL);
-```
+Use `InjectionToken` for non-class dependencies: declare the token, provide it with `useValue`, and read it with `inject()`.
 
 ## Signals
 
 ### Core Primitives
 
-```typescript
-count = signal(0);
-doubled = computed(() => this.count() * 2);
-
-increment() {
-  this.count.update(n => n + 1);
-}
-```
+Use `signal()` for state, `computed()` for derived values, and `.update()` to write from the previous value.
 
 ### `linkedSignal` — Writable Derived State
 
-Use `linkedSignal` when a signal must reset or adapt when a source changes, but also be independently writable:
-
-```typescript
-selectedOption = linkedSignal(() => this.options()[0]);
-// Resets to first option when options changes, but user can override
-```
+Use `linkedSignal` when a signal must reset or adapt when a source changes, but also be independently writable.
 
 ### `resource` — Async Data into Signals
 
-Use `resource()` to fetch async data reactively without manual subscriptions:
-
-```typescript
-userResource = resource({
-  request: () => ({ id: this.userId() }),
-  loader: ({ request }) => fetch(`/api/users/${request.id}`).then(r => r.json()),
-});
-
-// Access: userResource.value(), userResource.isLoading(), userResource.error()
-```
+Use `resource()` to fetch async data reactively without manual subscriptions. Access it with `userResource.value()`, `userResource.isLoading()`, `userResource.error()`.
 
 ### `effect` Usage
 
 Use `effect()` only for side effects that must react to signal changes (logging, third-party DOM manipulation). Never use effects to synchronize signals — use `computed` or `linkedSignal` instead. For DOM work after render, use `afterRenderEffect`.
-
-```typescript
-// CORRECT: Side effect
-effect(() => console.log('User changed:', this.user()));
-
-// WRONG: Use computed instead
-effect(() => { this.fullName.set(`${this.first()} ${this.last()}`); });
-```
 
 ## Templates
 
@@ -148,24 +85,6 @@ Choose the form strategy that matches the project's existing approach:
 - **Signal Forms** (v21+): Preferred for new projects on v21+. Signal-based form state.
 - **Reactive Forms**: `FormBuilder` + `FormGroup` + `FormControl`. Best for complex forms with dynamic validation.
 - **Template-Driven Forms**: `ngModel`. Suitable for simple forms only.
-
-```typescript
-// Reactive Forms — standard approach for most apps
-export class LoginComponent {
-  private fb = inject(FormBuilder);
-
-  form = this.fb.group({
-    email: ['', [Validators.required, Validators.email]],
-    password: ['', [Validators.required, Validators.minLength(8)]],
-  });
-
-  submit() {
-    if (this.form.valid) {
-      // use this.form.value
-    }
-  }
-}
-```
 
 ## Component Styles
 

@@ -2,8 +2,7 @@
 
 **Work Order:** WO-XXXX - [Title]
 **Status:** NOT STARTED | IN PROGRESS | IMPLEMENTATION COMPLETE
-**App:** admin-web | customer-portal | [other]
-**Last Updated:** YYYY-MM-DD
+**App:** {{WEB_APP}} | [other]
 
 ---
 

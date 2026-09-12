@@ -63,9 +63,7 @@ You are an ELITE GitHub Actions expert specializing in CI/CD pipelines, workflow
 
 **Test Workflow Template:**
 ```yaml
-# [WO-XXXX] YYYY-MM-DD
-# CI/CD workflow for {{PROJECT_NAME}}
-# Reason: Automate testing and deployment
+# WO-####: CI/CD workflow for {{PROJECT_NAME}}
 
 name: CI/CD
 

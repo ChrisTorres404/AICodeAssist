@@ -20,6 +20,7 @@
 set -euo pipefail
 
 PIPELINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SELF_ROOT="$PIPELINE_ROOT"
 TEMPLATES="$PIPELINE_ROOT/core/templates/bugs"
 
 find_config() {
@@ -34,6 +35,7 @@ CONFIG="$(find_config || true)"
 if [ -n "$CONFIG" ]; then
   # shellcheck disable=SC1090
   . "$CONFIG"
+  PIPELINE_ROOT="$SELF_ROOT"   # the config's PIPELINE_ROOT is the project's install path; ours is where this script lives
   PROJECT_ROOT="${PROJECT_ROOT:-$(dirname "$CONFIG")}"
   BUG_DIR="$PROJECT_ROOT/${BUGS_DIR:?BUGS_DIR not set in pipeline.config.sh}"
 else
@@ -58,7 +60,7 @@ next_number() {
   else printf '%04d' "$((max + 1))"; fi
 }
 
-render() { sed -e "s/BUG-XXXX/BUG-$3/g" -e "s/\[Title\]/$4/g" -e "s/YYYY-MM-DD/$(date +%F)/g" "$1" > "$2"; }
+render() { sed -e "s/BUG-XXXX/BUG-$3/g" -e "s/\[Title\]/$4/g" -e "s/\[Short Title\]/$4/g" -e "s/YYYY-MM-DD/$(date +%F)/g" "$1" > "$2"; }
 
 route() { # category -> "series|investigate|fix|validate"
   case "$1" in
@@ -68,7 +70,7 @@ route() { # category -> "series|investigate|fix|validate"
     ui|frontend)   echo "0300|support-engineer-expert + react-expert|the stack's UI specialist|frontend-validator-expert";;
     observability) echo "0400|support-engineer-expert + prometheus-expert|prometheus-expert or grafana-expert|project-validator-expert";;
     security)      echo "0500|owasp-top10-expert + support-engineer-expert|jwt-expert, iam-rbac-expert, or owasp-top10-expert|owasp-top10-expert, then project-validator-expert";;
-    performance|perf) echo "0600|support-engineer-expert + postgres-expert|nodejs-expert, postgres-expert, or redis-expert|project-validator-expert";;
+    performance|perf) echo "0600|performance-optimizer + postgres-expert|nodejs-expert, postgres-expert, or redis-expert|project-validator-expert";;
     integration)   echo "0700|support-engineer-expert + rest-expert|the stack's backend specialist or websocket-expert|project-validator-expert";;
     config|deployment) echo "0800|support-engineer-expert + docker-expert|docker-expert or github-actions-expert|project-validator-expert";;
     docs|documentation) echo "0900|documentation-expert|documentation-expert|documentation-expert";;
@@ -93,6 +95,13 @@ cmd_new() {
     routing="$(route "$category")" || die "unknown category '$category' — auth api database ui observability security performance integration config docs"
     [ -n "$series" ] || series="${routing%%|*}"
     investigate="$(printf '%s' "$routing" | cut -d'|' -f2)"; fix="$(printf '%s' "$routing" | cut -d'|' -f3)"; validate="$(printf '%s' "$routing" | cut -d'|' -f4)"
+    if [ -x "$PIPELINE_ROOT/bin/stack-specialist" ]; then
+      local be ui tokb="the stack's backend specialist" toku="the stack's UI specialist"
+      be="$("$PIPELINE_ROOT/bin/stack-specialist" backend "$PROJECT_ROOT" 2>/dev/null || true)"
+      ui="$("$PIPELINE_ROOT/bin/stack-specialist" ui "$PROJECT_ROOT" 2>/dev/null || true)"
+      [ -n "$be" ] && { fix="${fix//"$tokb"/$be}"; investigate="${investigate//"$tokb"/$be}"; }
+      [ -n "$ui" ] && { fix="${fix//"$toku"/$ui}"; investigate="${investigate//react-expert/$ui}"; }
+    fi
   fi
   mkdir -p "$BUG_DIR"
   [ -n "$series" ] || series="1000"   # uncategorised bugs go to the overflow series, as the methodology says
@@ -194,7 +203,7 @@ cmd_promote() {
   local cat="$pdir/CATALOG.md" issue close root fix
   issue="$(ls "$d"/BUG-$n-*.md | grep -v -- "-\(CLOSEOUT\|VERIFICATION\|Prompt\)" | head -1 || true)"
   close="$d/BUG-$n-${b#BUG-$n-}-CLOSEOUT.md"; [ -f "$close" ] || close=""
-  section() { awk -v h="$2" 'BEGIN{p=0} /^## /{p=($0 ~ h)} p&&!/^## /{print}' "$1" | sed -e '/^\s*$/d' -e '/^---*$/d' | head -${3:-6}; }
+  section() { awk -v h="$2" 'BEGIN{p=0} /^## /{p=($0 ~ h)} p&&!/^## /{print}' "$1" | sed -e '/^[[:space:]]*$/d' -e '/^---*$/d' | head -n "${3:-6}"; }
   root="$( { [ -n "$close" ] && section "$close" "Root Cause" 6; } || { [ -n "$issue" ] && section "$issue" "Root Cause" 6; } || true)"
   fix="$( [ -n "$close" ] && section "$close" "(Fix|Resolution|Solution)" 6 || true)"
   [ -f "$cat" ] || printf '# Pack catalog: %s\n\n' "$pack" > "$cat"
@@ -210,7 +219,13 @@ cmd_close() {
   local d; d="$(bug_folder "$n")"; [ -n "$d" ] || die "no BUG-$n under $BUG_DIR"
   ls "$d" | grep -qi -- "VERIFICATION" \
     || die "refusing to close BUG-$n: no BUG-$n-VERIFICATION.md.
-    The methodology forbids a closeout without executed-test evidence."
+    The methodology forbids a closeout without executed-test evidence. Run:  bug verify $n --run <suite.sh>"
+  local vstatus; vstatus="$(cat "$d"/BUG-$n-VERIFICATION*.md 2>/dev/null | grep -oE "EXECUTED\s*[—–-]+\s*(PASS|FAIL)|NOT EXECUTED[^*]*" | head -1)"
+  case "$vstatus" in
+    *PASS*) ;;
+    *FAIL*) die "refusing to close BUG-$n: verification is EXECUTED — FAIL. Fix it and re-run:  bug verify $n --run <suite.sh>";;
+    *) die "refusing to close BUG-$n: verification is NOT EXECUTED — PLAN ONLY. Run it:  bug verify $n --run <suite.sh>";;
+  esac
   local slug out; slug="$(basename "$d")"; slug="${slug#BUG-$n-}"
   out="$d/BUG-$n-$slug-CLOSEOUT.md"
   [ -e "$out" ] && die "$out already exists"
@@ -218,6 +233,8 @@ cmd_close() {
   echo "BUG-$n closeout drafted: $out"
 }
 
+pad() { case "${1:-}" in [0-9]|[0-9][0-9]|[0-9][0-9][0-9]) printf '%04d' "$((10#$1))";; *) printf '%s' "${1:-}";; esac; }
+case "${1:-}" in status|verify|promote|close) [ $# -ge 2 ] && set -- "$1" "$(pad "$2")" "${@:3}";; esac
 case "${1:-}" in
   new) shift; cmd_new "$@";;
   list) shift; cmd_list;;

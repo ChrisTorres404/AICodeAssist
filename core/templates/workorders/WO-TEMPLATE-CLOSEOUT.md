@@ -25,8 +25,8 @@
 ### 1. [Deliverable Category 1 - e.g., Backend Services]
 
 **Files Created:**
-- `[path/to/file1.ts]` - [Description]
-- `[path/to/file2.ts]` - [Description]
+- `[path/to/file]` - [Description]
+- `[path/to/file]` - [Description]
 
 **Key Features:**
 - [Feature 1]
@@ -35,8 +35,8 @@
 ### 2. [Deliverable Category 2 - e.g., Frontend Components]
 
 **Files Created:**
-- `[path/to/file1.tsx]` - [Description]
-- `[path/to/file2.tsx]` - [Description]
+- `[path/to/file1]` - [Description]
+- `[path/to/file2]` - [Description]
 
 **Key Features:**
 - [Feature 1]
@@ -45,7 +45,7 @@
 ### 3. [Deliverable Category 3 - e.g., Database Migrations]
 
 **Files Created:**
-- `[path/to/migration.ts]` - [Description]
+- `[path/to/migration]` - [Description]
 
 **Schema Changes:**
 - [Table/column added]

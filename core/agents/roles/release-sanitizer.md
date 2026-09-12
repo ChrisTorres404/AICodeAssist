@@ -74,6 +74,26 @@ Append a **Reviewer verdict** section to `SANITIZATION-REPORT.md`:
 One paragraph. If FAIL, the shortest path to PASS.
 ```
 
+## Git History
+A secret deleted from the working tree is still in every clone.
+```bash
+git log --all -p | grep -nE "AKIA[0-9A-Z]{16}|sk_(live|test)_[A-Za-z0-9]{16,}|-----BEGIN .*PRIVATE KEY" | head
+git log --all --diff-filter=D --name-only | grep -iE "\.env|\.pem|credentials" | head
+```
+If history is dirty and the repository has never been pushed, re-initialise it. If it has been pushed, rewrite with `git filter-repo`, force-push, and **rotate every exposed credential regardless**; rewriting history does not un-leak a key.
+
+## Judgement Examples
+| Flagged | Verdict | Why |
+|---|---|---|
+| `DATABASE_URL=postgres://user:pass@localhost/db` in `.env.example` | dismiss | placeholder in the example file |
+| `DATABASE_URL=postgres://app:Xk9!...@db.internal/prod` in `docker-compose.yml` | **real** | production host, real-looking password, committed |
+| `admin@example.com` | dismiss | RFC reserved domain |
+| `firstname.lastname@gmail.com` in a session log | **real** | a person |
+| `10.0.4.22` in an architecture diagram | warning | internal topology; remove if the doc ships |
+| `/Users/jane/projects/app` in a stack trace inside a bug closeout | **real** | host path; replace with `<project-root>` |
+| the `sk_test_…` key printed in a payment vendor's public documentation | dismiss | published by the vendor as a non-secret example; still worth confirming it is that one |
+| Any `sk_test_` not on a vendor's public docs page | **real** | test keys still authenticate to a real account |
+
 ## Rules
 
 - Truncate every secret you quote to its first four characters.

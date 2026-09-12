@@ -13,17 +13,19 @@ paths:
 
 ## Primary rule
 
-**ALL feature code goes in `/features/{feature-name}/`.**
+**All feature code goes in the features directory:** `src/features/{feature-name}/`
+when the project has a `src/` directory, otherwise `features/{feature-name}/` at
+the app root. One location per project; validators check this one rule.
 
 Never create feature code in:
-- `/components/{feature-name}/`
-- `/pages/admin/{feature-name}/`
-- `/src/{feature-name}/`
+- `components/{feature-name}/`
+- `pages/{feature-name}/`
+- `src/{feature-name}/`
 
 ## Feature layout
 
 ```
-/features/{feature-name}/
+src/features/{feature-name}/      (or features/{feature-name}/ without src/)
 ├── pages/           # Route components
 ├── components/      # Feature UI components
 │   ├── dialogs/     # Modals and dialogs, one per file
@@ -35,7 +37,7 @@ Never create feature code in:
 ```
 
 Truly shared components, used by more than one feature, go in
-`/components/common/`. Only then.
+`components/common/` beside `features/`. Only then.
 
 ## Import paths
 

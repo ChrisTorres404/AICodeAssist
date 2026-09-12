@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
- * WO-0400 Behavioral Test Coverage Calculator
- * Parses verification report markdown and calculates coverage percentage
+ * Behavioral Test Coverage Calculator
+ *
+ * Reads a verification document and reports how much of it is actually backed
+ * by execution: how many tests were run, how many passed, and how many are
+ * still NOT EXECUTED. A plan is not coverage.
  */
 
 const fs = require('fs');
@@ -80,6 +83,9 @@ if (args.length === 0) {
   console.error('');
   console.error('Example:');
   console.error('  node calculate-coverage.js {{WORKORDERS_DIR}}/WO-0101-example/WO-0101-VERIFICATION.md');
+  console.error('');
+  console.error('Set COVERAGE_SUMMARY_FILE to control where the summary is written');
+  console.error('(default: test-results/coverage-summary.txt).');
   process.exit(1);
 }
 
@@ -91,7 +97,7 @@ const badge = generateBadge(coverage);
 // Display report
 console.log('');
 console.log('╔════════════════════════════════════════════════════════╗');
-console.log('║   WO-0400 Behavioral Test Coverage Report             ║');
+console.log('║   Behavioral Test Coverage Report                      ║');
 console.log('╚════════════════════════════════════════════════════════╝');
 console.log('');
 console.log(`📄 File:           ${path.basename(filePath)}`);
@@ -146,13 +152,15 @@ console.log('──────────────────────�
 console.log('');
 
 // Write summary to file for CI/CD
-const summaryContent = `WO-0400 Behavioral Tests: ${coverage.overallCoverage}% Coverage
+const summaryContent = `Behavioral Tests: ${coverage.overallCoverage}% Coverage
 Total: ${coverage.total} | Passed: ${coverage.passed} | Failed: ${coverage.failed} | Not Executed: ${coverage.notExecuted}
 Status: ${coverage.failed === 0 && coverage.executed > 0 ? '✅ ALL PASS' : coverage.failed > 0 ? '❌ FAILURES' : '⏳ PENDING'}
 `;
 
-fs.writeFileSync('test-results/coverage-summary.txt', summaryContent);
-console.log('📝 Summary written to: test-results/coverage-summary.txt');
+const summaryPath = process.env.COVERAGE_SUMMARY_FILE || path.join('test-results', 'coverage-summary.txt');
+fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
+fs.writeFileSync(summaryPath, summaryContent);
+console.log(`📝 Summary written to: ${summaryPath}`);
 console.log('');
 
 // Exit code

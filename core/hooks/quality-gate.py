@@ -16,13 +16,30 @@ SOURCE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go",
               ".rb", ".java", ".kt", ".rs", ".php", ".cs", ".swift"}
 
 RULES = [
-    (re.compile(r"\bconsole\.log\s*\("),                 "console.log — use the project logger"),
-    (re.compile(r"\bprint\s*\(.*\bdebug\b", re.I),       "debug print — use the project logger"),
-    (re.compile(r"//\s*TODO:?\s*implement", re.I),       "TODO: implement — finish it or do not ship it"),
-    (re.compile(r"#\s*TODO:?\s*implement", re.I),        "TODO: implement — finish it or do not ship it"),
-    (re.compile(r"Not implemented"),                     "not-implemented stub"),
-    (re.compile(r"\bFIXME\b"),                           "FIXME left in source"),
+    # debug output, per language — the project logger is always the answer
+    (re.compile(r"\bconsole\.(log|debug)\s*\("),                         "console.log — use the project logger"),
+    (re.compile(r"\bprint\s*\(.*\b(debug|here|xxx|test)\b", re.I),      "debug print — use the project logger"),
+    (re.compile(r"\bfmt\.Print(ln|f)?\s*\("),                             "fmt.Print — use the project logger"),
+    (re.compile(r"\b(println!|dbg!)\s*\("),                                "println!/dbg! — use tracing or log"),
+    (re.compile(r"\bSystem\.(out|err)\.print(ln)?\s*\("),                 "System.out — use the project logger"),
+    (re.compile(r"\bConsole\.Write(Line)?\s*\("),                          "Console.Write — use the project logger"),
+    (re.compile(r"^\s*(puts|pp?)\s+"),                                       "puts/p — use the project logger"),
+    (re.compile(r"\b(var_dump|print_r)\s*\("),                              "var_dump/print_r — use the project logger"),
+    (re.compile(r"\bdebugPrint\s*\(|^\s*print\s*\(.*\);\s*$"),           "debug print — use the project logger"),
+    # stubs and deferred work
+    (re.compile(r"(//|#)\s*TODO:?\s*implement", re.I),                       "TODO: implement — finish it or do not ship it"),
+    (re.compile(r"throw new (Error|NotImplementedException)\s*\(\s*['\"]not implemented", re.I), "not-implemented stub"),
+    (re.compile(r"raise NotImplementedError|\btodo!\s*\(|\bunimplemented!\s*\(|panic\(\s*\"(not implemented|todo)|throw new NotImplementedException\(\)|UnsupportedOperationException\(\s*\"not implemented", re.I), "not-implemented stub"),
+    (re.compile(r"\bFIXME\b"),                                               "FIXME left in source"),
 ]
+
+
+def edited_text(ti):
+    """The text this tool call writes: Write content, Edit new_string, or every MultiEdit new_string."""
+    if ti.get("content"): return ti["content"]
+    if ti.get("new_string"): return ti["new_string"]
+    edits = ti.get("edits") or []
+    return "\n".join(e.get("new_string", "") for e in edits if isinstance(e, dict))
 
 def main():
     try:
@@ -37,7 +54,7 @@ def main():
     if re.search(r"(^|/)(test|tests|__tests__|spec)/|\.(test|spec)\.", path):
         return 0          # test files may legitimately log and stub
 
-    text = ti.get("content") or ti.get("new_string") or ""
+    text = edited_text(ti)
     if not text:
         return 0
 

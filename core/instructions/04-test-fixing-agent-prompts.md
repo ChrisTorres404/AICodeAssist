@@ -1,395 +1,352 @@
-# TEST FIXING AGENT PROMPT LIBRARY
+# Test Fixing — Agent Prompt Library
 
-**Purpose:** Ready-to-use agent prompts for systematic test fixing sessions
+Ready-to-use delegation prompts for a systematic test-fixing session. Used
+with `{{PIPELINE_ROOT}}/core/instructions/03-e2e-test-fix-rules.md`.
+
+Every template is a shape. Replace the bracketed parts with real values from
+this project and delete the lines that do not apply. A template sent with its
+brackets still in it is worse than no template.
+
+**All of these investigate. None of them edit.** Investigators return findings
+with `file:line`; applying the fix is a separate step, and a different agent
+validates it.
 
 ---
 
-## Agent 1: Explore Agent - Documentation Search
+## Context: Exploration
 
-**Use When:** Need to find documentation, understand historical context, or search for patterns
+**Use when** you need to understand what changed, what the conventions are, or
+where something is documented — before forming a theory.
 
-**Agent Type:** `Explore`
-**Model:** `haiku` (fast and cost-effective)
-**Expected Time:** 5-10 minutes
+**Agent:** `code-explorer`, or the built-in `Explore` agent for a broad sweep
 
-### Template 1: Database Schema Documentation
+### Template — convention and schema history
 
 ```markdown
-Search the codebase for documentation from [November 2025 / last week / etc.] about database schema changes. I need to understand:
+Search this repository for documentation and history about [the data model /
+naming convention / API contract] for [area]. I need to understand:
 
-1. What columns were renamed or changed?
-2. What is the naming convention (snake_case vs camelCase)?
-3. Are there any migration notes about the standardization?
+1. What changed, and when?
+2. What is the current convention?
+3. Are there migration or decision notes explaining why?
 
-Search locations:
-- docs/1_internaldocs./New_Schema_Update_ToDos/
-- migrations/
-- Database migration files (*.ts)
-- Session summaries
+Search:
+- The data-model definitions under [source directory]
+- The migration or schema-change directory
+- Documentation under {{DOCS_DIR}}
+- Work orders under {{WORKORDERS_DIR}}
+- Session notes under {{SESSIONS_DIR}}
 
-Return the exact documentation with file paths and line numbers so I can understand the database standardization rules.
+Return the exact text with file paths and line numbers. Do not summarize away
+the specifics — I need to reconcile code against them.
 ```
 
-### Template 2: Find Column Name Conventions
+### Template — field-level rules
 
 ```markdown
-Search the codebase for documentation about the column naming convention for [table_name]. I need to understand:
+Find the definition and rules for [field] on [entity or table].
 
-1. Is [column_name] nullable or NOT NULL?
-2. What are the business rules for [column_name]?
-3. When was this column last modified?
+1. Is it required or optional? What is its type?
+2. What business rules constrain it?
+3. When was it last changed, and by which work order?
 
-Search locations:
-- Entity files: src/**/*.entity.ts
-- Migration files: migrations/**/*.ts
-- Documentation: docs/**/*.md
-- Work orders: {{WORKORDERS_DIR}}/*.md
-
-Return exact column definitions with file:line references.
+Search the data-model definitions, the migration history, and the
+documentation. Return exact definitions with file:line references.
 ```
 
-### Template 3: Historical Context Search
+### Template — recent work on a component
 
 ```markdown
-Search for recent work (past 2 weeks) related to [feature/component]. I need to understand:
+Find the recent work related to [feature or component]. I need:
 
-1. What changes were made to [component]?
+1. What changed in [component]?
 2. Why was [decision] made?
-3. What issues were encountered?
+3. What problems were hit along the way?
 
-Search locations:
-- Session summaries: {{SESSIONS_DIR}}/active/
-- Work orders: {{WORKORDERS_DIR}}/
-- Commit messages (if available)
-
-Provide a chronological summary with file references.
+Search {{SESSIONS_DIR}}/active/, {{WORKORDERS_DIR}}/, {{BUGS_DIR}}/, and the
+commit history. Return a chronological summary with file references.
 ```
 
 ---
 
-## Agent 2: Support Engineer Agent - Bug Diagnosis
+## Active Debugging
 
-**Use When:** Need to debug complex errors, trace data flow, or understand why something isn't working
+**Use when** you have a specific failure and need the root cause traced.
 
-**Agent Type:** `support-engineer-expert`
-**Model:** `sonnet`
-**Expected Time:** 10-20 minutes
+**Agent:** `support-engineer-expert`
 
-### Template 1: HTTP Error Debugging
+### Template — an endpoint returns the wrong thing
 
 ```markdown
-I need deep troubleshooting for a [component/endpoint] bug:
+I need root-cause analysis for a failing endpoint.
 
-**Symptom:** [POST/GET/PUT/DELETE] [/api/endpoint/path] returns [404/500/401] "[error message]"
+**Symptom:** [METHOD] [path] returns [status] "[exact error message]"
 
-**What I've already done:**
-1. Verified the controller exists in [file path]
-2. Checked the module is imported in AppModule
-3. Verified database table [table_name] exists
-4. Checked [other verification]
+**Already verified:**
+1. The handler exists at [file:line]
+2. [Registration / routing check performed]
+3. [Data store check performed]
 
-**The problem:** [Description - e.g., "The endpoint should exist but returns 404"]
+**The problem:** [what should happen versus what does]
 
 **Files to investigate:**
-- [ControllerFile.ts] - Check route decorator and method signature
-- [ServiceFile.ts] - Check business logic and database queries
-- [EntityFile.ts] - Check column mappings
-- [app.module.ts] - Check module registration
+- [handler file] — the route definition and signature
+- [service file] — the logic and the queries it issues
+- [model file] — the field mappings
+- [wiring or configuration file] — registration
 
 **What I need:**
-1. Root cause: Why is this endpoint returning [status code]?
-2. Data flow trace: Request → Controller → Service → Entity → Database
-3. Exact fix needed with file:line references
-4. Verification steps to confirm fix works
+1. The root cause: why does this return [status]?
+2. A trace of the request from entry through to the data store
+3. The exact fix, with file:line references
+4. The verification step that would confirm it
 
-Use your elite debugging skills to trace the complete request flow and identify where it breaks.
+Do not edit anything. Return findings.
 ```
 
-### Template 2: Database Query Error
+### Template — a query fails
 
 ```markdown
-Deep troubleshooting needed for database query error:
+Root-cause analysis for a failing data-store query.
 
-**Symptom:** Query fails with "[error message]" when trying to [action]
+**Symptom:** [operation] fails with "[exact error message]"
 
-**What I've already done:**
-1. Verified table exists: SELECT * FROM [schema].[table] LIMIT 1;
-2. Verified column exists in database: \d [schema].[table]
-3. Checked entity definition in [EntityFile.ts]
-4. Database shows column as: [actual_column_name]
+**Already verified:**
+1. The table or collection exists
+2. The real field name in the live schema is [actual name]
+3. The model at [file:line] declares [declared name]
 
-**The problem:** Entity/Service is using [column_name] but database has [actual_column_name]
+**The problem:** the code names [declared name]; the schema has [actual name].
 
 **Files to investigate:**
-- [Entity.entity.ts] - Line [X] - @Column definition
-- [Service.service.ts] - Line [Y] - Query builder
-- Migration that created table: migrations/[timestamp]-[name].ts
+- [model file:line] — the field declaration
+- [service file:line] — query construction
+- The migration that created it
 
 **What I need:**
-1. Complete list of all places this column is referenced
-2. Root cause: Why does the code use [column_name] when DB has [actual_name]?
-3. Exact fixes with file:line references for:
-   - Entity @Column decorators
-   - Service query builders
-   - Any raw SQL queries
-4. Verification query to test fix
+1. Every place this field is referenced — model, queries, raw statements,
+   fixtures, test expectations
+2. Why the code diverged from the schema
+3. Exact fixes with file:line references
+4. A query that verifies the fix
 
-Trace all code paths that reference this column.
+Do not edit anything. Return findings.
 ```
 
-### Template 3: Test Failure Analysis
+### Template — a test and the code disagree
 
 ```markdown
-Test [test-name.e2e-spec.ts] is failing with unexpected behavior:
+Test [test file] fails: it expects [X] and gets [Y].
 
-**Symptom:** Test expects [X] but gets [Y]
-
-**Test File:** test/e2e/[path]/[test-name].e2e-spec.ts
-
-**What I've already done:**
-1. Verified test credentials work: [email]/[password]
-2. Checked endpoint exists and returns [status]
-3. Database state: [description]
-
-**The problem:** [Describe mismatch between expected and actual]
+**Already verified:**
+1. [credentials / fixtures / preconditions confirmed working]
+2. The endpoint returns [status]
+3. The relevant state is [description]
 
 **Files to investigate:**
-- Test file: [test.e2e-spec.ts] - Check expectations
-- Controller: [controller.ts] - Check what it actually returns
-- DTO: [dto.ts] - Check response structure
-- Service: [service.ts] - Check business logic
+- [test file] — the expectation
+- [handler] — what is actually returned
+- [response model] — the declared shape
+- [service] — the logic that produces it
 
 **What I need:**
-1. Why does the test expect [X] when the code returns [Y]?
-2. Which is correct - the test expectation or the code behavior?
-3. Root cause of the mismatch
-4. Fix with file:line (either fix test OR fix code, with reasoning)
+1. Why does the test expect [X] when the code produces [Y]?
+2. **Which one is right** — the expectation or the behavior? I need your
+   reasoning, not a preference.
+3. The root cause of the divergence
+4. The fix, with file:line, on whichever side is actually wrong
 
-Analyze the complete flow and determine the source of truth.
+Do not edit anything. Return findings.
 ```
 
 ---
 
-## Agent 3: Database Validator Agent - Infrastructure Verification
+## Infrastructure Verification
 
-**Use When:** Need to verify database state, check migrations, validate table/column existence
+**Use when** you need to know whether the thing the tests depend on actually
+exists.
 
-**Agent Type:** `database-validator-expert`
-**Model:** `sonnet`
-**Expected Time:** 10-15 minutes
+**Agent:** `database-validator-expert`
 
-### Template 1: Module Registration Check
+### Template — is it wired up
 
 ```markdown
-[ComponentName] endpoints are returning 404 but the code exists. Verify infrastructure:
+[Component] endpoints return [status] although the code exists. Verify the
+wiring:
 
-**1. Module Registration:**
-- Is [ModuleName]Module imported in AppModule?
-- File to check: src/app.module.ts
-- Verify it's in the imports array
-- Check controllers are exported from [ModuleName]Module
+**1. Registration**
+- Is [component] registered wherever this project wires components together?
+- File to check: [entry point or module file]
 
-**2. Controller Registration:**
-- Is [ControllerName] decorated with @Controller('[path]')?
-- File: src/modules/[module]/controllers/[controller].ts
-- Verify the path matches the failing endpoint
+**2. Route definition**
+- Is the handler declared at the path the test calls?
+- File: [handler file]
+- Does the declared path match the failing request exactly, prefixes included?
 
-**3. Route Configuration:**
-- Check method decorators: @Get(), @Post(), etc.
-- Verify route paths match test expectations
-- Check for any @UseGuards() that might block requests
+**3. Guards and middleware**
+- Is anything in front of this route rejecting the request before it arrives?
 
-**Database:** [DatabaseName]
-**Endpoint failing:** [METHOD /api/path]
+**Environment:** [which environment and data store]
+**Failing request:** [METHOD path]
 
 **What I need:**
-1. Exact reason why [endpoint] returns 404
-2. What's missing (module import, controller export, route decorator, etc.)
-3. Specific fix with file:line references
-4. Verification steps to confirm fix
+1. The exact reason for [status]
+2. What is missing — registration, export, path, middleware
+3. The fix, with file:line references
+4. The check that would confirm it
+
+Do not edit anything. Return findings.
 ```
 
-### Template 2: Database Table & Migration Verification
+### Template — schema and migration state
 
 ```markdown
-Need complete database infrastructure verification for [feature/component]:
+Full infrastructure verification for [feature].
 
-**1. Database Tables:**
-- Verify these tables exist: [table1], [table2], [table3]
-- Database: [DatabaseName]
-- Run: SELECT * FROM [schema].[table] LIMIT 1; for each
-- If missing, check what migration should have created them
+**1. Tables or collections**
+- Verify these exist: [list]
+- Environment: [name]
+- If any are missing, identify which migration should have created it
 
-**2. Migration Status:**
-- Was migration [timestamp-name].ts fully executed?
-- Check: SELECT * FROM migrations_history WHERE name LIKE '%[name]%';
-- Verify all tables from this migration exist
-- Check for any partial execution
+**2. Migration state**
+- Did migration [name] run completely?
+- Check the project's migration-history table
+- Verify every object that migration should have created
 
-**3. Column Verification:**
-- For each table, verify actual column names
-- Run: SELECT column_name FROM information_schema.columns
-       WHERE table_schema = '[schema]' AND table_name = '[table]'
-       ORDER BY ordinal_position;
-- Compare with entity definitions in [Entity.entity.ts]
+**3. Field verification**
+- For each table, list the real field names and types from the live schema
+- Compare against the model definitions at [paths]
 
-**4. Required Data:**
-- Check seed data for [reference tables]
-- Verify privileges/permissions exist if needed
-- Run: SELECT COUNT(*) FROM [schema].[table];
+**4. Required data**
+- Is the reference or seed data present?
+- Counts for [tables]
 
 **What I need:**
-1. Complete infrastructure status (tables, columns, data)
-2. What's missing or misconfigured
-3. Specific SQL to fix (if tables/data missing)
-4. Specific code fixes (if entity definitions wrong)
-5. Verification queries to confirm everything works
+1. The complete state: objects, fields, data
+2. What is missing or misconfigured
+3. The statements that would fix missing structure or data
+4. The code fixes, if the models are the side that is wrong
+5. Verification queries
+
+Do not edit anything. Return findings.
 ```
 
-### Template 3: Schema Mismatch Investigation
+### Template — systematic mismatch inventory
 
 ```markdown
-Need comprehensive schema verification for [schema_name] schema:
+Comprehensive schema verification for [schema or namespace].
 
-**Background:**
-The database was recently standardized to lowercase/camelCase naming.
-Tests are failing with column reference errors.
+**Background:** the tests fail with [class of error], which suggests a
+systematic mismatch between the live schema and the code that names it.
 
-**Investigation Required:**
+**Investigation:**
 
-**1. Table Names:**
-- List all tables in [schema_name] schema
-- Run: \dt [schema_name].*
-- Check for any snake_case table names
-- Standard should be: all lowercase, no underscores
+1. **Object names.** List everything in [schema or namespace] and flag any
+   that do not follow the convention.
+2. **Field names.** For [tables with failures], list every field. Flag the
+   ones the code names differently.
+3. **Model mapping.** For each model under [directory], verify the declared
+   field name against the live schema, including relationship and join fields.
+4. **Query construction.** Find every query — builder calls and raw statements
+   alike — that names these objects, and check each name.
 
-**2. Column Names for Each Table:**
-- For tables: [list of tables with issues]
-- Extract all column names
-- Identify any with underscores
-- Compare with entity @Column decorators
-
-**3. Entity-Database Mapping:**
-- For each entity in src/modules/[module]/entities/
-- Verify @Column({ name: 'columnname' }) matches database
-- Check JoinColumn references
-- Verify relationship column names
-
-**4. Service Query Verification:**
-- Search services for queries using these tables
-- Check .where() and .andWhere() clauses
-- Verify column names in QueryBuilder calls
-- Find any raw SQL queries
-
-**Database:** [DatabaseName]
-**Schema:** [schema_name]
+**Environment:** [name]
 
 **What I need:**
-1. Complete column name inventory (database vs code)
-2. List of all mismatches with exact locations
+1. A complete inventory: schema name versus code name, side by side
+2. Every mismatch, with exact locations
 3. Recommended fixes with file:line references
-4. Verification approach to ensure all are found
+4. How to confirm the inventory is exhaustive
+
+Do not edit anything. Return findings.
 ```
 
 ---
 
-## Usage Guidelines
+## Usage
 
-### When to Use Each Agent
+### Escalation order
 
-1. **Start with Explore Agent** if you need context
-   - What changed recently?
-   - What's the naming convention?
-   - Where is the documentation?
+Most failures resolve at the step people skip. Go in this order:
 
-2. **Use Support Engineer Agent** for active debugging
-   - Why is this endpoint failing?
-   - Why is the test expecting different behavior?
-   - Trace the data flow
+1. **Context first.** What changed? What is the convention? Where is it
+   documented? — `code-explorer` or `Explore`
+2. **Then active debugging.** Why does this specific thing fail? —
+   `support-engineer-expert`
+3. **Then infrastructure.** Does it exist? Did the migration run? Is it wired
+   up? — `database-validator-expert`
 
-3. **Use Database Validator Agent** for infrastructure
-   - Do the tables exist?
-   - Are columns named correctly?
-   - Did the migration run?
+Two more, when the symptom fits:
 
-### Agent Call Pattern
+- Data is missing or wrong and nothing threw — `silent-failure-hunter`
+- The build or type-check itself is broken — `build-error-resolver`
 
-```markdown
-1. Identify the problem
-2. Choose the right agent
-3. Fill in the template
-4. Launch agent via Task tool
-5. Review agent findings
-6. Apply recommended fixes
-7. Verify fixes work
-8. Document in session summary
+### The loop
+
+```
+1. Identify the problem precisely
+2. Choose the agent whose description matches
+3. Fill in the template completely
+4. Delegate; independent investigations run in parallel
+5. Read the findings and check them against the system yourself
+6. Apply the fix
+7. Re-run the affected tests
+8. Record it in the session document
 ```
 
-### Example Agent Call Sequence
+**If you delegate, you collect.** A spawned investigation is not a finished
+one. The subagent's final message is its deliverable; integrate it, then
+report.
 
-For a test failing due to 404 on a portal endpoint:
+### Example sequence
 
-1. **Database Validator Agent** → Verify portal tables exist
-2. **Database Validator Agent** → Check module registration
-3. **Support Engineer Agent** → Debug why route not found
-4. **Explore Agent** → Find documentation on portal setup
+A test failing because an endpoint returns "not found":
+
+1. `database-validator-expert` — do the tables the feature needs exist?
+2. `database-validator-expert` — is the component registered?
+3. `support-engineer-expert` — why is the route not resolving?
+4. `code-explorer` — what does the documentation say this path should be?
 
 ---
 
-## Agent Prompt Best Practices
+## Prompt Quality
 
-### ✅ DO:
-- Provide specific file paths to investigate
-- Include what you've already tried
-- Ask for file:line references in response
-- Request verification steps
-- Give database credentials when needed
-- Include error messages verbatim
+### Do
 
-### ❌ DON'T:
-- Use vague descriptions
-- Ask agent to make changes (they investigate only)
-- Skip context about what you've done
-- Forget to specify database name
-- Leave out error messages
-- Ask multiple unrelated questions
+- Name specific files and line numbers to start from
+- Say what you already ruled out, and how
+- Quote error messages verbatim
+- Ask for `file:line` in the response
+- Ask for the verification step
+- Name the environment and data store
 
----
+### Do not
 
-## Copy-Paste Ready Prompts
-
-### Quick Database Column Check
-```markdown
-Verify the actual column name for [table_name].[column_name]:
-
-Database: [DatabaseName]
-Run: SELECT column_name FROM information_schema.columns
-     WHERE table_schema = '[schema]' AND table_name = '[table]';
-
-Return the exact column name and compare with entity in [Entity.entity.ts].
-```
-
-### Quick Module Check
-```markdown
-Is [ModuleName]Module registered in AppModule?
-
-Check: src/app.module.ts
-Look for: import { [ModuleName]Module } and in imports array
-Return: Yes/No with line number if found
-```
-
-### Quick Migration Status
-```markdown
-Did migration [timestamp-name].ts execute successfully?
-
-Database: [DatabaseName]
-Check: SELECT * FROM migrations_history WHERE name LIKE '%[name]%';
-Verify: All tables from this migration exist
-Return: Status + any missing tables
-```
+- Describe the problem vaguely
+- Ask an investigator to make the change
+- Omit what you already tried — it will be tried again
+- Bundle unrelated questions into one delegation
+- Paraphrase an error message
 
 ---
 
-**Last Updated:** 2025-11-14
-**Usage:** Import these templates when running `fixTests` command
-**Customization:** Replace [placeholders] with your project values
+## Short Checks
+
+Not everything needs a full template.
+
+```markdown
+Verify the real field name for [table].[field] in [environment], and compare
+it with the model definition at [path]. Return the exact name and the
+mismatch, if any.
+```
+
+```markdown
+Is [component] registered where this project wires components together?
+Check [entry point file]. Return yes or no, with the line number if found.
+```
+
+```markdown
+Did migration [name] run completely in [environment]? Check the migration
+history table and verify every object it should have created. Return the
+status and anything missing.
+```

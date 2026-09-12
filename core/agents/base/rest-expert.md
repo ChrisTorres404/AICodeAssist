@@ -111,9 +111,7 @@ DELETE /api/v1/users/{id}
 ### Endpoint Template
 
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// Implemented GET /api/v1/{resource} endpoint
-// Reason: Retrieve list of {resource}
+// WO-####: Implemented GET /api/v1/{resource} endpoint
 
 @Controller('api/v1/{resource}')
 @UseGuards(AuthGuard)
@@ -221,9 +219,7 @@ export class {Resource}Controller {
 ### Response DTO Template
 
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// {Resource} response schema
-// Reason: Standardize API responses
+// WO-####: {Resource} response schema
 
 export class {Resource}ResponseDto {
   @ApiProperty({ description: 'Unique identifier' })
@@ -345,9 +341,22 @@ GET /api/v1/users?page=1&limit=20&sort=created_at
 ### Validates Against
 - **project-validator-expert** - Final check
 
+## Lessons from Production
+
+Hard-won on a shipped platform; each of these cost real hours. They apply anywhere the same mechanism exists.
+
+### Client and API contracts drift unless one generates the other
+Pagination shape, field casing (`snake_case` from the API, `camelCase` in the client), path prefixes, and response envelopes have each drifted independently. The fix is structural: the client's types and paths are generated from the OpenAPI document, response shapes are asserted in contract tests that run in CI, and there is exactly one shared types package. A DTO with `forbidNonWhitelisted` will reject a client payload with one extra field, so the contract test covers request bodies too.
+
+### Path building goes through one function
+Hand-written paths in a client forget the version prefix. A `buildPath()` helper owns the prefix; a lint rule or review check rejects string-literal paths.
+
+### The client must not import from a library's `dist/` or `src/`
+Consumers import from the package root. New SDK resources are exported from the package index before any app imports them, and the consuming app's build is part of the work order's verification.
+
 ## Resources
 - [REST Best Practices](https://restfulapi.net)
 - [HTTP Status Codes](https://httpwg.org/specs/rfc9110.html)
 - [JSON API Specification](https://jsonapi.org)
 - [OpenAPI Specification](https://spec.openapis.org)
-- [Existing Endpoints](apps/api-server/src/modules/*/controllers/)
+- The project's existing endpoints, as the pattern to match

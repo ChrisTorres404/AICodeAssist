@@ -20,7 +20,7 @@
 
 Use this when creating a new test plan for a work order. This template:
 - Lists all tests with descriptions
-- Provides copy/paste curl commands
+- Provides copy-pasteable request commands
 - Has placeholders for evidence
 
 **When to use:** Before test execution, when planning what to test.
@@ -51,7 +51,7 @@ Use this when creating verification evidence for WO closeouts. This template:
 
 **When to use:** When closing out a work order.
 
-**Output file naming:** `wo-XXXX-verification-report.md`
+**Output file naming:** `WO-XXXX-VERIFICATION.md`, inside the work-order folder
 
 ---
 
@@ -84,7 +84,7 @@ After all tests pass, you MUST also verify code quality:
 ### Code Quality Checklist (Before Declaring Done)
 
 - [ ] **Read through ALL changed files** — Line by line review
-- [ ] **No console.log statements** — Uses Logger service
+- [ ] **No debug logging** — uses the project's logger
 - [ ] **No magic numbers** — Extracted to configuration
 - [ ] **No dev fallbacks** — Removed temporary code
 - [ ] **Proper typing and validation** — No `any` types
@@ -98,28 +98,35 @@ After all tests pass, you MUST also verify code quality:
 3. **Expedience Over Quality** — Hardcoded values, copied code
 4. **Ignoring Standards** — Skipped self-review
 
-**See:** `MANDATORY-TESTING-METHODOLOGY.md` for full details.
+**See:** `{{PIPELINE_ROOT}}/core/methodology/MANDATORY-TESTING-METHODOLOGY.md` for the full form.
 
 ---
 
 ## Example Workflow
 
 ```bash
-# 1. Create test harness from template
-cp _TEMPLATES/TEST-TEMPLATE-HARNESS.md ../docs/wo-0101-test-harness.md
+TEMPLATES={{PIPELINE_ROOT}}/core/templates/testing
 
-# 2. Edit with actual test details
-# Fill in curl commands, expected responses, etc.
+# 1. Plan: create the test harness document
+cp $TEMPLATES/TEST-TEMPLATE-HARNESS.md \
+   {{WORKORDERS_DIR}}/WO-0101-<name>/wo-0101-test-harness.md
 
-# 3. Execute tests and capture evidence
-# Run curl commands, paste actual output
+# 2. Fill in the real requests, expected responses, and state checks
 
-# 4. Create execution report
-cp _TEMPLATES/TEST-TEMPLATE-EXECUTION.md ../test-results/wo-0101-execution-YYYYMMDD.md
+# 3. Write and run the suite, capturing the real output
+{{TESTING_DIR}}/suites/wo-0101-<feature>.sh
 
-# 5. For WO closeout, create verification report
-cp _TEMPLATES/TEST-TEMPLATE-VERIFICATION.md ../docs/wo-0101-verification-report.md
+# 4. Record the run
+cp $TEMPLATES/TEST-TEMPLATE-EXECUTION.md \
+   {{TESTING_DIR}}/test-results/wo-0101-execution-YYYYMMDD.md
+
+# 5. Let the driver stamp the verification from the suite's exit code
+wo verify 0101 --run {{TESTING_DIR}}/suites/wo-0101-<feature>.sh
 ```
+
+Step 5 is the one that matters: `wo verify --run` writes the status from what
+actually happened, so nobody types `PASS`. The verification template describes
+the document it produces; do not hand-write one to get around a failing suite.
 
 ---
 

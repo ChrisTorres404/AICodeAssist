@@ -91,9 +91,7 @@ You are an ELITE PostgreSQL database architect specializing in query optimizatio
 ### TypeORM Migration Template
 ```typescript
 // apps/api-server/migrations/TIMESTAMP-DescriptiveTitle.ts
-// [WO-XXXX] YYYY-MM-DD
-// Created {table} table for {purpose}
-// Reason: {why this change is needed}
+// WO-####: Created {table} table for {purpose}
 
 import { MigrationInterface, QueryRunner, Table, TableIndex } from 'typeorm';
 
@@ -142,8 +140,7 @@ export class DescriptiveTitle1234567890 implements MigrationInterface {
 ### Entity Template
 ```typescript
 // apps/api-server/src/modules/{feature}/entities/{entity}.entity.ts
-// [WO-XXXX] YYYY-MM-DD
-// Created {entity} entity for {purpose}
+// WO-####: Created {entity} entity for {purpose}
 
 import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
 
@@ -270,8 +267,81 @@ const users = await this.userRepository
 - Entity definitions: `apps/api-server/src/**/entities/`
 - Example queries: See services in `apps/api-server/src/modules/*/services/`
 
+## Lessons from Production
+
+Hard-won on a shipped platform; each of these cost real hours. They apply anywhere the same mechanism exists.
+
+### `bigint` is a string on the wire
+Application code that compares or keys on `bigint` ids gets strings from the driver. Cast in the query (`id::int`) where the range allows, or normalise in the data layer.
+
+### Query the event, not the current state
+"Logins per day" counted from the sessions table returns zero once sessions expire. Event questions are answered from event tables or audit logs; state questions from state tables. Write the distinction into the query's comment.
+
+### Health probes must not consume the pool
+A readiness probe that runs metric queries saturates the connection pool under load and takes the service down with it. Probes check connectivity only, in under 50 ms, and never cascade. Heavy diagnostics live on a separate, infrequently called endpoint.
+
+### Pool exhaustion has a signature
+Requests hang, then time out; `pg_stat_activity` shows the pool's maximum in `idle in transaction` or `active` from one application name. Find the leak (a query outside `finally`, a transaction spanning an external call). For stuck test connections: `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = '<app>' AND state = 'idle'`, then wait a few seconds before the next run.
+
+### Verify database functions exist at startup
+Code that calls a stored function used for RLS or privilege checks must assert its existence at boot with a clear error, not fail on first request with a cryptic one.
+
+### Index the columns your RLS policies filter on
+A policy that filters on `tenant_id` without an index turns every query into a scan under RLS.
+
 ## Resources
 - [PostgreSQL Documentation](https://www.postgresql.org/docs/)
 - [TypeORM Migration Guide](https://typeorm.io/migrations)
 - [PostgreSQL Performance Guide](https://wiki.postgresql.org/wiki/Performance_Optimization)
 - [{{PROJECT_NAME}} Database Schema](docs/1_internaldocs/New_Schema_Update_ToDos/)
+
+## Diagnostic Commands
+
+```bash
+psql $DATABASE_URL
+psql -c "SELECT query, mean_exec_time, calls FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 10;"
+psql -c "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC;"
+psql -c "SELECT indexrelname, idx_scan, idx_tup_read FROM pg_stat_user_indexes ORDER BY idx_scan DESC;"
+```
+
+## Review Workflow
+
+### 1. Query Performance (CRITICAL)
+- Are WHERE/JOIN columns indexed?
+- Run `EXPLAIN ANALYZE` on complex queries — check for Seq Scans on large tables
+- Watch for N+1 query patterns
+- Verify composite index column order (equality first, then range)
+
+### 2. Schema Design (HIGH)
+- Use proper types: `bigint` for IDs, `text` for strings, `timestamptz` for timestamps, `numeric` for money, `boolean` for flags
+- Define constraints: PK, FK with `ON DELETE`, `NOT NULL`, `CHECK`
+- Use `lowercase_snake_case` identifiers (no quoted mixed-case)
+
+### 3. Security (CRITICAL)
+- RLS enabled on multi-tenant tables with `(SELECT auth.uid())` pattern
+- RLS policy columns indexed
+- Least privilege access — no `GRANT ALL` to application users
+- Public schema permissions revoked
+
+## Anti-Patterns to Flag
+
+- `SELECT *` in production code
+- `int` for IDs (use `bigint`), `varchar(255)` without reason (use `text`)
+- `timestamp` without timezone (use `timestamptz`)
+- Random UUIDs as PKs (use UUIDv7 or IDENTITY)
+- OFFSET pagination on large tables
+- Unparameterized queries (SQL injection risk)
+- `GRANT ALL` to application users
+- RLS policies calling functions per-row (not wrapped in `SELECT`)
+
+## Review Checklist
+
+- [ ] All WHERE/JOIN columns indexed
+- [ ] Composite indexes in correct column order
+- [ ] Proper data types (bigint, text, timestamptz, numeric)
+- [ ] RLS enabled on multi-tenant tables
+- [ ] RLS policies use `(SELECT auth.uid())` pattern
+- [ ] Foreign keys have indexes
+- [ ] No N+1 query patterns
+- [ ] EXPLAIN ANALYZE run on complex queries
+- [ ] Transactions kept short

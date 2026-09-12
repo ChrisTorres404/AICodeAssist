@@ -20,7 +20,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 - "$ROOT" <<'PY'
 import pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
-files = sorted((root/"core/agents/base").glob("*.md")) + sorted((root/"core/agents/roles").glob("*.md"))
+files = sorted((root/"core/agents/base").glob("*.md")) + sorted((root/"core/agents/roles").glob("*.md")) + sorted((root/"core/agents/domain").rglob("*.md"))
 files = [f for f in files if f.name != "README.md"]
 stripped = folded = remodeled = marked = 0
 

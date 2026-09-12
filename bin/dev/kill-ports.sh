@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
+# kill-ports.sh — free local development ports before starting servers.
+#
+#   bin/dev/kill-ports.sh 3000 3001          ports as arguments
+#   DEV_PORTS="3000 3001" bin/dev/kill-ports.sh
+#
+# Kills the listener on each port and anything still connected to it. Stale
+# dev servers that survive a restart are the most common cause of "my change
+# is not showing up"; run this before you ask anyone to test in a browser.
 set -euo pipefail
-
-PORTS=(5050 7070)
-
-echo "🔪 Nuking dev ports: ${PORTS[*]}"
+PORTS=("$@")
+[ ${#PORTS[@]} -gt 0 ] || read -r -a PORTS <<< "${DEV_PORTS:-}"
+[ ${#PORTS[@]} -gt 0 ] || { echo "usage: $0 <port>... (or set DEV_PORTS)" >&2; exit 1; }
 for port in "${PORTS[@]}"; do
-  if lsof -i :"${port}" >/dev/null 2>&1; then
-    echo "  Port ${port}: killing listeners and child sockets"
-    # Kill direct listeners first
-    lsof -ti tcp:"${port}" | xargs -r kill -9 || true
-    # Kill anything still connected to that listener
-    lsof -ti tcp:"${port}" -sTCP:ESTABLISHED | xargs -r kill -9 || true
+  if lsof -i :"$port" >/dev/null 2>&1; then
+    echo "  port $port: killing listeners and connected sockets"
+    lsof -ti tcp:"$port" | xargs kill -9 2>/dev/null || true
+    lsof -ti tcp:"$port" -sTCP:ESTABLISHED | xargs kill -9 2>/dev/null || true
   else
-    echo "  Port ${port}: already clear"
+    echo "  port $port: already clear"
   fi
 done
-
-echo "✅ Ports freed"
+echo "ports freed: ${PORTS[*]}"

@@ -24,18 +24,22 @@
 ## Environment Details
 
 ```bash
-# API Version
-curl -s http://localhost:3001/health | jq '.version'
+# Application version
+curl -s {{API_BASE_URL}}/health | jq '.version'
 # Output: "X.Y.Z"
 
-# Database
-psql -d {{PROJECT_NAME}}Dev -c "SELECT version();"
-# Output: PostgreSQL X.Y.Z
+# Data store version, via the project's database client
+<db client> -c "SELECT version();"
+# Output: ...
 
-# Node Version
-node --version
-# Output: vX.Y.Z
+# Runtime version
+<runtime> --version
+# Output: ...
 ```
+
+> The example tests below use a sign-in flow because it exercises a request, a
+> response, and a state change in one journey. Replace them with this work
+> order's own tests.
 
 ---
 
@@ -47,7 +51,7 @@ node --version
 
 **Command:**
 ```bash
-curl -X POST http://localhost:3001/api/v1/auth/login \
+curl -X POST {{API_BASE_URL}}/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "test@example.com", "password": "Password123!"}'
 ```
@@ -74,7 +78,7 @@ curl -X POST http://localhost:3001/api/v1/auth/login \
 
 **Command:**
 ```bash
-curl -X POST http://localhost:3001/api/v1/auth/login \
+curl -X POST {{API_BASE_URL}}/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "test@example.com", "password": "WrongPassword"}'
 ```
@@ -100,7 +104,7 @@ curl -X POST http://localhost:3001/api/v1/auth/login \
 
 **Command:**
 ```bash
-curl -X GET http://localhost:3001/api/v1/users/me \
+curl -X GET {{API_BASE_URL}}/users/me \
   -H "Authorization: Bearer [TOKEN]"
 ```
 
@@ -132,19 +136,20 @@ curl -X GET http://localhost:3001/api/v1/users/me \
 
 #### Test 3.1: [Test Name] — NOT EXECUTED — SKIP
 
-**Reason:** MFA not configured for test user. Requires manual setup.
+**Reason:** Prerequisite not configured in this environment.
 
-**Action Required:** Configure MFA for test account before re-executing.
+**Action Required:** Configure the prerequisite, then re-execute. A skip is an
+environmental fact, never "did not get to it".
 
 ---
 
-## Database Verification
+## State Verification
 
 ### Query 1: Session Created
 
 ```sql
 SELECT id, user_id, created_at, expires_at
-FROM auth.sessions
+FROM sessions
 WHERE user_id = 1
 ORDER BY created_at DESC
 LIMIT 1;
@@ -154,18 +159,18 @@ LIMIT 1;
 ```
   id   | user_id |       created_at        |       expires_at
 -------+---------+-------------------------+-------------------------
- 12345 |       1 | 2025-12-19 10:30:00+00 | 2025-12-19 18:30:00+00
+ 12345 |       1 | YYYY-MM-DD 10:30:00+00 | YYYY-MM-DD 18:30:00+00
 ```
 
 **Status:** VERIFIED — Session created with correct expiry.
 
 ---
 
-### Query 2: Audit Log Entry
+### Query 2: Activity Recorded
 
 ```sql
 SELECT event_type, user_id, ip_address, created_at
-FROM audit.audit_events
+FROM activity_events
 WHERE user_id = 1 AND event_type = 'LOGIN_SUCCESS'
 ORDER BY created_at DESC
 LIMIT 1;
@@ -175,10 +180,10 @@ LIMIT 1;
 ```
    event_type   | user_id |  ip_address  |       created_at
 ----------------+---------+--------------+-------------------------
- LOGIN_SUCCESS  |       1 | 127.0.0.1    | 2025-12-19 10:30:00+00
+ LOGIN_SUCCESS  |       1 | 127.0.0.1    | YYYY-MM-DD 10:30:00+00
 ```
 
-**Status:** VERIFIED — Audit log captured login event.
+**Status:** VERIFIED — the activity log captured the sign-in event.
 
 ---
 
@@ -208,7 +213,7 @@ LIMIT 1;
 [Timestamp] Test 1.1: PASS
 [Timestamp] Test 1.2: PASS
 [Timestamp] Test 2.1: FAIL - HTTP 500
-[Timestamp] Test 3.1: SKIP - MFA not configured
+[Timestamp] Test 3.1: SKIP - prerequisite not configured
 [Timestamp] Execution complete: 2 passed, 1 failed, 1 skipped
 ```
 
@@ -219,7 +224,7 @@ LIMIT 1;
 - [ ] All PASS tests have evidence captured
 - [ ] All FAIL tests have failure reason documented
 - [ ] All SKIP tests have reason and action noted
-- [ ] Database verifications complete
+- [ ] State verifications complete
 - [ ] Issues filed for failures (if applicable)
 
 **Execution Complete:** YYYY-MM-DD HH:MM:SS

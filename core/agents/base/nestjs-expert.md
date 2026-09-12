@@ -111,9 +111,7 @@ apps/api-server/src/modules/{feature-name}/
 
 ### RBAC Guard Template
 ```typescript
-// [WO-XXXX] YYYY-MM-DD
-// Added RBAC protection for {endpoint}
-// Reason: Security - ensure only authorized users can access this endpoint
+// WO-####: Added RBAC protection for {endpoint}
 
 @UseGuards(AuthGuard, RbacGuard)
 @SetMetadata('requiredPrivilege', 'feature.action')
@@ -131,7 +129,7 @@ Before marking work complete:
 - [ ] DTOs validate all inputs
 - [ ] Services handle errors gracefully
 - [ ] Database queries are optimized
-- [ ] Tests provide >80% coverage
+- [ ] Tests meet the project's own coverage gate, and a behavioural suite covers the endpoint
 - [ ] No security vulnerabilities introduced
 - [ ] Type-safe implementation with no `any` types
 - [ ] Work order comment added to all new code
@@ -193,6 +191,34 @@ async list(
   return { items, total, page, limit };
 }
 ```
+
+## Lessons from Production
+
+Hard-won on a shipped platform; each of these cost real hours. They apply anywhere the same mechanism exists.
+
+### Global prefix plus controller prefix doubles the path
+`app.setGlobalPrefix('api/v1')` plus `@Controller('api/v1/health')` yields `/api/v1/api/v1/health`. Controllers declare only their own segment. A route-reachability test that walks every documented route catches this and the opposite case, a missing prefix in a client.
+
+### A guard's optional dependency is `undefined` at runtime, not an error
+A module that uses an auth guard must import the auth module. If it does not, the guard's injected service is `undefined` and every request fails in a way that looks like a token problem. Add a runtime assertion in the guard and log the actual failure reason.
+
+### Public endpoints cannot rely on request tenant context
+Anything decorated `@Public()` runs before tenant middleware resolves. Resolve the tenant from the origin or a discovery service inside the handler, through one shared utility, not a copy per controller.
+
+### Missing guard metadata is open access
+Cloning an admin controller into a portal variant and trimming it left handlers with no scope or privilege decorators, which the guard treated as allowed. Copy the guard and decorator envelope first, then trim. A startup assertion or architecture test should fail the build for any guarded controller with a handler lacking its required decorators.
+
+### Extraction leaves duplicates
+Moving routes into a new controller without deleting them from the old one leaves two handlers; which one answers depends on registration order. Decomposition work orders name what is deleted, and a test asserts which controller owns each route.
+
+### Register everything at startup, and say so in the log
+WebSocket namespaces, queues, and cron jobs that are defined but never registered fail silently. Log the registered set at boot and add a health check that lists it.
+
+### Exception filters must not clear cookies on forwarded 4xx responses
+A filter that attached `Set-Cookie` clears to every 401 wiped the session of a user whose request was proxied through another app. Check for a proxy marker header before adding cookie mutations to error responses.
+
+### Stale compiled output under a bundler
+Native modules fail with confusing errors when `dist/` is stale after a dependency change. Delete `dist/` and rebuild before diagnosing anything else; consider cleaning it in the dev start script.
 
 ## Resources
 - [NestJS Documentation](https://docs.nestjs.com)
