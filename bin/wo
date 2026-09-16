@@ -347,8 +347,21 @@ cmd_adopt() { # <file> --number N [--title T] [--status migrated] [--opened YYYY
   case "$status" in migrated|adopted|open|in-progress|blocked) ;; *) die "status must be migrated, adopted, open, in-progress, or blocked";; esac
   [ -z "$title" ] && title="$(grep -m1 -E '^# ' "$file" | sed 's/^# *//' | cut -c1-80)"
   [ -z "$title" ] && { title="$(basename "$file" .md)"; }
+  # A record that already sits in a WO-N folder under the work-order directory is
+  # adopted where it is: the folder keeps its name and contents, and only the
+  # metadata that makes it the pipeline's is added.
+  local fdir; fdir="$(cd "$(dirname "$file")" && pwd -P)"
+  case "$fdir" in "$WO_DIR"/WO-"$num"-*)
+    [ -f "$fdir/.wo-meta" ] && die "WO-$num is already the pipeline's (it carries .wo-meta)"
+    if [ "$dry" -eq 1 ]; then printf 'would adopt in place  %s\n             status  %s   size %s\n' "${fdir#$PROJECT_ROOT/}" "$status" "$size"; return 0; fi
+    printf 'size=%s\ntitle=%s\npriority=P2\ncreated=%s\nadopted=%s\nadopted_from=%s\nowner=%s\nstatus=%s\n' \
+      "$size" "$title" "${opened:-$(date +%F)}" "$(date +%F)" "$file" "$(git config user.name 2>/dev/null || whoami)" "$status" > "$fdir/.wo-meta"
+    echo "WO-$num adopted in place ($status): ${fdir#$PROJECT_ROOT/}"
+    echo "No verification was written. Adopted work is recorded, not verified."
+    return 0;;
+  esac
   local taken; taken="$(find "$WO_DIR" -maxdepth 1 -type d -name "WO-$num-*" -print -quit 2>/dev/null)"
-  [ -z "$taken" ] || die "WO-$num already exists: $taken. Two records cannot share a number."
+  [ -z "$taken" ] || die "WO-$num already exists: $taken. Two records cannot share a number. To adopt that folder as it is, name a file inside it."
   local dir="$WO_DIR/WO-$num-$(slugify "$title")" doc
   case "$size" in trivial) doc="$dir/WO-$num-$(slugify "$title").md";; *) doc="$dir/WO-$num-SPEC.md";; esac
   if [ "$dry" -eq 1 ]; then
@@ -412,7 +425,7 @@ cmd_close() {
     *) die "refusing to close WO-$n: verification is NOT EXECUTED — PLAN ONLY. A plan is not evidence. Run it:  wo verify $n --run <suite.sh>";;
   esac
   local area; area="$(meta_get "$d" area)"
-  local ph budget; ph="$(unfilled_placeholders "$vfile")"; budget="$(placeholder_budget "$(vtemplate "$area")")"
+  local ph budget; ph="$(unfilled_placeholders "$vfile")"; budget="$(placeholder_budget "$(vtemplate "$area" "$(meta_get "$d" intake)")")"
   if [ "${ph:-0}" -gt "$budget" ] && [ "${ALLOW_PLACEHOLDERS:-0}" != 1 ]; then
     die "refusing to close WO-$n: the verification document still carries $ph of its template placeholders (at most $budget may remain).
     A document nobody filled in reads as evidence and is not. Replace the narrative
@@ -457,7 +470,7 @@ cmd_close() {
     local crc=0 conly=()
     [ -n "${WO_PATHS:-}" ] && IFS=, read -r -a conly <<< "$WO_PATHS"
     if [ -f "$d/.wo-manifest" ]; then
-      ( cd "$PROJECT_ROOT" && python3 "$CHECK" --root "$PROJECT_ROOT" --manifest "$d/.wo-manifest" --exclude $(fingerprint_excludes | tr '\n' ' ') ${conly[@]:+--only "${conly[@]}"} ) || crc=$?
+      ( cd "$PROJECT_ROOT" && python3 "$CHECK" --root "$PROJECT_ROOT" --manifest "$d/.wo-manifest" --exclude $(fingerprint_excludes | tr '\n' ' ') --no-kb ${conly[@]:+--only "${conly[@]}"} ) || crc=$?
     elif ( cd "$PROJECT_ROOT" && git rev-parse --show-toplevel >/dev/null 2>&1 ); then
       ( cd "$PROJECT_ROOT" && python3 "$CHECK" --root "$PROJECT_ROOT" --since HEAD ) || crc=$?
     else
@@ -465,10 +478,32 @@ cmd_close() {
     fi
     [ "$crc" -ne 2 ] || die "refusing to close WO-$n: the checks above block. Fix them, or ACP_SKIP_CHECK=1 with a reason in the closeout."
   fi
+  # The knowledge base describes the code. A change to code a profile cites makes
+  # that profile a claim about something that no longer exists; the tool cannot
+  # rewrite it, but it can say so here, where the work is still in mind.
+  KB_IMPACT=""
+  local kbd="$PROJECT_ROOT/${KNOWLEDGE_DIR:-Workspace/Docs/KnowledgeBase}" kbpy="$PIPELINE_ROOT/core/hooks/kb.py"
+  if [ -d "$kbd" ] && [ -f "$kbpy" ] && [ -f "$d/.wo-manifest" ] && [ -f "$CHECK" ]; then
+    local changed; changed="$(cd "$PROJECT_ROOT" && python3 "$CHECK" --root "$PROJECT_ROOT" --manifest "$d/.wo-manifest" --exclude $(fingerprint_excludes | tr '\n' ' ') --list 2>/dev/null || true)"
+    if [ -n "$changed" ]; then
+      local irc=0; KB_IMPACT="$(printf '%s\n' "$changed" | python3 "$kbpy" impact --root "$PROJECT_ROOT" --kb "$kbd" --stdin 2>/dev/null)" || irc=$?
+      if [ "$irc" -eq 1 ]; then
+        echo "Knowledge base: this work order changed files that these profiles describe:" >&2
+        printf '%s\n' "$KB_IMPACT" | sed 's/^/    /' >&2
+        if [ "${ACP_STRICT:-0}" = 1 ] && [ "${ACP_SKIP_KB:-0}" != 1 ]; then
+          die "refusing to close WO-$n under the strict profile: update the profiles above, then  acp kb bind   (ACP_SKIP_KB=1 to override)"
+        fi
+        echo "    Update them before the next reader trusts them, then:  acp kb bind" >&2
+      fi
+    fi
+  fi
   local out="$d/WO-$n-CLOSEOUT.md"
   [ -e "$out" ] && die "$out already exists"
   local title; title="$(basename "$d")"; title="${title#WO-$n-}"
   render "$(ctemplate "$area")" "$out" "$n" "$title" "P2"
+  if [ -n "${KB_IMPACT:-}" ]; then
+    { printf '\n## Knowledge Base Impact\n\nThis work order changed files the following profiles describe. They were recorded here at close; a profile that still describes the old code is a claim about something that no longer exists.\n\n```\n%s\n```\n' "$KB_IMPACT"; } >> "$out"
+  fi
   echo "WO-$n closeout drafted: $out"
   echo "Fill it in from the verification report — do not claim results that were not executed."
   echo "When it is worth carrying to the next project:  wo promote $n"
@@ -592,7 +627,7 @@ unfilled_placeholders() { # file -> how many template placeholders were never re
 
 CHECK="$PIPELINE_ROOT/core/hooks/check.py"
 fingerprint_excludes() { # the folders whose contents are never "the source"
-  printf '%s\n' "$WORKORDERS_DIR" "${BUGS_DIR:-Workspace/Docs/Bugs}" "${SESSIONS_DIR:-Workspace/Sessions}" "${PIPELINE_ROOT#$PROJECT_ROOT/}" "${TESTING_DIR:-Workspace/Testing}/results"
+  printf '%s\n' "$WORKORDERS_DIR" "${BUGS_DIR:-Workspace/Docs/Bugs}" "${SESSIONS_DIR:-Workspace/Sessions}" "${PIPELINE_ROOT#$PROJECT_ROOT/}" "${TESTING_DIR:-Workspace/Testing}/results" "${TESTING_DIR:-Workspace/Testing}/suites" "${KNOWLEDGE_DIR:-Workspace/Docs/KnowledgeBase}"
 }
 write_manifest() { # <file> [paths csv]
   [ -f "$CHECK" ] || return 0
@@ -654,7 +689,7 @@ latest_status() { # verification file -> PASS | FAIL | PLAN | none  (the Overall
 tree_fingerprint() { # hash of the source state the evidence was produced against; the work-order, bug, session, results, suites, and pipeline folders are excluded
   ( set +e; cd "$PROJECT_ROOT" 2>/dev/null || { echo nofp; exit 0; }
     local tdir="${TESTING_DIR:-Workspace/Testing}"
-    local ex=(":!$WORKORDERS_DIR" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!$tdir/results" ":!$tdir/suites")
+    local ex=(":!$WORKORDERS_DIR" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!$tdir/results" ":!$tdir/suites" ":!${KNOWLEDGE_DIR:-Workspace/Docs/KnowledgeBase}")
     # WO_PATHS narrows "the source" to what the work order declared (wo new --paths)
     local scope=(.); [ -n "${WO_PATHS:-}" ] && IFS=, read -r -a scope <<< "$WO_PATHS"
     if git rev-parse --show-toplevel >/dev/null 2>&1; then
@@ -671,7 +706,7 @@ tree_fingerprint() { # hash of the source state the evidence was produced agains
       rm -f "$list"
     else
       find "${scope[@]}" -type f -not -path './.git/*' -not -path "./$WORKORDERS_DIR/*" -not -path "./${BUGS_DIR:-Workspace/Docs/Bugs}/*" -not -path "./${SESSIONS_DIR:-Workspace/Sessions}/*" \
-           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./$tdir/results/*" -not -path "./$tdir/suites/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
+           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./$tdir/results/*" -not -path "./$tdir/suites/*" -not -path "./${KNOWLEDGE_DIR:-Workspace/Docs/KnowledgeBase}/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
         | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f" 2>/dev/null; done
     fi | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16
     true )
@@ -695,7 +730,12 @@ wo_state() { # dir number -> closed | open | in-progress | blocked | migrated | 
   if ls "$1" 2>/dev/null | grep -qi -- "WO-$2-CLOSEOUT"; then echo closed; return; fi
   local st; st="$(meta_get "$1" status)"; echo "${st:-open}"
 }
-vtemplate() { # area -> the verification template that fits the work
+vtemplate() { # area [intake-step] -> the verification template that fits the work
+  # An intake step's verification is the shipped suite and nothing else; the
+  # feature-work template's fifty prompts would only ever be crossed out.
+  if [ -n "${2:-}" ] && [ -f "$PIPELINE_ROOT/core/templates/intake/TEST-TEMPLATE-VERIFICATION-INTAKE.md" ]; then
+    echo "$PIPELINE_ROOT/core/templates/intake/TEST-TEMPLATE-VERIFICATION-INTAKE.md"; return
+  fi
   case "${1:-}" in ui|frontend|styling)
     [ -f "$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION-UI.md" ] && { echo "$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION-UI.md"; return; };;
   esac
@@ -792,7 +832,7 @@ cmd_verify() {
   export WO_PATHS; WO_PATHS="$(meta_get "$d" paths)"
   local out="$d/WO-$n-VERIFICATION.md" title; title="$(meta_get "$d" title)"; title="${title:-$(basename "$d")}"
   if [ ! -f "$out" ] || [ "$force" -eq 1 ]; then
-    render "$(vtemplate "$(meta_get "$d" area)")" "$out" "$n" "$title" "P2"
+    render "$(vtemplate "$(meta_get "$d" area)" "$(meta_get "$d" intake)")" "$out" "$n" "$title" "P2"
     printf '\n---\n\n## Execution Record\n\n**Overall status:** NOT EXECUTED — PLAN ONLY\n\n' >> "$out"
     echo "WO-$n verification document created: $out"
   fi

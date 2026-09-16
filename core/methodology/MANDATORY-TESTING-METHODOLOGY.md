@@ -187,6 +187,22 @@ curl -X POST {{API_BASE_URL}}/auth/login \
 
 ---
 
+### Why not end-to-end tests with stubs
+
+| Concern | End-to-end with mocks and fixtures | Behavioural |
+|---|---|---|
+| What passing proves | that the code works against the stub | that the running system did the thing |
+| Hidden failure | a stub that drifted from the real service keeps passing | a real response cannot drift from itself |
+| What you can see | a framework's summary | the request, the response, the query, the row |
+| Environment | a test database that is not the database | the database the code actually writes to |
+| Reproducing a failure | rerun the framework | copy the command, paste it, watch it fail |
+| The value asserted | often "a call was made" | the actual value that came back, against the value that was sent |
+
+A suite that passes against a stub has proven the stub. The shipped examples under
+`{{PIPELINE_ROOT}}/core/templates/testing/examples/` show the alternative in full.
+
+---
+
 ## Test Harness Format
 
 Every behavioral test is written in this shape, starting at
@@ -326,7 +342,14 @@ anything; the helpers already handle the cases that bite.
 
 ## Good Examples
 
-There is no fixed list. Find the precedent that matches what you are testing:
+Two complete suites ship with the pipeline, in the shape every behavioural suite has:
+
+- `{{PIPELINE_ROOT}}/core/templates/testing/examples/crud-with-state-verification.sh` — create,
+  read, update, refuse, delete; every check on the actual value returned, then on the actual row
+- `{{PIPELINE_ROOT}}/core/templates/testing/examples/auth-flow.sh` — register, sign in, use the
+  token, refuse the wrong password and a forged token, sign out, confirm the token is dead
+
+Then find the precedent that matches what you are testing:
 
 ```bash
 pack suite "<term>"        # behavioral suites across every installed pack

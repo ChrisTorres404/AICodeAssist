@@ -237,3 +237,14 @@ measure_metric_delta() {
 
   echo $(( ${after:-0} - ${before:-0} ))
 }
+
+# --- small assertions the original methodology used constantly -----------------
+assert_contains() { # haystack needle label — the response carries the value that was sent
+  case "$1" in *"$2"*) echo "  PASS ${3:-contains $2}"; return 0;; *) echo "  FAIL ${3:-contains $2} (not found: $2)"; return 1;; esac
+}
+assert_not_empty() { # value label — an id, a token, a row came back at all
+  if [ -n "$1" ]; then echo "  PASS ${2:-not empty}"; return 0; else echo "  FAIL ${2:-not empty} (empty)"; return 1; fi
+}
+assert_gte() { # actual minimum label — counts and totals, never asserted as "some"
+  if [ "${1:-0}" -ge "${2:-0}" ] 2>/dev/null; then echo "  PASS ${3:-$1 >= $2}"; return 0; else echo "  FAIL ${3:-$1 >= $2} (got ${1:-nothing})"; return 1; fi
+}

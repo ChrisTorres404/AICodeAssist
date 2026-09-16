@@ -23,6 +23,12 @@ port, or credential in a suite.
 
 ## Write
 
+Start from a shipped example rather than a blank file:
+`{{PIPELINE_ROOT}}/core/templates/testing/examples/crud-with-state-verification.sh` or
+`auth-flow.sh`. Each is complete, asserts on actual values, verifies state in the database,
+cleans up after itself, and exits 77 when its preconditions are not met.
+
+
 Source the shared framework rather than re-implementing assertions:
 
 ```bash

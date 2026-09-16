@@ -161,6 +161,38 @@ These are limits of the design, written down so nobody discovers them the hard w
 - **Git hooks do not travel through a clone.** Every fresh clone runs `acp install`
   once. That is how git works, not something the pipeline can change.
 
+## Intake: what happens before the pipeline trusts your project
+
+Installing puts the files in place. It does not make the project operational, because
+nothing has been measured or described yet. So installing also opens six small work
+orders, each with a spec that ships complete and a suite that proves the step, and the
+pipeline's own rule applies to its own setup: nobody types PASS.
+
+| Step | The suite proves |
+|---|---|
+| Source state | a repository with at least one commit; the remote and its drift reported |
+| Instructions | `AGENTS.md` names the configured layout and `CLAUDE.md` imports it |
+| Baseline | the project's own tests ran once, recorded against this exact tree |
+| Record | the existing record was inventoried and brought in without fabricated evidence |
+| Suites | at least one way to produce evidence exists |
+| Knowledge base | the repository is described, and every claim resolves to source |
+
+`acp intake status` shows where you are; `acp doctor` says operational only when all six
+have closed on executed evidence. `acp intake inventory` does the classifying: it reads
+the repository without touching it, works out whether its record is pipeline-shaped,
+numbered, ADR-shaped, loose, or absent, catalogues every document, and writes the exact
+`wo adopt` commands for what can be adopted. Loose documentation is indexed and left
+alone unless you choose otherwise.
+
+**The knowledge base** is the same eight-phase analysis the pipeline uses to document
+code it did not write, run against your own: an analysis document, a Feature Profile
+per feature with every claim traced to a file and line, a status matrix, and a source
+index with a content hash for each cited file. It stays true the way evidence does.
+`acp kb status` reports every profile as current, stale, or broken and names the source
+no profile describes. `wo close` tells you which profiles the change you are closing
+touched, and writes that into the closeout. The same rule runs in the pre-commit hook
+and in CI. Updating a profile is work for an agent; knowing when is the tool's job.
+
 ## Adopting a project that already exists
 
 Most projects that want this are not new. They have a record of work already done, a test

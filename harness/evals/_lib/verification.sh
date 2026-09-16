@@ -29,3 +29,12 @@ fill_review() { # <number> [project root] — stand in for the reviewer, for eva
   local n="$1" root="${2:-.}" f
   for f in "$root"/Workspace/Docs/WorkOrders/WO-"$n"-*/WO-"$n"-REVIEW.md; do fill_verification "$f"; done
 }
+
+non_intake_wos() { # [project root] -> the work-order folder names that are not intake steps, one per line
+  local root="${1:-.}" d
+  for d in "$root"/Workspace/Docs/WorkOrders/WO-*; do
+    [ -d "$d" ] || continue
+    grep -q '^intake=' "$d/.wo-meta" 2>/dev/null && continue
+    basename "$d"
+  done
+}

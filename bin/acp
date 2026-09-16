@@ -10,6 +10,8 @@
 #   acp install <path>                                   add to an existing project
 #   acp doctor [path]                                    is the install healthy?
 #   acp baseline [--command '<cmd>'] [--dry-run]         run the project's own tests once and record the first measurement
+#   acp intake [status|inventory]                        the work orders a project completes before it is operational
+#   acp kb status|bind|impact                            the knowledge base: what describes the code, and whether it still does
 #   acp wo|bug|pack|sanitize|detect-stack <args>         forward to the driver
 #   acp check [--staged|--since REF|--paths P...]        the rules over a set of files; blocks on secrets,
 #                                                        weakened config, closeouts without evidence
@@ -26,7 +28,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BIN="$ROOT/bin"
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 usage() { sed -n '3,/^# -\{20,\}$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
@@ -233,6 +235,22 @@ PYEOF
     if [ -n "$bfp" ] && [ "$bfp" = "$cfp" ]; then ok "baseline recorded against this exact tree: $(sed -n 's/^- \*\*Result:\*\* //p' "$bl" | head -1 | cut -c1-60)"
     else ok "baseline recorded ($(sed -n 's/^- \*\*Result:\*\* //p' "$bl" | head -1 | cut -c1-60)); the tree has changed since — re-run:  acp baseline"; fi
   else meh "no baseline: the project's own tests have never been run under this tool, so nothing recorded here is relative to a known state — run:  acp baseline"; fi
+  # Installation is six work orders; operational means all six closed on evidence.
+  if [ -d "$dest/core/templates/intake" ]; then
+    local il; il="$(cd "$target" && "$dest/bin/acp" intake status 2>/dev/null | tail -1 || true)"
+    case "$il" in
+      operational*) ok "intake: $il";;
+      "not yet operational"*) meh "intake: $il — run:  acp intake status";;
+      *) meh "intake: no intake work orders yet — run:  acp intake";;
+    esac
+  fi
+  local kbdir; kbdir="$(sed -n 's/^export KNOWLEDGE_DIR="\([^"]*\)".*/\1/p' "$cfg" 2>/dev/null)"; kbdir="${kbdir:-Workspace/Docs/KnowledgeBase}"
+  if [ -f "$dest/core/hooks/kb.py" ]; then
+    if [ -d "$target/$kbdir" ]; then
+      local kl krc=0; kl="$(python3 "$dest/core/hooks/kb.py" status --root "$target" --kb "$target/$kbdir" 2>/dev/null | tail -1)" || krc=$?
+      case "$krc" in 0) ok "knowledge base: $kl";; 1) meh "knowledge base: $kl — profiles describe code that changed; update them, then  acp kb bind";; 2) bad "knowledge base: $kl — profiles cite files or lines that no longer exist";; *) meh "knowledge base: $kl";; esac
+    else meh "no knowledge base: nothing describes this repository yet — the intake work order for it says how"; fi
+  fi
   # Reporting "healthy" while the drivers cannot actually complete a lifecycle is
   # the worst failure a doctor can have: prove one end to end, here, now.
   if [ -x "$dest/bin/wo" ]; then
@@ -273,10 +291,90 @@ case "$cmd" in
     root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
     ex=()
     if [ -f "$root/pipeline.config.sh" ]; then
-      for k in WORKORDERS_DIR BUGS_DIR SESSIONS_DIR; do v="$(sed -n "s/^export $k=\"\([^\"]*\)\".*/\1/p" "$root/pipeline.config.sh" | head -1)"; [ -n "$v" ] && ex+=("$v"); done
+      for k in WORKORDERS_DIR BUGS_DIR SESSIONS_DIR KNOWLEDGE_DIR; do v="$(sed -n "s/^export $k=\"\([^\"]*\)\".*/\1/p" "$root/pipeline.config.sh" | head -1)"; [ -n "$v" ] && ex+=("$v"); done
     fi
     ex+=("${ROOT#$root/}")
     exec python3 "$ROOT/core/hooks/check.py" --root "$root" --exclude "${ex[@]}" "$@";;
+  intake)
+    # Installation is work, and work here is a work order. Six of them, each with a
+    # shipped spec and a shipped suite, and the project is operational when every
+    # one has closed on an executed pass. Idempotent: an existing step is kept.
+    root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    cfg="$root/pipeline.config.sh"; [ -f "$cfg" ] || { echo "acp intake: no pipeline.config.sh at $root; install first" >&2; exit 1; }
+    wod="$(sed -n 's/^export WORKORDERS_DIR="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; wod="${wod:-Workspace/Docs/WorkOrders}"
+    bugd="$(sed -n 's/^export BUGS_DIR="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; bugd="${bugd:-Workspace/Docs/Bugs}"
+    tdir="$(sed -n 's/^export TESTING_DIR="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; tdir="${tdir:-Workspace/Testing}"
+    rel="${ROOT#$root/}"; T="$ROOT/core/templates/intake"
+    intake_state() { # step -> closed | verified | open | missing, and the number
+      local st="" num="" dd
+      for dd in "$root/$wod"/WO-*; do
+        [ -f "$dd/.wo-meta" ] && [ "$(sed -n 's/^intake=//p' "$dd/.wo-meta" | head -1)" = "$1" ] || continue
+        num="$(basename "$dd")"; num="${num#WO-}"; num="${num%%-*}"
+        if ls "$dd" | grep -qi "WO-$num-CLOSEOUT"; then st=closed
+        elif grep -q 'EXECUTED — PASS' "$dd/WO-$num-VERIFICATION.md" 2>/dev/null; then st=verified
+        else st=open; fi
+        break
+      done
+      printf '%s %s\n' "${st:-missing}" "$num"
+    }
+    case "${1:-}" in
+      status)
+        [ -d "$T" ] || { echo "acp intake: no intake templates shipped with this pipeline" >&2; exit 1; }
+        closed=0; total=0
+        printf '  %-4s %-8s %-10s %s\n' "STEP" "WO" "STATE" "TITLE"
+        for spec in "$T"/INTAKE-0*.md; do
+          [ -f "$spec" ] || continue; total=$((total+1))
+          step="$(basename "$spec" .md)"; n="${step#INTAKE-}"; n="${n%%-*}"; title="$(grep -m1 '^# ' "$spec" | sed 's/^# *WO-XXXX: *//; s/^# *//')"
+          set -- $(intake_state "$n"); st="$1"; num="${2:-}"
+          [ "$st" = closed ] && closed=$((closed+1))
+          printf '  %-4s %-8s %-10s %s\n' "$n" "${num:+WO-$num}" "$st" "$title"
+        done
+        echo; [ "$closed" -eq "$total" ] && echo "operational: every intake step has closed on executed evidence" || echo "not yet operational: $closed of $total intake steps closed with evidence"
+        [ "$closed" -eq "$total" ];;
+      inventory)
+        py="$ROOT/core/hooks/inventory.py"; [ -f "$py" ] || { echo "acp intake: inventory engine missing" >&2; exit 1; }
+        kbd="$(sed -n 's/^export KNOWLEDGE_DIR="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; kbd="${kbd:-Workspace/Docs/KnowledgeBase}"
+        # The inventory is part of the repository's description, so it lives with
+        # the knowledge base, outside the evidence fingerprint.
+        out="$root/$kbd/INDEX.md"; mkdir -p "$(dirname "$out")"
+        python3 "$py" --root "$root" --workorders-dir "$wod" --bugs-dir "$bugd" --testing-dir "$tdir" --pipeline-dir "$rel" --knowledge-dir "$kbd" --out "$out" >/dev/null && echo "wrote ${out#$root/}: what this repository is, the shape of its record, and how to bring it in" || exit 1;;
+      "")
+        [ -d "$T" ] || { echo "acp intake: no intake templates shipped with this pipeline" >&2; exit 1; }
+        W="$ROOT/bin/wo"; opened=0; kept=0
+        for spec in "$T"/INTAKE-0*.md; do
+          [ -f "$spec" ] || continue
+          step="$(basename "$spec" .md)"; n="${step#INTAKE-}"; n="${n%%-*}"; slug="${step#INTAKE-0?-}"
+          title="$(grep -m1 '^# ' "$spec" | sed 's/^# *WO-XXXX: *//; s/^# *//')"
+          set -- $(intake_state "$n"); [ "$1" != missing ] && { kept=$((kept+1)); continue; }
+          case "$slug" in knowledge-base) area=analysis;; baseline|suites) area=testing;; *) area=docs;; esac
+          num="$(cd "$root" && "$W" new "$title" --size small --area "$area" 2>/dev/null | grep -o 'WO-[0-9]*' | head -1)"; num="${num#WO-}"
+          [ -n "$num" ] || { echo "acp intake: could not open step $n" >&2; continue; }
+          dd="$(find "$root/$wod" -maxdepth 1 -type d -name "WO-$num-*" | head -1)"
+          # the shipped spec replaces the template: complete prose, nothing to fill in
+          spec_out="$dd/WO-$num-SPEC.md"
+          { sed -e "s/WO-XXXX/WO-$num/g" -e "s|{{PIPELINE_ROOT}}|$rel|g" "$spec"
+            [ -f "$spec_out" ] && awk '/^## Specialists for this work order/{p=1} p' "$spec_out" | sed '1s/^/\n---\n\n/'
+          } > "$spec_out.new" && mv "$spec_out.new" "$spec_out"
+          printf 'intake=%s\n' "$n" >> "$dd/.wo-meta"
+          suite_src="$T/intake-$n-$slug.sh"; suite_dst="$root/$tdir/suites/intake-$n-$slug.sh"
+          if [ -f "$suite_src" ]; then mkdir -p "$(dirname "$suite_dst")"; sed -e "s|{{PIPELINE_ROOT}}|$rel|g" "$suite_src" > "$suite_dst"; chmod +x "$suite_dst"; fi
+          opened=$((opened+1))
+          printf '  WO-%s  %s\n' "$num" "$title"
+        done
+        echo "intake: $opened step(s) opened, $kept already present. Each has a shipped suite under $tdir/suites/;"
+        echo "        verify a step with  wo verify <n> --run $tdir/suites/intake-0N-<step>.sh   and close it. Then:  acp intake status";;
+      *) echo "usage: acp intake [status|inventory]" >&2; exit 1;;
+    esac;;
+  kb)
+    root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    kbd="Workspace/Docs/KnowledgeBase"
+    [ -f "$root/pipeline.config.sh" ] && { v="$(sed -n 's/^export KNOWLEDGE_DIR="\([^"]*\)".*/\1/p' "$root/pipeline.config.sh" | head -1)"; [ -n "$v" ] && kbd="$v"; }
+    py="$ROOT/core/hooks/kb.py"; [ -f "$py" ] || { echo "acp kb: engine missing ($py)" >&2; exit 1; }
+    sub="${1:-status}"; shift || true
+    case "$sub" in
+      status|bind|impact) exec python3 "$py" "$sub" --root "$root" --kb "$root/$kbd" "$@";;
+      *) echo "usage: acp kb status|bind|impact [--files ...]" >&2; exit 1;;
+    esac;;
   baseline)
     # The first measurement of a project the tool is about to record evidence
     # about. Structure checks pass on a codebase whose tests have been dead for a

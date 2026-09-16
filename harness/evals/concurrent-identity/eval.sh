@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+. "$(dirname "$0")/../_lib/verification.sh"
 cd "$EVAL_TMP"; "$PIPELINE_ROOT/bin/new-project" p --name P >/dev/null 2>&1; cd p || { echo "scaffold failed"; exit 1; }
 W=./.aicodepipeline/bin/wo; B=./.aicodepipeline/bin/bug
 BAR="$EVAL_TMP/barrier"
@@ -19,8 +20,8 @@ new_wo() { $W new "$1" --size trivial --area docs; }
 new_bug() { $B new "$1" --category api; }
 
 race 6 new_wo
-folders="$(ls Workspace/Docs/WorkOrders 2>/dev/null | grep -c . || true)"
-ids="$(ls Workspace/Docs/WorkOrders 2>/dev/null | sed 's/^WO-\([0-9]*\)-.*/\1/' | sort -u | grep -c . || true)"
+folders="$(non_intake_wos | grep -c . || true)"
+ids="$(non_intake_wos | sed 's/^WO-\([0-9]*\)-.*/\1/' | sort -u | grep -c . || true)"
 [ "$folders" -eq 6 ] || { echo "six concurrent creators produced $folders work orders"; ls Workspace/Docs/WorkOrders; exit 1; }
 [ "$ids" -eq 6 ] || { echo "six work orders share only $ids distinct numbers:"; ls Workspace/Docs/WorkOrders; exit 1; }
 

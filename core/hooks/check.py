@@ -249,6 +249,25 @@ def check_evidence(root, files, blockers):
         blockers.append(f"{d}: CLOSEOUT present but {why}")
 
 
+def check_kb(root, files, warnings, kb):
+    """A change to a file a Feature Profile cites makes that profile a claim about
+    code that no longer exists. The engine lives beside this script; when it is
+    absent, or there is no knowledge base, there is nothing to say."""
+    kb = kb or os.path.join(root, "Workspace", "Docs", "KnowledgeBase")
+    engine = os.path.join(HERE, "kb.py")
+    if not os.path.isdir(kb) or not os.path.isfile(engine) or not files: return
+    try:
+        r = subprocess.run([sys.executable, engine, "impact", "--root", root, "--kb", kb, "--stdin"],
+                           input="\n".join(sorted(files)) + "\n", capture_output=True, text=True, timeout=60)
+    except Exception:
+        return
+    if r.returncode == 1:
+        for line in r.stdout.splitlines():
+            if line.strip() and not line.startswith(("uncovered:", "impact:")) and "\t" in line:
+                prof, cited = line.split("\t", 1)
+                warnings.append(f"{prof}: describes changed code ({cited}); update it, then run acp kb bind")
+
+
 # --- main ----------------------------------------------------------------------
 
 def main():
@@ -262,8 +281,11 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=[])
     ap.add_argument("--only", nargs="*", default=None, help="scope for manifest mode: paths the work order declared")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--kb", default=None, help="knowledge-base directory (default: Workspace/Docs/KnowledgeBase under root)")
+    ap.add_argument("--no-kb", action="store_true", help="skip the knowledge-base rule (the drivers run their own at close)")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--write-manifest", help="take a snapshot of the tree to this file and exit")
+    ap.add_argument("--list", action="store_true", help="print the file set one path per line and exit; no rules run")
     a = ap.parse_args()
     # realpath, not abspath: on macOS the temp directory is a symlink, and a root
     # spelled one way with paths spelled the other resolves to nothing.
@@ -290,6 +312,9 @@ def main():
             print("check: not a git repository; give --paths, --manifest, or --staged", file=sys.stderr); return 1
 
     files = {p: s for p, s in files.items() if os.path.isfile(os.path.join(root, p))}
+    if a.list:
+        for p in sorted(files): print(p)
+        return 0
     # The excluded directories are excluded in every mode. The installed pipeline
     # carries example credentials and template configurations by design, and the
     # work-order folders are the pipeline's own state; a staged set that includes
@@ -318,6 +343,7 @@ def main():
     check_quality(root, files, warnings)
     check_ui_size(root, files, warnings)
     check_docs(root, files, warnings)
+    if not a.no_kb: check_kb(root, files, warnings, a.kb)
 
     strict = a.strict or os.environ.get("ACP_STRICT") == "1"
     if not blockers and not warnings:

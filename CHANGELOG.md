@@ -1,5 +1,36 @@
 # Changelog
 
+### 1.3.0 — intake, and a knowledge base that stays true
+
+Installation is not done when the files are in place; it is done when the
+project has been measured and described. Both are now work orders.
+
+- `acp install` and `new-project` open six intake work orders, each with a
+  shipped spec that is complete prose and a shipped suite that proves the step:
+  source state established, instructions reconciled, baseline recorded, record
+  brought in, suites wired, knowledge base built. `wo verify --run` records the
+  evidence, `wo close` refuses without it, and `acp intake status` and doctor
+  say whether the project is operational (`intake-work-orders`)
+- `acp intake inventory` classifies the repository before anything is adopted:
+  git state, stack, instruction files, hooks, CI, and the shape of its record —
+  pipeline work orders, numbered documents, ADRs, loose documentation, or
+  nothing — with a document index and ready-to-run `wo adopt` commands where the
+  shape allows it. Loose documentation is indexed, never adopted unless chosen
+  (`intake-inventory`)
+- the knowledge base is the repository-analysis engine run against the
+  project's own code, under `KNOWLEDGE_DIR` (default
+  `Workspace/Docs/KnowledgeBase`): the analysis, one Feature Profile per
+  feature, the status matrix, and a source index recording a content hash per
+  cited file. `acp kb status` reports every profile as current, stale, or
+  broken, and which source no profile describes; `acp kb bind` refreshes the
+  index after profiles are updated (`kb-freshness`)
+- freshness is enforced where code changes: `wo close` names the profiles that
+  describe files the work order changed and writes them into the closeout, and
+  refuses under the strict profile; `acp check` carries the same rule into the
+  pre-commit hook and CI; doctor reports the counts (`kb-close-impact`)
+- the knowledge directory is excluded from the evidence fingerprint, so
+  describing the code does not stale evidence about it
+
 ### 1.2.0 — enforcement that does not depend on the agent
 
 A paired trial under Codex showed the fifteen session hooks, ninety-five agents and

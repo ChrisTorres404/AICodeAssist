@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+. "$(dirname "$0")/../_lib/verification.sh"
 cd "$EVAL_TMP"; "$PIPELINE_ROOT/bin/new-project" p --name P >/dev/null || exit 1
 cd p; W=./.aicodepipeline/bin/wo; A=./.aicodepipeline/bin/acp
 printf '#!/usr/bin/env bash\nexit 0\n' > ok.sh
@@ -13,7 +14,7 @@ echo "$out" | grep -qE "^  [0-9]+ passed, 0 failed" || { echo "the installed cop
 dout="$($A doctor . 2>&1)"
 case "$dout" in *"lifecycle probe"*) ;; *) echo "doctor did not exercise a lifecycle probe"; exit 1;; esac
 case "$dout" in *FAIL*) echo "doctor reported FAIL on a healthy install:"; echo "$dout" | grep FAIL; exit 1;; esac
-[ "$(ls -d Workspace/Docs/WorkOrders/WO-* 2>/dev/null | wc -l | tr -d ' ')" -eq 0 ] || { echo "the doctor probe left a work order behind"; exit 1; }
+[ "$(non_intake_wos | grep -c . || true)" -eq 0 ] || { echo "the doctor probe left a work order behind"; exit 1; }
 
 # 3. a commit citing a work order that was never opened is reported, and blocked in strict
 H=.aicodepipeline/core/hooks/wo-reference.py

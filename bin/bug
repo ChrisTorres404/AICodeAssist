@@ -214,8 +214,15 @@ cmd_adopt() { # <file> --number N --category C [--title T] [--status migrated] [
   [ -n "$cat" ] || die "bug adopt: --category is required, because the number cannot say what the bug is about"
   num="$(printf '%04d' "$((10#$num))")"
   [ -z "$title" ] && title="$(grep -m1 -E '^# ' "$file" | sed 's/^# *//' | cut -c1-80)"; [ -z "$title" ] && title="$(basename "$file" .md)"
+  local fdir; fdir="$(cd "$(dirname "$file")" && pwd -P)"
+  case "$fdir" in "$BUG_DIR"/BUG-"$num"-*)
+    [ -f "$fdir/.bug-meta" ] && die "BUG-$num is already the pipeline's (it carries .bug-meta)"
+    if [ "$dry" -eq 1 ]; then printf 'would adopt in place  %s\n           category  %s   status %s\n' "${fdir#$PROJECT_ROOT/}" "$cat" "$status"; return 0; fi
+    printf 'title=%s\ncategory=%s\ncreated=%s\nadopted=%s\nadopted_from=%s\nowner=%s\nstatus=%s\n' "$title" "$cat" "$(date +%F)" "$(date +%F)" "$file" "$(git config user.name 2>/dev/null || whoami)" "$status" > "$fdir/.bug-meta"
+    echo "BUG-$num adopted in place ($status, $cat): ${fdir#$PROJECT_ROOT/}"; return 0;;
+  esac
   local taken; taken="$(find "$BUG_DIR" -maxdepth 1 -type d -name "BUG-$num-*" -print -quit 2>/dev/null)"
-  [ -z "$taken" ] || die "BUG-$num already exists: $taken"
+  [ -z "$taken" ] || die "BUG-$num already exists: $taken. To adopt that folder as it is, name a file inside it."
   local routing; routing="$(route "$cat" 2>/dev/null || true)"; local series="${routing%%|*}"
   local note=""
   if [ -n "$series" ]; then
@@ -328,7 +335,7 @@ placeholder_budget() { # how many template prompts may still remain at close
 
 CHECK="$PIPELINE_ROOT/core/hooks/check.py"
 fingerprint_excludes() {
-  printf '%s\n' "${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" "${BUGS_DIR:-Workspace/Docs/Bugs}" "${SESSIONS_DIR:-Workspace/Sessions}" "${PIPELINE_ROOT#$PROJECT_ROOT/}" "${TESTING_DIR:-Workspace/Testing}/results"
+  printf '%s\n' "${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" "${BUGS_DIR:-Workspace/Docs/Bugs}" "${SESSIONS_DIR:-Workspace/Sessions}" "${PIPELINE_ROOT#$PROJECT_ROOT/}" "${TESTING_DIR:-Workspace/Testing}/results" "${TESTING_DIR:-Workspace/Testing}/suites" "${KNOWLEDGE_DIR:-Workspace/Docs/KnowledgeBase}"
 }
 write_manifest() { # <file>
   [ -f "$CHECK" ] || return 0
@@ -338,7 +345,7 @@ write_manifest() { # <file>
 tree_fingerprint() { # hash of the source state the evidence was produced against; the work-order, bug, session, results, suites, and pipeline folders are excluded
   ( set +e; cd "$PROJECT_ROOT" 2>/dev/null || { echo nofp; exit 0; }
     local tdir="${TESTING_DIR:-Workspace/Testing}"
-    local ex=(":!${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!$tdir/results" ":!$tdir/suites")
+    local ex=(":!${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!$tdir/results" ":!$tdir/suites" ":!${KNOWLEDGE_DIR:-Workspace/Docs/KnowledgeBase}")
     # WO_PATHS narrows "the source" to what the work order declared (wo new --paths)
     local scope=(.); [ -n "${WO_PATHS:-}" ] && IFS=, read -r -a scope <<< "$WO_PATHS"
     if git rev-parse --show-toplevel >/dev/null 2>&1; then
@@ -355,7 +362,7 @@ tree_fingerprint() { # hash of the source state the evidence was produced agains
       rm -f "$list"
     else
       find "${scope[@]}" -type f -not -path './.git/*' -not -path "./${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}/*" -not -path "./${BUGS_DIR:-Workspace/Docs/Bugs}/*" -not -path "./${SESSIONS_DIR:-Workspace/Sessions}/*" \
-           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./$tdir/results/*" -not -path "./$tdir/suites/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
+           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./$tdir/results/*" -not -path "./$tdir/suites/*" -not -path "./${KNOWLEDGE_DIR:-Workspace/Docs/KnowledgeBase}/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
         | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f" 2>/dev/null; done
     fi | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16
     true )

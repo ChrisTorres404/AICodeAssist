@@ -25,6 +25,7 @@ export DOCS_DIR="Workspace/Docs"
 export WORKORDERS_DIR="Workspace/Docs/WorkOrders"
 export BUGS_DIR="Workspace/Docs/Bugs"
 export TESTING_DIR="Workspace/Testing"
+export KNOWLEDGE_DIR="Workspace/Docs/KnowledgeBase"   # the repository described: analysis, feature profiles, source index
 export SESSIONS_DIR="Workspace/Sessions"
 
 # --- Application layout (used by agents to locate code) -------------------

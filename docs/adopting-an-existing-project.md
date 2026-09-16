@@ -7,6 +7,12 @@ order that works, written from an adoption that did most of it in the wrong orde
 The one-line version: **commit first, measure second, install third, wrap rather than rewrite,
 then verify, close, and commit in that order.**
 
+Since 1.3.0 the tool walks this order with you. Installing opens six intake work orders, one per
+phase below, each with a shipped suite that proves the step; `acp intake status` shows what is
+left, `acp intake inventory` does the classifying in Phase 3, and `acp doctor` calls the project
+operational only when all six have closed on executed evidence. The phases are still worth
+reading, because they say why each step exists and what it cost to learn.
+
 ## Phase 0 — before you install anything
 
 1. **Put the project under version control, and commit.** Not "it is in git somewhere": this

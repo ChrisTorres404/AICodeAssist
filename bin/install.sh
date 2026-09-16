@@ -456,9 +456,18 @@ if [ -x "$DEST/bin/lint" ]; then
   esac
 fi
 
+# Installation is not done when the files are in place; it is done when the
+# project has been measured and described. Those are work orders, opened here.
+if [ -d "$DEST/core/templates/intake" ] && [ -x "$DEST/bin/acp" ]; then
+  echo; echo "Intake — the work orders this project completes before it is operational:"
+  (cd "$TARGET" && "$DEST/bin/acp" intake 2>&1 | sed 's/^/  /') || true
+fi
+
+echo
 echo "Done. Next:"
 echo "  export PATH=\"$DEST/bin:\$PATH\""
-echo "  cd $TARGET && acp doctor && wo new \"My first work order\""
+echo "  cd $TARGET && acp intake status     # what is left before the project is operational"
+echo "  acp baseline && acp intake inventory   # measure it, and catalogue what it already has"
 echo
 echo "Project-specific agent rules belong in $PIPELINE_ROOT/core/agents/overlays/,"
 echo "not in base/ — base agents are replaced wholesale on the next install."
