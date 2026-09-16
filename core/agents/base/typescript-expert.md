@@ -351,7 +351,6 @@ npm run build -- --watch
 ## Resources
 - [TypeScript Handbook](https://www.typescriptlang.org/docs/)
 - [Advanced TypeScript](https://www.typescriptlang.org/docs/handbook/advanced-types.html)
-- [Type Challenges](https://github.com/type-challenges/type-challenges)
 - [class-validator](https://github.com/typestack/class-validator)
 - [Existing DTOs](apps/api-server/src/**/dto/)
 

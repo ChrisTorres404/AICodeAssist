@@ -7,7 +7,7 @@ description: Use after a complex task, failure, or when reviewing what was learn
 
 > **The problem:** Most people write "fixed a bug in X" as a learning log. That's a diary entry, not a learning artifact. A real growth log extracts the *pattern* so you recognize it next time.
 >
-> **This skill teaches:** How to write learning entries that compound across sessions. Works with any note-taking system — Markdown files, Notion, Obsidian, plain text. Templates are generic; adapt to your setup.
+> **This skill teaches:** How to write learning entries that compound across sessions. Works with any note-taking system — Markdown files, a notes app, plain text. Templates are generic; adapt to your setup.
 
 ## When to Activate
 
@@ -107,7 +107,7 @@ Before finalizing a growth log entry:
 
 Store entries wherever you keep notes. Common patterns:
 - Markdown files in a `growth-log/` directory (one file per day: `YYYY-MM-DD.md`)
-- A dedicated section in Notion, Obsidian, or your note-taking app
+- A dedicated section in your note-taking app
 - Plain text files with a consistent naming convention
 
 Pick one convention and stick to it. Searchability matters more than format.

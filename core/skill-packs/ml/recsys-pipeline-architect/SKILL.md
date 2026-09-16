@@ -5,7 +5,7 @@ description: Design composable recommendation, ranking, and feed pipelines using
 
 # recsys-pipeline-architect
 
-A spec-and-scaffold skill for building composable recommendation, ranking, and feed pipelines. It encodes the **six-stage pattern** — Source → Hydrator → Filter → Scorer → Selector → SideEffect — popularized by xAI's open-sourced [For You algorithm](https://github.com/xai-org/x-algorithm) (Apache 2.0). This skill is an independent reimplementation of the pattern (MIT) — no code copied from the original.
+A spec-and-scaffold skill for building composable recommendation, ranking, and feed pipelines. It encodes a **six-stage pattern** — Source → Hydrator → Filter → Scorer → Selector → SideEffect — the shape most production feed and ranking systems converge on. The implementation here is original.
 
 ## When to Use
 

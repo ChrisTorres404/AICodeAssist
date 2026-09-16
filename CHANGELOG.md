@@ -1,5 +1,18 @@
 # Changelog
 
+### 1.1.4 — first public release
+
+The 1.1.3 tree, prepared for a public repository:
+
+- the README is written for someone who has never seen the pipeline: the problem,
+  what you get, five minutes to a first work order, a day with it, what it will
+  not do, and the evidence so far, with the reference material after
+- inline references to other projects removed from three skills and agents; the
+  notices file is the one place another project is named
+- an example key in the release-sanitizer agent's teaching table rewritten so it
+  no longer matches a real credential's shape
+- release assets: a source archive and the Claude Code plugin, with checksums
+
 ### 1.1.3 — the installed project as a test target
 
 Findings from a blind recovery run on a mature codebase and two rounds of

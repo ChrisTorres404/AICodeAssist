@@ -1,75 +1,197 @@
 # AICodePipeline
 
-**by Christian Torres**
+**Make your AI coding agent prove its work.**
 
-An engineering pipeline for working with AI coding agents that refuses to take
-"done" on faith. Every unit of work is a work order with a specification, a
-verification record built from tests that actually ran, and a closeout. The
-driver will not produce a closeout without the evidence. Hooks catch debug
-logging and stubs as they are written. Packs carry what you learned into the
-next project, pitfalls included.
+AI agents write code fast. They also say "done" when it is not, forget what they tried
+once the session ends, and quietly weaken the tests to make them pass. This pipeline
+gives an agent a way of working that does not allow any of that: every piece of work is a
+work order with a spec, a test that actually ran, and a closeout the tool refuses to
+write until the evidence exists. It works on any codebase in any language, and it is
+free.
 
-Built over a year of shipping a production identity platform with AI agents,
-then extracted and made general so it works on any codebase, in any language.
+Built over eighteen months of shipping a production platform with AI agents, then
+pulled out and made general.
+
+---
+
+## The problem it solves
+
+If you have worked with a coding agent for more than a week, you have seen these:
+
+- **"Done" that is not done.** The agent reports success. You find out later the tests
+  were never run, or were run against code that has since changed.
+- **Work that evaporates.** What was tried, what failed, why the fix took the shape it
+  did: all of it lived in a chat window that is now gone. The next session, or the next
+  person, starts from zero.
+- **Shortcuts you did not authorize.** A `console.log` left in. A stub that throws
+  "not implemented." A lint rule relaxed so the check goes green.
+- **No memory across projects.** The same mistake, solved again, on the next codebase.
+
+None of these are model failures. They are process failures, and a process is something
+you can enforce.
+
+## What you get
+
+- **Work orders.** Every task gets a folder with a specification, a checklist, a prompt,
+  and later a verification record and a closeout. The size of the task sets how much
+  ceremony it gets; a two-line fix does not need four documents.
+- **Verification that cannot be faked by typing.** `wo verify --run` executes your test
+  suite and writes `EXECUTED — PASS` or `EXECUTED — FAIL` from the exit code. Nobody
+  types "PASS." The result is bound to a fingerprint of your source, so if the code
+  changes after the pass, the pass is stale and the tool says so.
+- **A closeout the tool refuses to write without evidence.** `wo close` will not run on
+  a work order whose verification is missing, failed, never finished, or still a blank
+  template.
+- **Rules that are enforced, not requested.** Debug logging, stubs, credentials in a
+  commit, a weakened lint config, a commit that cites a work order nobody opened: each
+  one is caught by a hook or a driver, not by hoping the agent remembers.
+- **Packs.** When a work order closes with a pass, you can promote it. Its spec, its
+  tests, and the pitfalls you wrote down while you still remembered them become
+  searchable precedent for the next project.
+- **Specialists.** Ninety-five agent definitions, from REST and database design to
+  security review and accessibility, routed to a work order by its area.
+
+## Five minutes
+
+Requirements: macOS or Linux, bash 3.2 or newer, `python3`, `perl`, `git`. Nothing to
+install beyond cloning this repository.
+
+**A new project:**
+
+```bash
+git clone https://github.com/ChrisTorres404/AICodeAssist.git pipeline
+pipeline/bin/new-project ~/code/my-app --name "My App"
+cd ~/code/my-app
+export PATH="$PWD/.aicodepipeline/bin:$PATH"
+acp doctor .
+```
+
+**An existing project:**
+
+```bash
+cp pipeline/pipeline.config.example.sh /path/to/project/pipeline.config.sh   # edit the few lines at the top
+pipeline/bin/install.sh /path/to/project
+```
+
+**Then your first work order:**
+
+```bash
+wo new "Rate limiting on the public API" --size small --area api
+# ... fill in the SPEC, do the work, write a test ...
+wo verify 0001 --run tests/rate-limit.sh      # runs it, records the result
+wo close 0001                                 # drafts the closeout, or refuses
+```
+
+Try closing before verifying. It refuses, and tells you what it needs. That refusal is
+the whole product in one line.
+
+**As a Claude Code plugin instead:**
+
+```bash
+pipeline/bin/build-plugin
+claude plugin add ./pipeline/dist/plugin      # then /plugin install aicodepipeline
+```
+
+## A day with it
+
+You open a work order for the feature. The tool creates the folder and the documents
+sized for the job, and names the specialist roles for that area. You or your agent fill
+in the spec before writing code, because the spec is where "done" gets defined.
+
+The work happens. In Claude Code, hooks watch it: a `console.log` written into source
+is called out in the same turn, a change to `tsconfig.json` is blocked unless you say
+why, and a commit carrying something that looks like a credential does not go through.
+
+You scaffold a test suite with `wo suite` and run it with `wo verify --run`. The
+result, the log, and a fingerprint of the source go into the verification record. If
+you touch the code afterwards, the record is stale and close refuses until you run it
+again.
+
+You close the work order. The closeout is drafted from what actually ran. If the work
+is worth remembering, you promote it into a pack, and the pitfalls you noted are there
+the next time you or anyone else searches for "rate limit."
+
+Bugs follow the same lifecycle with `bug new`, `bug verify`, `bug close`.
+
+## How this changes your programming
+
+- **You stop re-verifying the agent's claims by hand.** The tool already did, and it
+  wrote down what it found.
+- **Rework drops.** A pass bound to a source fingerprint means the thing that passed is
+  the thing you are shipping. In a paired trial on the same codebase, an agent using
+  the pipeline's required independent review caught a silent data-precision defect
+  before handoff that an agent working without it shipped.
+- **Context survives the session.** Six months from now the work order still says what
+  was tried, what failed, and what the test proved. So does the next person's.
+- **You can hand more to the agent.** The rules hold whether or not anyone is watching.
+- **Your projects compound.** Every promoted work order makes the next one start from
+  precedent instead of a blank page.
+
+## Does it actually work?
+
+The honest evidence so far, all of it reproducible from this repository:
+
+- A blind recovery run on a mature, real codebase found ten of ten planted defects.
+- Twenty-three adversarial scenarios, written by an independent reviewer to break the
+  lifecycle, pass. That includes four simultaneous creators getting distinct work-order
+  numbers, a verification interrupted mid-run leaving no stale pass behind, and a failed
+  upgrade leaving the project intact.
+- The pipeline tests itself with the same discipline: `bin/acp test` runs thirty
+  behavioural evaluations, each of which installs into a scratch project and asserts on
+  what actually happened.
+
+What it does not claim: that it makes an agent faster. In the paired trial the two
+arms finished within seconds of each other once the defect was repaired. The gain is
+in what reaches you, not how quickly.
+
+## What it will not do
+
+These are limits of the design, written down so nobody discovers them the hard way:
+
+- **It cannot stop someone determined to fake evidence.** A verification file written by
+  hand with a pass line is accepted. The files are on your disk, and nothing here can
+  prove otherwise. The rules keep work from drifting past its own tests; they do not
+  authenticate the tests.
+- **A suite that asserts nothing passes.** The tool records an exit code. Write tests
+  that can fail.
+- **Git hooks do not travel through a clone.** Every fresh clone runs `acp install`
+  once. That is how git works, not something the pipeline can change.
+
+## Works with your tools
+
+The drivers (`wo`, `bug`, `pack`, `acp`) are plain bash and run under any coding agent
+or none. The git `commit-msg` hook runs regardless of who typed the command. The
+templates and the methodology are files any agent can read.
+
+The session hooks, the slash commands and the specialist subagents are Claude Code
+features. Without Claude Code you keep the drivers, the git hook, the templates and the
+methodology, and you lose the in-session early warnings. Everything the tool refuses to
+do, it still refuses.
 
 ---
 
-## Start here
+# Reference
 
-**Supported platforms:** macOS and Linux, bash 3.2+, `python3`, `perl`, `git`.
-Windows is not supported. Nothing else needs installing.
-
-**New project, one command:**
-
-```bash
-bin/new-project ~/code/my-app --name "My App" --domain myapp.io
-```
-
-**Existing project:**
-
-```bash
-cp pipeline.config.example.sh /path/to/project/pipeline.config.sh   # edit it
-bin/install.sh /path/to/project                 # --profile minimal | standard | full
-```
-
-`minimal` is rules, agents, commands, and the six lifecycle skills with no
-hooks; `standard` (the default) adds every skill and the hook set; `full`
-adds every domain agent pack and every optional skill pack. `new-project`
-takes the same flag, plus `--skill-pack` and `--agent-pack` for one at a time.
-
-**As a Claude Code plugin, no install step:**
-
-```bash
-bin/build-plugin
-claude plugin add ./dist/plugin        # then /plugin install aicodepipeline
-```
-
-Either way you get: the drivers, 95 agents, 162 skills plus 9 optional skill packs, 32 slash commands, 15 hooks, 16 stack profiles, per-language
-rules chosen by stack detection, a permission baseline, and a project
-`CLAUDE.md` with the run and test commands filled in from what `detect-stack`
-finds (for an empty project, run `detect-stack . --write` once code exists; it
-also installs the language rule sets the code now needs).
-
----
+Everything above is enough to start. What follows is the detail.
 
 ## The work-order lifecycle
 
 ```bash
 acp wo new "Rate limiting" --size standard --priority P1   # folder + required docs
 acp wo start 0407 · block 0407 "reason" · note 0407 "text"  # status and session notes
-acp wo suite 0407          # scaffold the behavioural suite (sources the harness, exits non-zero on failure)
-acp wo verify 0407 --run suites/wo-0407.sh   # runs it; stamps EXECUTED — PASS/FAIL from exit code
-acp wo close 0407          # REFUSES without a VERIFICATION document
+acp wo suite 0407          # scaffold the behavioural suite
+acp wo verify 0407 --run suites/wo-0407.sh   # runs it; stamps EXECUTED — PASS/FAIL from the exit code
+acp wo close 0407          # refuses without an executed pass
 acp wo integrate "Batch name" --covers 0402,0403,0404   # parallel work: prove the modules compose
-acp wo promote 0407        # carry it into a pack; writes one catalog entry file, so parallel promotions never conflict
+acp wo promote 0407        # carry it into a pack
 acp wo list · show · status · stats
 ```
 
-`acp` is the front door; every subcommand is also a standalone script in
-`bin/` you can call or edit directly. `acp doctor` tells you whether an
-install is healthy.
+`acp` is the front door; every subcommand is also a standalone script in `bin/`.
+`acp doctor` tells you whether an install is healthy, and proves it by opening,
+verifying and closing a throwaway work order in place.
 
-**Size sets the ceremony.** A two-line fix does not need four documents.
+**Size sets the ceremony.**
 
 | Size | Created at open | Always required to close |
 |---|---|---|
@@ -78,57 +200,46 @@ install is healthy.
 | `standard` | SPEC, CHECKLIST, TASK-BREAKDOWN, Prompt | VERIFICATION |
 | `large` | standard plus SDK and UI implementation docs | VERIFICATION |
 
-The verification requirement never relaxes, and `wo verify` is the only thing
-that should create the document: with `--run` it executes the suite and writes
-the status from the exit code, so nobody types `PASS`. `bug` runs the same
-lifecycle for defects, including `verify` and `promote`.
+**Honest status, always.** `EXECUTED — PASS`, `EXECUTED — FAIL`, `NOT EXECUTED — PLAN
+ONLY`, or `RUNNING` for a verification that started and never finished. The last two
+exist so the first is never used falsely.
 
 ## Working with others
 
-Commit `.aicodepipeline/` and `pipeline.config.sh` with the project: a teammate
-who clones gets the same drivers, rules, hooks, and agents, and the config
-resolves its own location, so nothing is machine-specific. Update the pipeline
-by running `install.sh` from a clone of this repository (never from the
-installed copy; it refuses).
+Commit `.aicodepipeline/` and `pipeline.config.sh` with the project. A teammate who
+clones gets the same drivers, rules, hooks and agents, and the config resolves its own
+location. Simultaneous work is safe: identities are reserved atomically, and promotions
+write one catalog entry file each so parallel promotions never conflict.
 
 ```bash
 acp wo publish 0407    # opens a GitHub issue carrying the full work order
 acp wo sync 0407       # pushes the current spec and status to the issue
-acp wo import 77       # creates WO-0077 from an existing issue, numbers matched
+acp wo import 77       # creates WO-0077 from an existing issue
 ```
 
-The folder is the record; the issue is the shared view. `wo verify --run`
-comments the result on the issue, and `wo close` closes it. Needs the `gh`
-CLI, authenticated. Every work order records its `owner`.
+Needs the `gh` CLI, authenticated. In a monorepo, whole-tree fingerprinting means an
+unrelated commit can make your evidence stale; run the suite again and it is current.
 
-**Honest status, always.** `EXECUTED — PASS`, `EXECUTED — FAIL`, or
-`NOT EXECUTED — PLAN ONLY`. The third exists so the first is never used
-falsely. The Stop hook checks that a closeout is not resting on the third.
-
----
-
-## Enforcement, not exhortation
+## What is enforced
 
 | Rule | Mechanism | Profile |
 |---|---|---|
-| No closeout or promotion without `EXECUTED — PASS` verification | `wo close`, `bug close`, `wo promote` refuse on missing, plan-only, or failed | always |
-| A closeout in the working tree rests on executed evidence | `evidence-gate.py` Stop hook | standard warns, strict blocks |
-| No `console.log`, `TODO: implement`, not-implemented stubs | `quality-gate.py` PostToolUse | standard warns, strict blocks |
-| Commits reference a work order | `wo-reference.py` PreToolUse | advisory |
-| A commit cites a work order or bug that does not exist | `wo-reference.py` as a git `commit-msg` hook, wired at install | blocks, whether the message came from `-m`, `-F`, stdin or an editor (`ACP_WO_REFERENCE=warn` to override) |
+| No closeout or promotion without `EXECUTED — PASS` | `wo close`, `bug close`, `wo promote` refuse on missing, plan-only, failed, or unfinished | always |
+| A pass is bound to the source it ran against | close refuses if the tree changed after the pass, or while the suite ran | always |
 | A verification document that is still mostly template | `wo close`, `bug close` refuse (`ALLOW_PLACEHOLDERS=1` to override) | always |
+| A commit cites a work order or bug that does not exist | git `commit-msg` hook, wired at install; sees `-m`, `-F`, stdin and editor messages alike | blocks (`ACP_WO_REFERENCE=warn` to override) |
+| Credentials in staged changes | `commit-quality.py` on `git commit` | blocks; debug logging warns |
+| Lint, format, or strictness config weakened to pass a check | `config-protection.py` | blocks (`ACP_ALLOW_CONFIG_EDIT=1` to override) |
+| A closeout in the working tree rests on executed evidence | `evidence-gate.py` Stop hook | standard warns, strict blocks |
+| `console.log`, `TODO: implement`, not-implemented stubs, debug output in nine languages | `quality-gate.py` | standard warns, strict blocks |
+| Commits reference a work order | `wo-reference.py` | advisory |
 | Force-push to shared branches, `--no-verify`, destructive shell | markdown hook rules | block / warn |
-| Sessions open oriented | `session-orient.sh` SessionStart | all |
-| Credentials in staged changes | `commit-quality.py` PreToolUse on `git commit` | blocks; debug logging warns |
-| Lint, format, strictness config weakened to pass a check | `config-protection.py` PreToolUse | blocks (`ACP_ALLOW_CONFIG_EDIT=1` to override) |
-| Edited files formatted with the project's own formatter | `post-edit-format.py` PostToolUse | standard |
-| Type errors after an edit, reported for that file only | `post-edit-typecheck.py` PostToolUse | strict |
-| UI drift: hard-coded colours, `transition-all`, unnamed icon buttons, undesigned empty states | `design-quality.py` PostToolUse | advisory |
-| UI line limits (page 150, component 200, modal 50, form 80, table 100) | `ui-size-check.py` PostToolUse | standard warns, strict blocks |
-| Debug output in Go, Rust, Java, C#, Ruby, PHP, Python, JS | `quality-gate.py` PostToolUse | standard warns, strict blocks |
-| Scratch files at the repository root | `doc-file-warning.py` PreToolUse | advisory |
-| Orientation note written before context compaction | `pre-compact.py` PreCompact | all |
-| Documentation claims: every `<!-- SOURCE: path -->` resolves, over-claim language flagged | `doc-claims-check.py` PostToolUse | standard warns, strict blocks |
+| Edited files formatted with the project's own formatter | `post-edit-format.py` | standard |
+| Type errors after an edit, for that file only | `post-edit-typecheck.py` | strict |
+| UI drift: hard-coded colours, `transition-all`, unnamed icon buttons | `design-quality.py` | advisory |
+| UI line limits (page 150, component 200, modal 50, form 80, table 100) | `ui-size-check.py` | standard warns, strict blocks |
+| Documentation claims: every `<!-- SOURCE: path -->` resolves | `doc-claims-check.py` | standard warns, strict blocks |
+| Sessions open oriented; a note is written before context compaction | `session-orient.sh`, `pre-compact.py` | all |
 
 ```bash
 export ACP_HOOK_PROFILE=strict          # minimal | standard | strict
@@ -149,103 +260,67 @@ That looks like the production database. Are you sure?
 
 ### The commit-msg hook
 
-Two of these checks live in Claude Code's hook system, which sees the command a session is
-about to run. That is early feedback, and it is not the whole picture: a commit message can
-reach git by `-F`, by stdin, or from an editor without ever appearing in a command. So the
-traceability check is also installed as a git `commit-msg` hook, which sees the final message
-every time. Installing wires it; `acp doctor` reports whether it is there.
-
-If the repository already has a `commit-msg` hook, installing leaves it alone rather than
-overwriting work you did not ask it to touch. The guarantee then applies only once you chain
-the check into your own hook:
+The session hooks see the command an agent is about to run. A commit message can reach
+git by `-F`, by stdin, or from an editor without ever appearing in a command, so the
+traceability check is also installed as a git `commit-msg` hook, which sees the final
+message every time. If the repository already has a `commit-msg` hook, installing
+leaves it alone; chain the check into yours to get the same guarantee:
 
 ```sh
 "$(git rev-parse --show-toplevel)/.aicodepipeline/core/hooks/wo-reference.py" "$@" || exit $?
 ```
 
-### What the evidence rules do and do not guarantee
+### Install profiles
 
-The drivers refuse a closeout without an executed pass, refuse one whose latest run failed or
-never finished, and refuse one whose source moved while the suite ran. That is a check on
-process, not an authentication of evidence, and the difference matters:
+`minimal` is rules, agents, commands and the six lifecycle skills with no hooks;
+`standard` (the default) adds every skill and the hook set; `full` adds every optional
+agent pack and skill pack. `install.sh --profile` and `new-project --profile` take the
+same values, plus `--skill-pack` and `--agent-pack` for one at a time.
 
-- **A document can be written by hand.** A verification file with a pass line and no run log is
-  accepted. Files on your disk are yours; nothing here can prove otherwise. The rules stop work
-  drifting past its own tests. They do not stop someone determined to fake the result.
-- **A suite that asserts nothing passes.** The drivers record an exit code. A suite that
-  collects no tests and exits zero is a pass, because nothing else was ever claimed.
-- **A suite that swallows failures passes.** `false` followed by a successful command exits
-  zero. Write suites that propagate failure.
-- **Git hooks do not travel through a clone.** They live in the repository, not in its history.
-  Every fresh clone starts without them, so run `acp install <project>` once in each clone. This
-  is not specific to the pipeline; it is how git hooks work.
-
-### Upgrading an existing installation
-
-Re-run the installer over the project:
+### Upgrading
 
 ```bash
 acp install <project>
 ```
 
-That is the migration path, and it is the only one. It replaces the pipeline's own hooks by
-their `acp:` identity, keeps every hook and setting that is yours, and adds anything new since
-the version you have. `acp doctor` only reports; it never edits git hooks, so a project that
-was installed before a hook existed will not be told it is missing one until the installer has
-run again. If you maintain several projects, re-run it in each.
-
----
+Re-run the installer over the project. It replaces the pipeline's own hooks by their
+`acp:` identity, keeps every hook and setting that is yours, and adds anything new. A
+failed install leaves the project intact; the replacement is staged before anything is
+removed, and your own overlays and harness configuration are held with the project
+until the install commits. `acp doctor` only reports; it never edits git hooks.
 
 ## Rules and agents
 
-`core/rules/common/` is ten short files, always loaded: work orders, testing,
-coding style, code review, security, git, agents, patterns, documentation,
-troubleshooting. `core/rules/ui/`
-carries the UI standards — feature-folder structure, reusable components,
-line limits that trigger extraction (page 150, component 200, modal 50, form
-80, table 100), import paths, and verification — and loads whenever a UI
-stack is present. Twenty-one language sets extend them; `install.sh` picks the
-right ones from what `bin/detect-stack` finds.
+`core/rules/common/` is ten short files, always loaded: work orders, testing, coding
+style, code review, security, git, agents, patterns, documentation, troubleshooting.
+`core/rules/ui/` carries the UI standards and loads whenever a UI stack is present.
+Twenty-one language sets extend them; `install.sh` picks the right ones from what
+`bin/detect-stack` finds.
 
-Agents: 52 technology specialists and 43 process roles, selected by
-description, every one built out with responsibilities, code templates, a
-validation checklist, patterns, anti-patterns, and common issues. Opt-in domain packs add 19 more: `identity` (auth, OAuth/OIDC, multi-tenant, SDK
-platforms), `ml`, `network`, `healthcare`, and `gan` (`AGENT_PACKS="identity ml"`). Project-specific narrowing goes in `core/agents/overlays/`, which
-survives reinstalls.
+Agents: 52 technology specialists and 43 process roles, each with responsibilities,
+code templates, a validation checklist, patterns and anti-patterns. Opt-in domain
+packs add 19 more (`identity`, `ml`, `network`, `healthcare`, `gan`). Project-specific
+narrowing goes in `core/agents/overlays/`, which survives reinstalls.
 
----
+## Understanding code you did not write
 
-## Understanding and documenting code you did not write
-
-The same evidence discipline applies to claims about code, not just code. A
-second lifecycle, `wo new --area analysis` and `--area docs`, reads a
-repository without touching it and produces documentation whose every claim
-traces to a source file:
+The same evidence discipline applies to claims about code. `wo new --area analysis`
+and `--area docs` read a repository without touching it and produce documentation whose
+every claim traces to a source file:
 
 ```bash
-/analyze-repo ./their-service   # eight-phase read-only analysis → Feature Profiles + source index
-/status-matrix                  # honest badges: implemented, partial, in development, planned, not available
+/analyze-repo ./their-service   # eight-phase read-only analysis
+/status-matrix                  # honest badges: implemented, partial, planned, not available
 /docs-faq · /docs-brief · /docs-primer · /docs-reference · /docs-developer
-/integration-kit                # playbook, PM brief, API quick reference, decision matrix
-/feasibility "can it do X?"     # verdict, mechanism, integration path, blocker or not
-/review-docs <path>             # factuality-validator, then critical-reviewer
+/feasibility "can it do X?"     # verdict, mechanism, integration path
+/review-docs <path>             # factuality validation, then critical review
 ```
 
-Three rules make it honest. **Source or silence**: anything that cannot be
-traced to a file is omitted, never invented, and every claim carries a
-`<!-- SOURCE: path:L12 -->` comment that a hook verifies (the hook proves the reference exists; the
-factuality validator proves the source supports the claim). **No implemented
-badge without a code reference**, and every partial lists its limitations.
-**The validator is never the author**: a factuality validator marks each
-claim VERIFIED, UNVERIFIED, or DISCREPANCY, and a critical reviewer hunts
-contradictions and over-claims before a document reaches VALIDATED.
+**Source or silence:** anything that cannot be traced to a file is omitted, never
+invented, and every claim carries a `<!-- SOURCE: path:L12 -->` comment a hook verifies.
+**The validator is never the author.**
 
----
-
-## Packs: precedent, not just process
-
-A pack is a domain's accumulated experience: work orders, bugs, test suites,
-architecture, and a catalog of pitfalls.
+## Packs
 
 ```bash
 pack list
@@ -253,16 +328,9 @@ pack search "rate limit"
 pack show WO-0407
 ```
 
-`wo promote` moves a verified work order into your project's pack and writes a
-catalog entry. Edit the **Pitfalls** lines while you still remember. That is
-how the pipeline gets smarter the more you use it.
-
-The repository ships the machinery and no corpus: `packs/` starts empty in
-every install, and `pack search` returns nothing until you promote your first
-work order. The author's own packs stay private; the pipeline is the part that
-was general enough to share. To share a pack, run `bin/sanitize` on it first.
-
----
+`wo promote` moves a verified work order into your project's pack and writes a catalog
+entry. The repository ships the machinery and no corpus: `packs/` starts empty, and the
+author's own packs stay private. To share a pack, run `bin/sanitize` on it first.
 
 ## Before anything leaves your machine
 
@@ -270,59 +338,29 @@ was general enough to share. To share a pack, run `bin/sanitize` on it first.
 bin/sanitize <dir> --report report.md
 ```
 
-Secrets, personal identifiers, internal infrastructure, host paths, dangerous
-files. A single critical finding is a FAIL. `new-project` refuses to install a
-pack that fails; `wo promote` refuses to promote a work order that fails. The
-`release-sanitizer` agent reviews the report with judgement.
+Secrets, personal identifiers, internal infrastructure, host paths, dangerous files. A
+single critical finding is a FAIL, and `wo promote` refuses to promote work that fails.
 
----
+## Testing the pipeline itself
 
-## Testing
-
-`harness/` is a behavioral test framework: real requests against a running
-system, then assertions on the state that changed. One config file switches
-the whole suite between environments. `harness/load/` is a k6 capacity
-harness. Unit tests are welcome; they are not verification evidence on their
-own.
-
-The pipeline tests itself the same way. `bin/acp test` is the whole gate in one
-command — lint, the sanitizer over every shipped directory, every evaluation,
-the plugin build, and plugin validation — and `TESTING.md` documents each check
-on its own, with expected output, for anyone deciding whether this repository
-works.
-
-`acp eval run` executes the evaluations under `harness/evals/`: each one
-installs into a scratch project, drives a hook or a driver, and asserts on what
-happened (a commit with a credential is blocked, a work order refuses to close
-without verification, each install profile ships what it promises, seventeen
-stacks each get the right rules and commands). `acp eval live` goes further and
-drives real sessions, then checks what they left behind. Add one with
-`acp eval new` whenever an agent, rule, or hook change could regress silently.
-
----
+`bin/acp test` is the whole gate in one command: lint, the sanitizer over every shipped
+directory, every behavioural evaluation, the plugin build and plugin validation.
+`TESTING.md` documents each check with its expected output. `acp eval new` adds an
+evaluation whenever an agent, rule or hook change could regress silently.
 
 ## Layout
 
 ```
-core/       governance, methodology, instructions, templates, agents, skills,
-            hooks, rules, commands, workflows, config.   {{VARIABLE}} templated.
-harness/    behavioral + load test frameworks.            Templated.
-packs/      your domain experience, built by promotion. Sanitize before sharing.
-core/skill-packs/  optional skill collections (healthcare, network, marketing,
-            supply-chain, business-ops, science, ml, web3, media); SKILL_PACKS
+core/       methodology, templates, agents, skills, hooks, rules, commands, config
+harness/    behavioural and load test frameworks
+packs/      your domain experience, built by promotion
 bin/        acp, new-project, install.sh, build-plugin, wo, bug, pack, sanitize,
-            detect-stack, stack-specialist, lint, eval, dev/, maintenance scripts
-docs/       getting-started tutorial, harness guide, agent security, an overlay
-            example.  TESTING.md and CONTRIBUTING.md are at the root.
+            detect-stack, lint, eval
+docs/       getting-started tutorial, harness guide, agent security, overlay example
 ```
-
-`THIRD-PARTY-NOTICES.md` carries the licence notices the law requires; nothing
-else in the tree names another project.
-
----
 
 ## Author
 
 Christian Torres — [github.com/ChrisTorres404](https://github.com/ChrisTorres404)
 
-MIT licensed.
+MIT licensed. `THIRD-PARTY-NOTICES.md` carries the notices the licence requires.

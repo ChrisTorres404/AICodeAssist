@@ -140,7 +140,6 @@ async function retryAsync<T>(
 
 ## Resources
 - [Node.js Documentation](https://nodejs.org/docs/)
-- [Node.js Best Practices](https://github.com/goldbergyoni/nodebestpractices)
 
 ## Elite Capabilities
 - **Event Loop**: Understanding async I/O, microtasks, macrotasks
