@@ -8,7 +8,7 @@ Prints languages, frameworks, package manager, and the run/test/build commands
 it could find. Used by bin/install.sh and bin/new-project to choose which rule
 sets to install and to fill in the project's AGENTS.md. Read-only.
 """
-import json, os, re, sys
+import re, json, os, re, sys
 if any(a in ("-h", "--help") for a in sys.argv[1:]):
     print("usage: detect-stack [project-dir] [--json] [--write [AGENTS.md]]\n  Detects languages, frameworks, package manager, run/test/build/lint commands, and the rule sets to install.\n  --write refreshes the Stack / Run / Test / Build lines of the project's AGENTS.md (or CLAUDE.md) in place."); sys.exit(0)
 
@@ -53,10 +53,32 @@ SKIP = {"node_modules", ".git", "vendor", "dist", "build", ".next", "__pycache__
 def exists(root, name):
     return os.path.exists(os.path.join(root, name))
 
+# Extensions that mean "there is code here". Documents and the pipeline's own shell
+# suites are not the project's source, and must not make an empty project look
+# like one with a stack.
+SOURCE_EXTS = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".rb", ".java", ".kt", ".kts", ".rs", ".php",
+               ".cs", ".swift", ".dart", ".vue", ".svelte", ".scala", ".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm",
+               ".ex", ".exs", ".clj", ".hs", ".lua", ".erl", ".zig", ".nim", ".r", ".jl", ".sql"}
+
+def pipeline_dirs(root):
+    """The pipeline's own workspace is not the project's source. When the project is
+    bound to a pipeline, its configuration says where that workspace is."""
+    out = set()
+    cfg = os.path.join(root, "pipeline.config.sh")
+    if os.path.isfile(cfg):
+        try:
+            for line in open(cfg, encoding="utf-8", errors="ignore"):
+                m = re.match(r'^export (WORKORDERS_DIR|BUGS_DIR|TESTING_DIR|SESSIONS_DIR|KNOWLEDGE_DIR|PIPELINE_ROOT)="([^"$]+)"', line)
+                if m: out.add(os.path.normpath(os.path.join(root, m.group(2))))
+        except OSError:
+            pass
+    return out
+
 def ext_counts(root, limit=4000):
     counts, seen = {}, 0
+    skip_abs = pipeline_dirs(root)
     for dp, dns, fns in os.walk(root):
-        dns[:] = [d for d in dns if d not in SKIP and not d.startswith(".")]
+        dns[:] = [d for d in dns if d not in SKIP and not d.startswith(".") and os.path.normpath(os.path.join(dp, d)) not in skip_abs]
         for fn in fns:
             e = os.path.splitext(fn)[1].lower()
             if e: counts[e] = counts.get(e, 0) + 1
@@ -134,7 +156,7 @@ def detect(root):
     monorepo = bool(pkg.get("workspaces")) or exists(root, "pnpm-workspace.yaml") or exists(root, "turbo.json") or exists(root, "nx.json")
     return {"languages": languages, "frameworks": frameworks, "package_manager": pm,
             "rule_sets": ["common"] + rule_dirs, "commands": {k: v for k, v in commands.items() if v},
-            "monorepo": monorepo, "empty": not exts}
+            "monorepo": monorepo, "empty": not any(e in SOURCE_EXTS for e in exts)}
 
 def _grep(root, pat, exts):
     rx = re.compile(pat)

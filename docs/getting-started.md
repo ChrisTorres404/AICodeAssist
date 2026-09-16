@@ -2,7 +2,7 @@
 
 Fifteen minutes, one real feature, start to finish: scaffold a project, open a
 work order, write the code, run a behavioural suite, close on evidence, and
-carry what you learned into a pack. Two tracks run side by side — **Node** and
+carry what you learned into a playbook. Two tracks run side by side — **Node** and
 **Python/FastAPI**; the pipeline is identical, only the code differs. Every command below is real and every output block is copied from
 a run of it.
 
@@ -24,15 +24,15 @@ export PATH="$PWD/.aicodepipeline/bin:$PATH"
 
 ```
   rendered 728 files
-  installed 95 agents, 32 commands, 162 skills, 1 workflows
+  installed 96 agents, 32 commands, 169 skills, 1 workflows
   installed rules: common
   hooks installed; 77 allow and 21 deny rules added
   wrote AGENTS.md (the instructions every agent reads); wrote CLAUDE.md (imports it); git initialised
 ```
 
 `--profile minimal` gives rules, agents, commands, and the six lifecycle skills
-with no hooks; `standard` is the default; `full` adds the domain agent packs and
-every optional skill pack.
+with no hooks; `standard` is the default; `full` adds every agent set and
+every skill set.
 
 ## 2. Read the AGENTS.md it generated
 
@@ -40,6 +40,24 @@ It is yours — `install.sh` never overwrites it. Read the **Project specifics**
 section at the bottom first; that is what an agent reads to locate your code.
 On an empty project it is honest about knowing nothing yet: `- **Stack:**
 _(empty project — fill in once code exists)_`, and the same for run and test.
+
+The other documents you fill in yourself live in `core/templates/project/`. If
+the project has a UI, copy
+`core/templates/project/DESIGN-SYSTEM-INSTRUCTIONS.md` to
+`Workspace/Docs/DESIGN-SYSTEM.md` and fill in its first section — your design
+system's name, tokens, and the inventory of shared components. It is what a UI
+agent reads before it writes a component, and the inventory is what stops it
+inventing a fourth card variant. Every concrete value shipped in the template
+is an example to replace.
+
+If the UI does not look like that design system yet, there is a second
+template beside it:
+`core/templates/project/DESIGN-SYSTEM-MIGRATION-GUIDE.md`, copied to
+`Workspace/Docs/DESIGN-SYSTEM-MIGRATION.md`. That one is the conversion plan —
+seven phases from defining the tokens through to the visual-regression check,
+with the before-and-after for every component shape. Open a work order for it;
+a conversion across every page wants a spec and verification like any other
+change.
 
 ## 3. Check the install
 
@@ -51,7 +69,7 @@ acp doctor
   PASS  pipeline installed at .aicodepipeline/
   PASS  no unresolved template variables
   PASS  hooks wired in .claude/settings.json
-  PASS  agents: 95    skills: 162    rules: common
+  PASS  agents: 96    skills: 169    rules: common
   WARN  AGENTS.md Project Specifics still has placeholders — run: detect-stack . --write
 
 healthy — 1 warning(s)
@@ -190,12 +208,12 @@ Fill it in from the verification report — do not claim results that were not e
 ## 11. Write down what you learned, then promote it
 
 Fill in **Lessons Learned** now, while you still remember; `wo promote 1`
-refuses a closeout that still says `[Lesson 1]`. Then it lands in a pack, and
-`pack search "suite"` finds it again from your next project:
+refuses a closeout that still says `[Lesson 1]`. Then it lands in a playbook, and
+`playbook search "suite"` finds it again from your next project:
 
 ```
-WO-0001 promoted to pack 'task-tracker': <project>/.aicodepipeline/packs/task-tracker/workorders/WO-0001-task-create-endpoint
-Catalog entry appended: <project>/.aicodepipeline/packs/task-tracker/CATALOG.md
+WO-0001 promoted to playbook 'task-tracker': <project>/.aicodepipeline/playbooks/task-tracker/workorders/WO-0001-task-create-endpoint
+Catalog entry appended: <project>/.aicodepipeline/playbooks/task-tracker/CATALOG.md
 
 CATALOG — task-tracker
   WO-0001 — Task create endpoint
@@ -203,7 +221,7 @@ CATALOG — task-tracker
     pitfall:  2. A 400 case is worth an assertion of its own — the happy path alone hid the missing title check
 ```
 
-That is the point of a pack: the mistakes come back before you repeat them.
+That is the point of a playbook: the mistakes come back before you repeat them.
 
 ## 12. A bug, end to end
 
@@ -262,7 +280,7 @@ Every session opens oriented:
 ```
 In-flight work orders (SCTPVC = Spec/Checklist/Tasks/Prompt/Verification/Closeout):
   WO-0002  SCTP.. open         standard task-tracker-analysis
-Search prior work before specifying anything new: .aicodepipeline/bin/pack search "<term>"
+Search prior work before specifying anything new: .aicodepipeline/bin/playbook search "<term>"
 ```
 
 Others block a commit carrying a credential, refuse edits that weaken a lint or
@@ -297,4 +315,4 @@ project; `acp doctor` reports plugin mode. The drivers still want a
 
 **Next:** `AGENTS.md` in your project (edit it; every agent reads it first) ·
 `docs/harness.md` (the harness in full) · `TESTING.md` (how to verify the
-pipeline itself) · `acp help`, or `wo`, `bug`, `pack` with no arguments.
+pipeline itself) · `acp help`, or `wo`, `bug`, `playbook` with no arguments.

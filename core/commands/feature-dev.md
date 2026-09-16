@@ -4,7 +4,7 @@ description: Guided feature development inside a work order — explore the code
 
 Feature: **$ARGUMENTS**
 
-1. **Open** a work order (`wo new --area <area> --size <size>`) and search the packs for precedent.
+1. **Open** a work order (`wo new --area <area> --size <size>`) and search the playbooks for precedent.
 2. **Explore** with `code-explorer`: trace the existing path this feature touches, name the files, list reusable utilities.
 3. **Clarify**: present what you found and ask the design and edge-case questions that change the approach. Wait.
 4. **Design** with `architect` (or `code-architect` for a contained change): the blueprint, trade-offs, and an ADR if the decision is architectural. Wait for approval.

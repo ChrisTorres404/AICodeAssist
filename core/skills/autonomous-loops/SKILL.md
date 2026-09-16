@@ -376,7 +376,7 @@ done
 
 ## 6. Work-Order DAG Orchestration
 
-**The most sophisticated pattern.** An RFC-driven, multi-agent pipeline that decomposes a spec into a dependency DAG, runs each unit through a tiered quality pipeline, and lands them via an agent-driven merge queue. Created by enitrat (credit: @enitrat).
+**The most sophisticated pattern.** An RFC-driven, multi-agent pipeline that decomposes a spec into a dependency DAG, runs each unit through a tiered quality pipeline, and lands them via an agent-driven merge queue.
 
 ### Architecture Overview
 
@@ -601,5 +601,5 @@ These patterns compose well:
 
 - Work is a work order: open it with `wo new`, size it honestly, fill the SPEC before code.
 - Verification means behavioural tests that **ran**: `wo verify <n> --run <suite>` writes the status from the exit code. `NOT EXECUTED — PLAN ONLY` is honest; a typed `PASS` is not.
-- Search the packs before building: `pack search "<problem>"`.
+- Search the playbooks before building: `playbook search "<problem>"`.
 - Route by area: `wo new --area`, `bug new --category`; the routing tables are in `core/rules/common/`.

@@ -18,13 +18,22 @@ Usage (normally through `acp check`):
   check.py --paths <p> [<p>...]      an explicit list
   check.py --root <dir>              project root (default: cwd)
   check.py --strict                  advisory findings block too
+  check.py --types                   also type-check (slow; off by default)
 
 Exit 2 when something blocks, 0 otherwise. Findings go to stderr.
 
+Strict is --strict, ACP_STRICT=1, or ACP_HOOK_PROFILE=strict. The last is there
+because the git hooks are shims that exec this directly and never pass through
+run-hook.sh, so without it a project running the strict profile would be strict
+in a Claude Code session and merely advisory at commit time.
+
 What blocks under every profile: credential-like values, a lint/format/type
 configuration that was weakened, and a closeout resting on verification that is
-not an executed pass. Debug logging, stubs, oversized UI files and untraceable
-documentation claims warn, and block under --strict.
+not an executed pass. Debug logging, stubs, oversized UI files, untraceable
+documentation claims, generic-UI drift, and files the project's own formatter
+would rewrite warn, and block under --strict. Type errors are asked for
+(--types, or ACP_CHECK_TYPES=1) and then warn, and block under --strict: a
+whole-project type-check is too slow to put on every commit unasked.
 """
 import argparse, hashlib, importlib.util, os, re, subprocess, sys
 
@@ -48,6 +57,9 @@ config = load("config-protection")
 uisize = load("ui-size-check")
 docs = load("doc-claims-check")
 evidence = load("evidence-gate")
+design = load("design-quality")
+formatting = load("post-edit-format")
+typecheck = load("post-edit-typecheck")
 
 SECRET_LINE = re.compile(commit.SECRET.pattern.replace(r"^\+.*(", "(", 1))
 # The per-line fixture exemption comes from the hook too, so a line the commit hook
@@ -268,6 +280,169 @@ def check_kb(root, files, warnings, kb):
                 warnings.append(f"{prof}: describes changed code ({cited}); update it, then run acp kb bind")
 
 
+# --- the rules the session hooks ran alone ------------------------------------
+# Three rules below existed only as PostToolUse hooks, which means they only ever
+# ran inside Claude Code. An agent that is not Claude Code, or a person at a
+# terminal, saw none of them. They run here too now, over the same file set and
+# with the same exclusions as every other rule, so git and CI enforce them under
+# any agent. Their tables and their decisions are imported from those hooks
+# rather than restated, for the reason stated at the top of this file.
+
+FORMAT_TIMEOUT = 60      # a formatter on a changed set; long enough for a cold start
+TYPES_TIMEOUT = 120      # a whole-project tsc, the same bound the post-edit hook uses
+
+
+class _Ask:
+    """Stands in for `subprocess` inside a post-edit hook while the hook is asked
+    which command it would run for a file. Those hooks decide, then act; check
+    time needs the decision without the action — nothing on disk may change while
+    someone is part-way through a commit — so calls are recorded and none are
+    executed. `git rev-parse` is answered instead of recorded: it is the hook's
+    own containment guard, not the command being asked about, and an empty answer
+    switches that guard off for a path we have already resolved ourselves."""
+
+    def __init__(self): self.calls = []
+
+    def run(self, args, **kw):
+        args = list(args)
+        if args[:2] != ["git", "rev-parse"]: self.calls.append((args, kw))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+
+def hook_command(mod, path):
+    """The command `mod` would run for `path`, without running it.
+
+    Asking the hook beats copying its table here: the formatter a project has
+    configured, and the tsconfig nearest a file, are decisions with real detail
+    in them, and a second copy of that detail is a copy that goes stale. The
+    module's own `subprocess` and `json` names are swapped for the duration and
+    put back, so nothing outside this call is affected."""
+    ask = _Ask()
+    payload = {"tool_name": "Edit", "tool_input": {"file_path": path}}
+    saved = mod.subprocess, mod.json
+    mod.subprocess = ask
+    mod.json = type("_payload", (), {"load": staticmethod(lambda _stream: payload)})
+    try:
+        mod.main()
+    except Exception:
+        return None
+    finally:
+        mod.subprocess, mod.json = saved
+    return ask.calls[0] if ask.calls else None
+
+
+def check_ui_drift(root, files, warnings):
+    """design-quality's signals over the changed frontend files. The hook sees one
+    edit as it happens; this sees the set that is about to be committed. Advisory
+    under every profile, blocking under strict — the signals are judgement calls
+    (a rendered list may legitimately have no empty state), and a rule that is
+    right most of the time belongs in front of a person, not across a gate."""
+    for p in sorted(files):
+        if not design.FRONTEND.search(p): continue
+        try: text = open(os.path.join(root, p), encoding="utf-8", errors="ignore").read()
+        except OSError: continue
+        for rx, msg in design.SIGNALS:
+            m = rx.search(text)          # one report per signal per file, as the hook does
+            if not m: continue
+            line = text.count("\n", 0, m.start()) + 1
+            warnings.append(f"{p}:{line}: `{m.group(0)[:40].strip()}` — {msg}")
+
+
+def read_only_form(prefix):
+    """A formatter's write invocation turned into the one that only reports.
+
+    `prefix` is the command the post-edit hook would run with the file name
+    removed. Everything the pipeline knows about *which* formatter a project uses
+    comes from that hook; what is known here, and only here, is how each formatter
+    is asked the question instead of told to act. Returns None when a formatter
+    has no read-only form, which is reported as a note and never as a finding."""
+    if not prefix: return None
+    prog = os.path.basename(prefix[0])
+    if prog == "prettier": return [prefix[0], "--check"]
+    if prog == "biome":    return [prefix[0], "format"]            # without --write it only reports
+    if prog == "ruff":     return [prefix[0], "format", "--check"] # no -q: the names are the answer
+    if prog == "black":    return [prefix[0], "--check"]
+    if prog == "gofmt":    return [prefix[0], "-l"]
+    if prog == "rustfmt":  return list(prefix) + ["--check"]
+    return None
+
+
+def check_format(root, files, warnings, notes):
+    """Files the project's own formatter would rewrite. Never rewrites them: at
+    check time the working tree belongs to whoever is committing. Advisory,
+    blocking under strict. A formatter that is not installed, or fails, is a note
+    and never a failure — the pipeline does not own the project's toolchain, and
+    a missing dependency is not a finding about the code."""
+    groups = {}
+    here = os.getcwd()
+    try:
+        # The hook detects the project's formatter by relative path (a prettier
+        # config, node_modules/.bin/prettier), so the question has to be asked
+        # from the project root for the answer to be about this project.
+        os.chdir(root)
+        for p in sorted(files):
+            if not is_source(p): continue
+            got = hook_command(formatting, os.path.join(root, p))
+            if not got: continue
+            args = got[0]
+            mode = read_only_form(args[:-1])      # the hook always puts the file last
+            if mode is None:
+                notes.append(f"{os.path.basename(args[0])} has no read-only form here; formatting not checked")
+                continue
+            groups.setdefault(tuple(mode), []).append(p)
+        for mode, paths in sorted(groups.items()):
+            prog = os.path.basename(mode[0])
+            try:
+                r = subprocess.run(list(mode) + paths, cwd=root, capture_output=True, text=True, timeout=FORMAT_TIMEOUT)
+            except Exception:
+                notes.append(f"{prog} is configured but could not be run here; formatting not checked")
+                continue
+            out = (r.stdout or "") + (r.stderr or "")
+            # Every one of these names the files it would change; gofmt -l names them
+            # and still exits 0, so the names are read rather than the status.
+            hit = [p for p in paths if p in out or os.path.join(root, p) in out]
+            for p in hit:
+                warnings.append(f"{p}: {prog} would reformat this file; run the project's formatter, then stage it")
+            if not hit and r.returncode != 0:
+                notes.append(f"{prog} reported a problem it did not attribute to a file; formatting not checked")
+    finally:
+        os.chdir(here)
+
+
+DIAGNOSTIC = re.compile(r"^(.+?)\((\d+),\d+\): (error TS\d+: .*)$")
+
+
+def check_types(root, files, warnings, notes):
+    """The nearest-tsconfig `tsc --noEmit` the post-edit hook runs, reporting only
+    the errors in the changed files. Asked for rather than always on: a whole
+    project type-check costs seconds to minutes, and a commit hook that does that
+    unbidden is a commit hook people remove. Once asked for it is advisory, and
+    blocking under strict."""
+    runs = {}
+    for p in sorted(files):
+        if not p.endswith((".ts", ".tsx")): continue
+        got = hook_command(typecheck, os.path.join(root, p))
+        if not got: continue
+        args, kw = got
+        # The command is per-tsconfig, not per-file, so files sharing one project
+        # share one run. -p names the project; the file itself is not an argument.
+        runs.setdefault((tuple(args), kw.get("cwd") or root), []).append(p)
+    for (args, cwd), _paths in sorted(runs.items()):
+        try:
+            r = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, timeout=TYPES_TIMEOUT)
+        except Exception:
+            notes.append("tsc is not available here; type errors not checked"); continue
+        seen = 0
+        for line in (r.stdout or "").splitlines():
+            m = DIAGNOSTIC.match(line)
+            if not m: continue
+            seen += 1
+            rel = os.path.relpath(os.path.join(cwd, m.group(1)), root)
+            if rel in files: warnings.append(f"{rel}:{m.group(2)}: {m.group(3)}")
+        if not seen and r.returncode != 0:
+            notes.append("tsc could not run (is TypeScript installed?); type errors not checked")
+
+
 # --- main ----------------------------------------------------------------------
 
 def main():
@@ -281,6 +456,7 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=[])
     ap.add_argument("--only", nargs="*", default=None, help="scope for manifest mode: paths the work order declared")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--types", action="store_true", help="also run the project's tsc over the changed TypeScript (slow; ACP_CHECK_TYPES=1 does the same)")
     ap.add_argument("--kb", default=None, help="knowledge-base directory (default: Workspace/Docs/KnowledgeBase under root)")
     ap.add_argument("--no-kb", action="store_true", help="skip the knowledge-base rule (the drivers run their own at close)")
     ap.add_argument("--quiet", action="store_true")
@@ -336,18 +512,29 @@ def main():
         if not a.quiet: print(f"check: nothing to check in {how}")
         return 0
 
-    blockers, warnings = [], []
+    blockers, warnings, notes = [], [], []
     check_secrets(root, files, blockers)
     check_config(root, files, blockers)
     check_evidence(root, evidence_files, blockers)
     check_quality(root, files, warnings)
     check_ui_size(root, files, warnings)
     check_docs(root, files, warnings)
+    check_ui_drift(root, files, warnings)
+    check_format(root, files, warnings, notes)
+    if a.types or os.environ.get("ACP_CHECK_TYPES") == "1": check_types(root, files, warnings, notes)
     if not a.no_kb: check_kb(root, files, warnings, a.kb)
 
-    strict = a.strict or os.environ.get("ACP_STRICT") == "1"
+    # The git hooks are shims that exec this directly; run-hook.sh, which is what
+    # turns the strict profile into ACP_STRICT, is only in the Claude Code path.
+    # Reading the profile here is what makes strict mean the same thing at a
+    # commit, in CI, and in a session.
+    strict = (a.strict or os.environ.get("ACP_STRICT") == "1"
+              or os.environ.get("ACP_HOOK_PROFILE", "").strip().lower() == "strict")
+    notes = list(dict.fromkeys(notes))       # one line per reason, however many files hit it
     if not blockers and not warnings:
-        if not a.quiet: print(f"check: {len(evidence_files)} file(s) in {how}, nothing found")
+        if not a.quiet:
+            print(f"check: {len(evidence_files)} file(s) in {how}, nothing found")
+            for n in notes: print(f"  note: {n}")
         return 0
     out = [f"check — {how}, {len(files)} file(s):"]
     if blockers:
@@ -356,6 +543,9 @@ def main():
     if warnings:
         out.append("  advisory:" if not strict else "  blocking under strict:")
         out += [f"    {w}" for w in warnings[:30]]
+    if notes:
+        out.append("  note:")
+        out += [f"    {n}" for n in notes]
     print("\n".join(out), file=sys.stderr)
     return 2 if blockers or (strict and warnings) else 0
 

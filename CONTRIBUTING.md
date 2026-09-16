@@ -28,7 +28,7 @@ change to agents, skills, commands, rules, or templates, also run
 - **Enforcement is mechanical.** Prefer a hook, a driver guard, or a skill over
   prose in a governance document. Never relax the closeout guard — it is the
   only thing making evidence non-optional.
-- **No project's own work in this repository.** `packs/` ships a scaffold and
+- **No project's own work in this repository.** `playbooks/` ships a scaffold and
   no corpus; users fill it with `wo promote`.
 - **No third-party references.** Nothing in the tree names another product,
   company, or project. `THIRD-PARTY-NOTICES.md` is the single exception and
@@ -53,7 +53,7 @@ reinstalls. `bin/install.sh` regenerates `.claude/agents/` on every run.
 **A skill** — `core/skills/<name>/SKILL.md` with `name` and `description` in
 the frontmatter. Long-form; loaded on demand. A skill that never triggers is a
 document nobody reads, so make the description say when it applies. Optional
-collections live in `core/skill-packs/<pack>/<skill>/`.
+collections live in `core/skill-sets/<set>/<skill>/`.
 
 **A hook** — prefer a markdown rule: a file in `core/hooks/rules/` with `name`,
 `enabled`, `event`, `pattern`, and `action` (`block` or `warn`) in the
@@ -78,7 +78,7 @@ change could regress silently. A live scenario is a directory under
 
 ## Before you specify anything
 
-`bin/pack search <term>`. Most of the hard thinking, including the mistakes, is
+`bin/playbook search <term>`. Most of the hard thinking, including the mistakes, is
 already recorded.
 
 ## Commits

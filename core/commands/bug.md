@@ -10,6 +10,6 @@ Args: **$ARGUMENTS**
 
 **Verify** (`/bug <n> verify --run <suite>`): the suite runs and the VERIFICATION document is stamped from its exit code. Never type PASS.
 
-**Close** (`/bug <n> close`): refuses without executed verification. Write the CLOSEOUT's root cause and pitfalls first; they are what `bug promote` carries into the pack.
+**Close** (`/bug <n> close`): refuses without executed verification. Write the CLOSEOUT's root cause and pitfalls first; they are what `bug promote` carries into the playbook.
 
-**Promote** (`/bug <n> promote`): sanitize-gated; adds the bug and its pitfalls to the pack catalog so the next project searches it before repeating the mistake.
+**Promote** (`/bug <n> promote`): sanitize-gated; adds the bug and its pitfalls to the playbook catalog so the next project searches it before repeating the mistake.

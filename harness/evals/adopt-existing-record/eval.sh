@@ -5,7 +5,7 @@ W=./.aicodepipeline/bin/wo; B=./.aicodepipeline/bin/bug
 printf '# Old feature\n\nShipped in 2025 after a manual harness run.\n' > old.md
 printf '# Old bug\n\nFixed by hand.\n' > oldbug.md
 
-$W adopt old.md --number 42 --opened 2025-06-01 --dry-run | grep -q 'would adopt' || { echo "dry run did not describe the plan"; exit 1; }
+$W adopt old.md --number 42 --opened 2025-06-01 --dry-run > "$EVAL_TMP/dry.out" 2>&1; grep -q 'would adopt' "$EVAL_TMP/dry.out" || { echo "dry run did not describe the plan"; exit 1; }
 [ -d Workspace/Docs/WorkOrders/WO-0042-old-feature ] && { echo "dry run created the folder"; exit 1; }
 $W adopt old.md --number 42 --opened 2025-06-01 >/dev/null || { echo "adopt failed"; exit 1; }
 d=Workspace/Docs/WorkOrders/WO-0042-old-feature
@@ -16,12 +16,12 @@ grep -q '^adopted=' "$d/.wo-meta" || { echo "adoption date not recorded"; exit 1
 rc=0; $W adopt old.md --number 42 >/dev/null 2>&1 || rc=$?; [ "$rc" -ne 0 ] || { echo "a second record took the same number"; exit 1; }
 
 # one definition of state across list, filters and stats
-$W list | grep -q 'WO-0042.*migrated' || { echo "wo list does not show migrated"; $W list; exit 1; }
-$W list --active | grep -q 'WO-0042' && { echo "an adopted item counts as active"; exit 1; }
-$W list --open | grep -q 'WO-0042' && { echo "an adopted item counts as open"; exit 1; }
-$W list --adopted | grep -q 'WO-0042' || { echo "--adopted does not list it"; exit 1; }
-$W stats | grep -q 'adopted, not verified *1' || { echo "wo stats folds adopted work into open"; $W stats; exit 1; }
-$W stats | grep -q 'mean open-to-closeout' && { echo "cycle time reported from adopted items"; exit 1; }
+$W list > "$EVAL_TMP/list.out" 2>&1; grep -q 'WO-0042.*migrated' "$EVAL_TMP/list.out" || { echo "wo list does not show migrated"; cat "$EVAL_TMP/list.out"; exit 1; }
+$W list --active > "$EVAL_TMP/active.out" 2>&1; grep -q 'WO-0042' "$EVAL_TMP/active.out" && { echo "an adopted item counts as active"; exit 1; }
+$W list --open > "$EVAL_TMP/open.out" 2>&1; grep -q 'WO-0042' "$EVAL_TMP/open.out" && { echo "an adopted item counts as open"; exit 1; }
+$W list --adopted > "$EVAL_TMP/adopted.out" 2>&1; grep -q 'WO-0042' "$EVAL_TMP/adopted.out" || { echo "--adopted does not list it"; exit 1; }
+$W stats > "$EVAL_TMP/stats.out" 2>&1; grep -q 'adopted, not verified *1' "$EVAL_TMP/stats.out" || { echo "wo stats folds adopted work into open"; cat "$EVAL_TMP/stats.out"; exit 1; }
+grep -q 'mean open-to-closeout' "$EVAL_TMP/stats.out" && { echo "cycle time reported from adopted items"; exit 1; }
 
 # bugs: the category is the metadata, the number is what the record cites
 out="$($B adopt oldbug.md --number 7 --category ui 2>&1)" || { echo "bug adopt failed: $out"; exit 1; }

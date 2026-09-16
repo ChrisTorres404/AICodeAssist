@@ -16,7 +16,7 @@
 ### Configuration & Patterns
 - [ ] Using configuration/settings instead of hardcoded values (no magic numbers)
 - [ ] Following existing patterns in the codebase
-- [ ] Using the project's logger (no debug printing)
+- [ ] Using the project's logger — no debug logging (`console.log` or its equivalent) left in place
 - [ ] Error handling with proper exception types and messages
 
 ### Production Mindset
@@ -89,6 +89,16 @@
 - [ ] [Manual check 2]
 - [ ] [Manual check 3]
 
+#### Manual Verification Scenarios
+
+The checks a suite cannot make for you. Each row is walked by hand, and the
+outcome recorded — an empty Result column is an unfinished checklist.
+
+| Scenario | Steps | Expected Result | Result |
+|----------|-------|-----------------|--------|
+| [Scenario 1] | 1. [Step]<br>2. [Step] | [Expected outcome] | NOT EXECUTED |
+| [Scenario 2] | 1. [Step]<br>2. [Step] | [Expected outcome] | NOT EXECUTED |
+
 ---
 
 ---
@@ -99,7 +109,7 @@
 
 ### Code Quality Review
 - [ ] Read through ALL changed files line by line
-- [ ] Removed ALL debug logging (use the project's logger)
+- [ ] Removed ALL debug logging — every `console.log` or stack equivalent (use the project's logger)
 - [ ] No magic numbers - extracted to configuration or constants
 - [ ] Proper typing - no `any` types, proper validation
 - [ ] Error handling complete with clear messages
@@ -114,6 +124,28 @@
 - [ ] Would deploy this to production right now
 - [ ] Code reviewer would approve this
 - [ ] Matches quality of existing codebase
+
+---
+
+## Closure Checklist
+
+Before marking COMPLETE, verify:
+
+- [ ] All acceptance criteria met
+- [ ] Behavioral tests executed and passed — `wo verify <n> --run <suite>` wrote
+      `EXECUTED — PASS` from a real exit code
+- [ ] Client-library or SDK layer complete, if the work order has one
+- [ ] The UI calls the client library, not the transport directly
+- [ ] UI follows the project's design system
+- [ ] Documentation updated
+- [ ] Code reviewed
+- [ ] Build passes
+- [ ] Type checker reports no errors
+- [ ] Linter passes
+
+`wo close <n>` is refused without a verification document that says
+`EXECUTED — PASS`. The rest of this list is what the refusal cannot check for
+you.
 
 ---
 

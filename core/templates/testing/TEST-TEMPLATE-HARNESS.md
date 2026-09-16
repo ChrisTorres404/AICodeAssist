@@ -23,12 +23,15 @@
 
 ## Test Matrix
 
-| Test ID | Category | Description | Status |
-|---------|----------|-------------|--------|
-| 1.1 | [Category] | [Description] | NOT EXECUTED |
-| 1.2 | [Category] | [Description] | NOT EXECUTED |
-| 2.1 | [Category] | [Description] | NOT EXECUTED |
-| 2.2 | [Category] | [Description] | NOT EXECUTED |
+| Test ID | Category | Description | Status | Evidence |
+|---------|----------|-------------|--------|----------|
+| 1.1 | [Category] | [Description] | NOT EXECUTED | [section, or blank until it runs] |
+| 1.2 | [Category] | [Description] | NOT EXECUTED | [section, or blank until it runs] |
+| 2.1 | [Category] | [Description] | NOT EXECUTED | [section, or blank until it runs] |
+| 2.2 | [Category] | [Description] | NOT EXECUTED | [section, or blank until it runs] |
+
+The Evidence column points at the section of this document holding the captured
+output for that test. It stays blank until the test has actually run.
 
 ---
 
@@ -190,6 +193,18 @@ SELECT * FROM schema.table WHERE id = [ID];
 | EXECUTED — PASS | 0 |
 | EXECUTED — FAIL | 0 |
 | NOT EXECUTED | [TOTAL] |
+
+---
+
+## Manual Verification Scenarios
+
+Checks a suite cannot make on its own — what a person does, and what they must
+see. Each row is executed by hand and its outcome recorded in the Result column.
+
+| Scenario | Steps | Expected Result | Result |
+|----------|-------|-----------------|--------|
+| [Scenario 1] | 1. [Step]<br>2. [Step] | [Expected outcome] | NOT EXECUTED |
+| [Scenario 2] | 1. [Step]<br>2. [Step] | [Expected outcome] | NOT EXECUTED |
 
 ---
 

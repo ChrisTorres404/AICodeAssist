@@ -12,5 +12,5 @@ ls Workspace/Testing/suites/*.sh >/dev/null 2>&1 || fail "no behavioural suite w
 grep -qE "EXECUTED\s*[—–-]+\s*PASS" "$d/WO-$n-VERIFICATION.md" || fail "verification is not EXECUTED — PASS: $(grep -o 'Overall status:.*' "$d/WO-$n-VERIFICATION.md" | head -1)"
 [ -f "$d/WO-$n-CLOSEOUT.md" ] || fail "no CLOSEOUT (wo close was not run)"
 grep -q "\[Lesson 1\]" "$d/WO-$n-CLOSEOUT.md" && fail "closeout lessons left as placeholders"
-ls -d .aicodepipeline/packs/*/workorders/WO-$n-* >/dev/null 2>&1 || fail "work order was not promoted"
+ls -d .aicodepipeline/playbooks/*/workorders/WO-$n-* >/dev/null 2>&1 || fail "work order was not promoted"
 echo "PASS: WO-$n opened, spec filled, endpoint implemented, suite executed (PASS), closed with lessons, promoted"

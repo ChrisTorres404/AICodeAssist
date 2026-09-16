@@ -81,7 +81,8 @@ def check_agent(p):
     if fm.get("tools", "").startswith("["): err(rel, "tools must be a comma-separated scalar, not a YAML list")
     if fm.get("description") and not re.search(r"\bUse\b|\buse when\b|PROACTIVE", fm["description"]): warn(rel, "description gives no dispatch signal (no 'Use …')")
     if len(t.splitlines()) < 100: warn(rel, f"only {len(t.splitlines())} lines; the fleet standard is 100+")
-    if "## Activation Triggers" in t: err(rel, "dead 'Activation Triggers' section")
+    m = re.search(r"^## Activation Triggers\n(.*?)(?=^## |\Z)", t, re.S | re.M)
+    if m and not m.group(1).strip(): err(rel, "empty 'Activation Triggers' section")
 
 def check_skill(d):
     _p = d / "SKILL.md"
@@ -151,13 +152,13 @@ for p in sorted((ROOT / "core/agents").rglob("*.md")):
     if p.name != "README.md": check_agent(p)
 for d in sorted(x for x in (ROOT / "core/skills").iterdir() if x.is_dir()): check_skill(d)
 _skill_names = {d.name for d in (ROOT / "core/skills").iterdir() if d.is_dir()}
-if (ROOT / "core/skill-packs").exists():
-    _skill_names |= {d.name for pk in (ROOT / "core/skill-packs").iterdir() if pk.is_dir() for d in pk.iterdir() if d.is_dir()}
-for f in list((ROOT / "core/skills").rglob("*.md")) + list((ROOT / "core/skill-packs").rglob("*.md")):
+if (ROOT / "core/skill-sets").exists():
+    _skill_names |= {d.name for pk in (ROOT / "core/skill-sets").iterdir() if pk.is_dir() for d in pk.iterdir() if d.is_dir()}
+for f in list((ROOT / "core/skills").rglob("*.md")) + list((ROOT / "core/skill-sets").rglob("*.md")):
     for m in re.finditer(r"\]\(\.\./([a-z0-9-]+)/SKILL\.md\)", f.read_text(errors="ignore")):
         if m.group(1) not in _skill_names: err(f.relative_to(ROOT), f"cross-skill link to missing skill '{m.group(1)}'")
-for pack in sorted(x for x in (ROOT / "core/skill-packs").iterdir() if x.is_dir()) if (ROOT / "core/skill-packs").exists() else []:
-    for d in sorted(x for x in pack.iterdir() if x.is_dir()): check_skill(d)
+for skill_set in sorted(x for x in (ROOT / "core/skill-sets").iterdir() if x.is_dir()) if (ROOT / "core/skill-sets").exists() else []:
+    for d in sorted(x for x in skill_set.iterdir() if x.is_dir()): check_skill(d)
 for p in sorted((ROOT / "core/hooks/rules").glob("*.md")): check_hook_rule(p)
 for p in [ROOT / "core/config/settings.hooks.json"]:
     if p.exists(): check_hooks_json(p)

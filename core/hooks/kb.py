@@ -17,25 +17,59 @@ holding the analysis document, `profiles/` with one Feature Profile per
 feature, a status matrix, and `source-index.tsv` — the machine-readable
 binding this tool writes and reads.
 
+  kb.py scaffold --root <dir> --kb <dir> [--level lite|standard|full]
+                 [--pipeline-dir <rel>] [--grow] [--force]
+                                                  build the knowledge base from
+                                                  the tree, then bind it
   kb.py bind   --root <dir> --kb <dir>            record a hash per cited file
-  kb.py status --root <dir> --kb <dir> [--json]   current / stale / broken, and
+  kb.py status --root <dir> --kb <dir> [--level …] [--json]
+                                                  current / stale / broken, what
+                                                  falls short of the level, and
                                                   which source nothing describes
   kb.py impact --root <dir> --kb <dir> --files …  which profiles describe this change
 
-Exit codes — status: 0 every profile current, 1 something is stale, 2 something
-is broken (broken outranks stale), 3 there is no knowledge base to report on.
-impact: 0 nothing affected, 1 at least one profile describes the change. bind:
-0, or 1 when the directory holds no profiles.
+The scaffold exists because the alternative was a step designed to fail: the
+intake check asked for a knowledge base that only an agent run could produce, and
+nothing started that run. `scaffold` reads the tree — feature units, entry points,
+routes, models, the manifest — and writes a survey, one profile per feature with
+its structure filled in and its narrative sections left as the prompts they are,
+a status matrix, and the binding. No agent, no network, same bytes from the same
+tree. What it cannot write is the part worth reading, and it says so in every
+document it leaves behind.
+
+Levels are to this step what sizes are to a work order.
+
+  lite      a profile exists per feature, structure filled in from the tree.
+            The scaffold produces this on its own, so the step passes on a
+            fresh install.
+  standard  the narrative sections are written: no more than half the writing
+            prompts the scaffold wrote are still standing.
+  full      standard, and a second reader has checked the profile against the
+            source — frontmatter `validated: true` with a name in `reviewed-by`.
+
+`scaffold` records the chosen level in `<kb>/level`; `status --level` overrides it.
+
+Exit codes — status: 0 every profile current and at the level, 1 something is
+stale, 2 something is broken (broken outranks stale), 3 there is no knowledge
+base to report on, 4 everything is current but something falls short of the
+level. 4 is reported only when nothing is stale or broken; the count of profiles
+short of the level is on the summary line either way. impact: 0 nothing
+affected, 1 at least one profile describes the change. bind: 0, or 1 when the
+directory holds no profiles. scaffold: 0, or 1 when it cannot write.
 
 `wo close` and `acp check` call `impact` to say "this change touched files these
 profiles describe". Re-writing the profile is agent work and always was; this
-tool only knows, and says, when it is due.
+tool only knows, and says, when it is due. `scaffold --grow` is the close-time
+form: it adds profiles for features that have none and marks vanished ones
+orphaned, and it re-binds nothing, so a profile describing code that just changed
+stays stale until someone updates it.
 
 The rules it shares with the hooks — the SOURCE comment's spelling, the source
 extensions, the directories no rule reads, the hash — are imported from them,
 so the engine and the hooks cannot drift apart.
 """
-import argparse, hashlib, importlib.util, json, os, re, sys
+import argparse, hashlib, importlib.util, json, os, re, subprocess, sys
+from datetime import date
 
 # Reading a project must not leave bytecode behind in the installed pipeline.
 sys.dont_write_bytecode = True
@@ -237,6 +271,1029 @@ def cluster(paths, limit=10):
     return [{"dir": d, "count": len(fs), "examples": sorted(fs)[:3]} for d, fs in ordered]
 
 
+# --- levels -------------------------------------------------------------------
+
+LEVELS = ("lite", "standard", "full")
+LEVEL_FILE = "level"
+# The sections of a Feature Profile a person writes. 4 (How It Works) and 9 (Quick
+# Reference) are generated from the tree, so a prompt left in them says nothing
+# about whether anyone has described the feature.
+NARRATIVE_SECTIONS = (1, 2, 3, 5, 6, 7, 8)
+SECTION_RX = re.compile(r"^##\s+(\d+)\.\s")
+# `wo close` counts unfilled template prompts exactly this way — square-bracket
+# prompts outside fenced code — and the two must agree, or a profile that passes
+# one gate fails the other for no reason a reader can see.
+BRACKET_RX = re.compile(r"\[[A-Za-z][^\]]{2,}\]")
+FM_RX = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+BADGES = ("undocumented", "described", "validated")
+
+
+def frontmatter(text):
+    """{key: value} for the document's YAML frontmatter, flat scalars only. The
+    keys this tool reads are all scalars; anything else is left to a real parser."""
+    m = FM_RX.match(text)
+    if not m:
+        return {}
+    out = {}
+    for line in m.group(1).split("\n"):
+        k, sep, v = line.partition(":")
+        if sep and re.match(r"^[A-Za-z_][\w-]*$", k.strip()):
+            out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def set_frontmatter(text, key, value):
+    """Set one frontmatter key in place, adding it before the closing marker when
+    it is absent. A document with no frontmatter is returned untouched: inventing
+    one would rewrite someone else's file."""
+    m = FM_RX.match(text)
+    if not m:
+        return text
+    body, line = m.group(1), f"{key}: {value}"
+    if re.search(rf"(?m)^{re.escape(key)}\s*:", body):
+        body = re.sub(rf"(?m)^{re.escape(key)}\s*:.*$", line, body, count=1)
+    else:
+        body = body + "\n" + line
+    return "---\n" + body + "\n---\n" + text[m.end():]
+
+
+def narrative_prompts(text):
+    """How many bracketed writing prompts are still unanswered in the sections a
+    person writes. Fenced code is skipped, so a prompt quoted in an example does
+    not read as one left unwritten."""
+    n, cur, code = 0, None, False
+    for line in text.split("\n"):
+        if line.startswith("```"):
+            code = not code
+            continue
+        if code:
+            continue
+        if line.startswith("## "):
+            m = SECTION_RX.match(line)
+            cur = int(m.group(1)) if m else None
+            continue
+        if cur in NARRATIVE_SECTIONS:
+            n += len(BRACKET_RX.findall(line))
+    return n
+
+
+def template_path(name):
+    """A template ships beside the engine, at <pipeline>/core/templates/docs/."""
+    return os.path.join(HERE, "..", "templates", "docs", name)
+
+
+def template_budget():
+    """The prompt count of the shipped template, for profiles written before the
+    scaffold existed and so carrying no `scaffold_prompts`. None when the template
+    cannot be read: an unknown budget reports nothing rather than guessing."""
+    t = read(template_path("feature-profile.md"))
+    return narrative_prompts(t) if t else None
+
+
+def level_of(kb, override):
+    """--level wins; otherwise the level the scaffold recorded; otherwise lite."""
+    if override:
+        return override
+    v = read(os.path.join(kb, LEVEL_FILE)).strip()
+    return v if v in LEVELS else "lite"
+
+
+def badge_of(text, budget):
+    """The status matrix's three badges, read off one profile."""
+    fm = frontmatter(text)
+    if fm.get("validated", "").lower() == "true" and fm.get("reviewed-by", "N/A").strip() not in ("", "N/A"):
+        return "validated"
+    b = fm.get("scaffold_prompts")
+    try:
+        b = int(b)
+    except (TypeError, ValueError):
+        b = budget
+    if b is None:
+        return "described"
+    return "undocumented" if narrative_prompts(text) * 2 > b else "described"
+
+
+def level_shortfall(name, text, level, budget):
+    """Why this document falls short of the level, or None. Only the Feature
+    Profiles are judged: the survey and the matrix are generated, and have no
+    narrative sections for anyone to leave unwritten."""
+    if level == "lite" or not name.startswith("profiles/"):
+        return None
+    fm = frontmatter(text)
+    b = fm.get("scaffold_prompts")
+    try:
+        b = int(b)
+    except (TypeError, ValueError):
+        b = budget
+    if b is not None:
+        left = narrative_prompts(text)
+        # More than half the prompts the scaffold wrote still standing: this is
+        # the template with a title on it, the same bar `wo close` applies.
+        if left * 2 > b:
+            return f"{left} of {b} writing prompts unanswered — the narrative is still the scaffold"
+    if level == "full":
+        if fm.get("validated", "").lower() != "true":
+            return "frontmatter says validated: false — nobody has checked it against the source"
+        if fm.get("reviewed-by", "N/A").strip() in ("", "N/A"):
+            return "frontmatter reviewed-by is N/A — no reviewer is named"
+    return None
+
+
+# --- the scaffold: the knowledge base the tool builds for itself ---------------
+
+FEATURE_CAP = 60
+EVIDENCE_CAP = 200
+SCAFFOLD_MARK = "<!-- acp:kb-scaffold -->"
+UNWRITTEN = "[Unwritten at scaffold — replace this line with what the prompt above asks for.]"
+DEFAULT_PIPELINE_DIR = ".aicodepipeline"
+
+# Where a project keeps the code it wrote. The root itself is the fallback for a
+# flat repository that uses none of these.
+CONVENTIONAL_ROOTS = ("src", "app", "lib", "services", "modules", "features", "pkg", "cmd", "internal")
+CONVENTIONAL_NESTED = (("apps", "src"), ("packages", "src"))
+# A test states what the code should do; the claim belongs on the code, so tests
+# are cited by the profile describing what they test and are not features of their own.
+TEST_DIRS = {"test", "tests", "__tests__", "spec", "specs", "e2e", "__mocks__", "fixtures", "testdata"}
+# Code this project did not write, or did not write by hand.
+GENERATED_DIRS = {"vendor", "third_party", "generated", "gen", "out", "target", "bin", "obj"}
+MANIFESTS = ("package.json", "pyproject.toml", "requirements.txt", "go.mod", "Cargo.toml",
+             "Gemfile", "composer.json", "pom.xml", "build.gradle", "pubspec.yaml", "Package.swift")
+
+ENDPOINT_RX = re.compile(
+    r"@(?:Get|Post|Put|Patch|Delete|Head|Options|All)\s*\("              # Nest, Spring
+    r"|@(?:app|router|bp|blueprint)\.(?:route|get|post|put|patch|delete|websocket)\b"  # Flask, FastAPI
+    r"|\b(?:router|app|server)\.(?:get|post|put|patch|delete|all)\s*\("  # Express, Koa
+    r"|\bhttp\.HandleFunc\s*\("                                          # Go
+    r"|\bRoute::[A-Za-z]+"                                               # Laravel
+    r"|^\s*(?:get|post|put|patch|delete)\s+['\"]/"                       # Sinatra, Rails
+)
+ROUTE_PATH_RX = re.compile(r"""['"`](/[^'"`]*)['"`]""")
+MODEL_DIRS = {"models", "model", "entities", "entity", "migrations", "migration", "schema", "schemas"}
+MODEL_FILE_RX = re.compile(r"(\.entity\.(ts|js|tsx)$|^schema\.prisma$|^models?\.(py|ts|js|rb|go)$)")
+DJANGO_MODEL_RX = re.compile(r"^\s*class\s+\w+\s*\(\s*[\w.]*models\.Model\s*\)")
+DECL_RX = re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?"
+                     r"(?:class|interface|type|struct|model|def|CREATE TABLE|@Entity|@Table)\b", re.I)
+SLUG_NOISE = {"src", "app", "apps", "lib", "packages", "pkg", "cmd", "internal", "services", "modules", "features"}
+
+
+def skip_feature_dir(name, full, kb):
+    """The directories feature discovery walks past: the ones no rule reads, the
+    tests, the vendored and generated output, the knowledge base, and any
+    installed pipeline (detected by what it holds, not by its name)."""
+    if name.startswith(".") or name in SKIP_DIRS or name in TEST_DIRS or name in GENERATED_DIRS:
+        return True
+    if os.path.realpath(full) == kb:
+        return True
+    return is_pipeline_dir(full)
+
+
+def dir_entries(d, kb):
+    """(direct source files, walkable subdirectories) for one directory, sorted."""
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return [], []
+    files, dirs = [], []
+    for n in names:
+        full = os.path.join(d, n)
+        if os.path.isdir(full):
+            if not skip_feature_dir(n, full, kb):
+                dirs.append(n)
+        elif os.path.splitext(n)[1] in SOURCE_EXT:
+            files.append(n)
+    return files, dirs
+
+
+def source_under(d, kb, depth=0):
+    """Every source file under one directory, absolute, sorted, depth-limited so a
+    symlink loop cannot become an infinite walk."""
+    if depth > 24:
+        return []
+    files, dirs = dir_entries(d, kb)
+    out = [os.path.join(d, f) for f in files]
+    for x in dirs:
+        out.extend(source_under(os.path.join(d, x), kb, depth + 1))
+    return sorted(out)
+
+
+def grouping_level(d, kb):
+    """The first level below a conventional root that groups anything: a directory
+    holding two or more source files, or branching into two or more directories
+    that do. `src/main/java/com/acme/` is four wrappers around one package, and
+    calling each of them a feature would describe the build layout, not the system."""
+    for _ in range(12):
+        files, dirs = dir_entries(d, kb)
+        kids = [x for x in dirs if source_under(os.path.join(d, x), kb)]
+        if len(files) >= 2 or len(kids) >= 2 or (files and kids) or not kids:
+            return d
+        d = os.path.join(d, kids[0])
+    return d
+
+
+def feature_units(root, kb):
+    """[(directory, [source files])] — the candidate features, one per directory
+    that holds code, grouped at the level that groups. Disjoint by construction:
+    a unit owns the files below it, and a unit's own direct files form a unit of
+    their own when its children are units too."""
+    roots = []
+    for name in CONVENTIONAL_ROOTS:
+        p = os.path.join(root, name)
+        if os.path.isdir(p) and not skip_feature_dir(name, p, kb):
+            roots.append(p)
+    for parent, child in CONVENTIONAL_NESTED:
+        pp = os.path.join(root, parent)
+        if not os.path.isdir(pp):
+            continue
+        try:
+            names = sorted(os.listdir(pp))
+        except OSError:
+            continue
+        for x in names:
+            q = os.path.join(pp, x, child)
+            if os.path.isdir(q) and not skip_feature_dir(x, os.path.join(pp, x), kb):
+                roots.append(q)
+    if not roots:
+        roots = [root]
+
+    units, seen = [], set()
+    def add(d, files):
+        key = os.path.realpath(d)
+        if files and key not in seen:
+            seen.add(key)
+            units.append((d, sorted(files)))
+    for r in roots:
+        g = grouping_level(r, kb)
+        files, dirs = dir_entries(g, kb)
+        kids = [os.path.join(g, x) for x in dirs if source_under(os.path.join(g, x), kb)]
+        for k in kids:
+            add(k, source_under(k, kb))
+        if files:
+            add(g, [os.path.join(g, f) for f in files])
+    if not units:
+        # A tree that fits none of the conventions still has code in it somewhere.
+        add(root, source_under(root, kb))
+    return units
+
+
+def feature_slug(root, d, taken):
+    """A file name for the profile: the unit's path with the conventional wrappers
+    dropped, so `apps/web/src/auth` reads as `web-auth` and `src/auth` as `auth`."""
+    rel = rel_to(root, d)
+    parts = [p for p in rel.split("/") if p not in (".", "")]
+    kept = [p for p in parts if p not in SLUG_NOISE] or parts or [os.path.basename(root) or "root"]
+    s = re.sub(r"[^a-z0-9._-]+", "-", "-".join(kept).lower()).strip("-._") or "feature"
+    base, n = s, 2
+    while s in taken:
+        s = f"{base}-{n}"
+        n += 1
+    taken.add(s)
+    return s
+
+
+def title_of(slug):
+    return " ".join(w.capitalize() for w in re.split(r"[-_.]+", slug) if w) or "Feature"
+
+
+def cite(root, path, line=1):
+    """A citation to a line that is there. A citation past the end of the file is
+    what `status` calls broken, so the scaffold clamps rather than writes one."""
+    rp = rel_to(root, path)
+    n = line_count(path)
+    return f"<!-- SOURCE: {rp}:L{max(1, min(int(line), n) if n else 1)} -->"
+
+
+def first_decl_line(path):
+    """The line a reader would open the file at: its first declaration, else 1."""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            for i, line in enumerate(f, 1):
+                if DECL_RX.match(line):
+                    return i
+                if i > 400:
+                    break
+    except OSError:
+        pass
+    return 1
+
+
+def scan_evidence(root, files):
+    """Endpoints and data models, read out of the files themselves. Heuristic by
+    construction: it recognises the route and model spellings listed above and
+    nothing else, so what it finds is a floor, not an inventory."""
+    endpoints, models = [], []
+    for path in files:
+        rp = rel_to(root, path)
+        segs = set(os.path.dirname(rp).split("/"))
+        base = os.path.basename(rp)
+        model_file = bool(segs & MODEL_DIRS) or bool(MODEL_FILE_RX.search(base))
+        django = False
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as f:
+                for i, line in enumerate(f, 1):
+                    if len(endpoints) < EVIDENCE_CAP and ENDPOINT_RX.search(line):
+                        m = ROUTE_PATH_RX.search(line)
+                        endpoints.append({"file": rp, "line": i, "path": m.group(1) if m else "—",
+                                          "marker": ENDPOINT_RX.search(line).group(0).strip()})
+                    if not django and DJANGO_MODEL_RX.match(line):
+                        django = True
+                        if len(models) < EVIDENCE_CAP:
+                            models.append({"file": rp, "line": i, "why": "Django model class"})
+                    if i > 5000:
+                        break
+        except OSError:
+            continue
+        if model_file and not django and len(models) < EVIDENCE_CAP:
+            why = "schema definition" if base == "schema.prisma" else (
+                  "entity declaration" if base.endswith((".entity.ts", ".entity.js")) else
+                  "under a models, entities, migrations, or schema directory")
+            models.append({"file": rp, "line": first_decl_line(path), "why": why})
+    endpoints.sort(key=lambda e: (e["file"], e["line"]))
+    models.sort(key=lambda m: (m["file"], m["line"]))
+    return endpoints, models
+
+
+def find_manifest(root):
+    for m in MANIFESTS:
+        p = os.path.join(root, m)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def manifest_line(path, key):
+    """The line a key is declared on, so a claim read out of a manifest cites the
+    place it was read from rather than the top of the file."""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            for i, line in enumerate(f, 1):
+                if re.search(r'["\']?' + re.escape(key) + r'["\']?\s*[:=]', line):
+                    return i
+    except OSError:
+        pass
+    return 1
+
+
+def detect_stack(root, pipeline_dir):
+    """detect-stack already knows how to read a project; asking it keeps one answer
+    to 'what is this built with'. Its absence is a null, not a failure."""
+    for exe in (os.path.join(root, pipeline_dir, "bin", "detect-stack"),
+                os.path.join(HERE, "..", "..", "bin", "detect-stack")):
+        if not os.path.isfile(exe):
+            continue
+        try:
+            r = subprocess.run([sys.executable, exe, root, "--json"],
+                               capture_output=True, text=True, timeout=120)
+            if r.returncode == 0:
+                return json.loads(r.stdout)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return {}
+
+
+def tree_hash(root, pipeline_dir, files):
+    """The driver's own fingerprint when the pipeline is installed here, so the
+    survey and a work order's evidence name the same tree; otherwise a hash of the
+    file list, which at least changes when the layout does."""
+    exe = os.path.join(root, pipeline_dir, "bin", "wo")
+    if os.path.isfile(exe):
+        try:
+            r = subprocess.run([exe, "fingerprint"], cwd=root, capture_output=True, text=True, timeout=180)
+            v = (r.stdout or "").strip().splitlines()
+            if r.returncode == 0 and v and re.match(r"^[0-9a-f]{12,64}$", v[-1]):
+                return v[-1]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return hashlib.sha256("\n".join(sorted(files)).encode("utf-8")).hexdigest()[:16]
+
+
+def entry_points(root):
+    """[(what, how it is declared, path, line)] — the ways into the program."""
+    out = []
+    pkg = os.path.join(root, "package.json")
+    if os.path.isfile(pkg):
+        try:
+            data = json.loads(read(pkg))
+        except ValueError:
+            data = {}
+        if isinstance(data.get("main"), str):
+            out.append(("main", f"`{data['main']}`", pkg, manifest_line(pkg, "main")))
+        b = data.get("bin")
+        if isinstance(b, str):
+            out.append(("bin", f"`{b}`", pkg, manifest_line(pkg, "bin")))
+        elif isinstance(b, dict):
+            for k in sorted(b):
+                out.append((f"bin {k}", f"`{b[k]}`", pkg, manifest_line(pkg, k)))
+        s = data.get("scripts")
+        if isinstance(s, dict):
+            for k in sorted(s):
+                out.append((f"script `{k}`", f"`{str(s[k])[:80]}`", pkg, manifest_line(pkg, k)))
+    for name in ("main.go", "__main__.py", "main.py", "manage.py", "index.js", "index.ts", "app.py", "Program.cs"):
+        for d in (root, os.path.join(root, "src"), os.path.join(root, "cmd"), os.path.join(root, "app")):
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                out.append((f"`{rel_to(root, p)}`", "program entry file", p, first_decl_line(p)))
+    return out[:60]
+
+
+def dependencies(root, manifest):
+    """[(name, version, path, line)] straight out of the manifest, in its own order."""
+    if not manifest:
+        return []
+    base, out = os.path.basename(manifest), []
+    text = read(manifest)
+    if base == "package.json":
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = {}
+        for section in ("dependencies", "devDependencies"):
+            for k in sorted((data.get(section) or {}) if isinstance(data.get(section), dict) else {}):
+                out.append((k, str(data[section][k]), manifest, manifest_line(manifest, k)))
+    elif base == "requirements.txt":
+        for i, line in enumerate(text.split("\n"), 1):
+            s = line.strip()
+            if s and not s.startswith("#"):
+                m = re.match(r"^([A-Za-z0-9._-]+)\s*(.*)$", s)
+                if m:
+                    out.append((m.group(1), m.group(2) or "unpinned", manifest, i))
+    elif base == "go.mod":
+        for i, line in enumerate(text.split("\n"), 1):
+            m = re.match(r"^\s*(?:require\s+)?([a-z0-9][\w./-]*\.[\w./-]+)\s+(v\S+)", line)
+            if m:
+                out.append((m.group(1), m.group(2), manifest, i))
+    elif base in ("Cargo.toml", "pyproject.toml"):
+        section = ""
+        for i, line in enumerate(text.split("\n"), 1):
+            s = line.strip()
+            if s.startswith("["):
+                section = s
+                continue
+            if "dependencies" in section:
+                m = re.match(r'^([A-Za-z0-9._-]+)\s*=\s*(.+)$', s)
+                if m:
+                    out.append((m.group(1), m.group(2)[:60], manifest, i))
+    else:
+        out.append((base, "manifest on file", manifest, 1))
+    return out[:80]
+
+
+# --- the documents the scaffold writes ----------------------------------------
+
+def fm_block(fields):
+    return "---\n" + "".join(f"{k}: {v}\n" for k, v in fields) + "---\n"
+
+
+def split_sections(text):
+    """(everything before section 1, {number: [lines of that section, heading first]})
+    for a template written as `## 1. Heading`."""
+    head, sections, cur = [], {}, None
+    for line in text.split("\n"):
+        m = SECTION_RX.match(line) if line.startswith("## ") else None
+        if m:
+            cur = int(m.group(1))
+            sections[cur] = [line]
+            continue
+        (sections[cur] if cur is not None else head).append(line)
+    return "\n".join(head), sections
+
+
+def strip_rule(lines):
+    """Drop a section's trailing horizontal rule, so generated content lands inside
+    the section rather than after the line that ends it."""
+    out = list(lines)
+    while out and (out[-1].strip() == "" or out[-1].strip() == "---"):
+        out.pop()
+    return out
+
+
+def insert_prompt(section_lines):
+    """Put the scaffold's own bracketed prompt directly after the section's writing
+    prompt, so what is unwritten is visible in the document and countable from it."""
+    out, placed = [], False
+    for i, line in enumerate(section_lines):
+        out.append(line)
+        if not placed and line.rstrip().endswith("-->"):
+            out.append("")
+            out.append(UNWRITTEN)
+            placed = True
+    if not placed:
+        out = [section_lines[0], "", UNWRITTEN] + section_lines[1:]
+    return out
+
+
+def build_profile(root, tpl, slug, unit_dir, files, endpoints, models, today):
+    """One Feature Profile: the template's nine sections, with 4 and 9 filled in
+    from the tree and the rest left as the prompts they are until someone writes
+    them. Everything generated carries the file and line it was read from."""
+    name, rel_dir = title_of(slug), rel_to(root, unit_dir)
+    first = files[0]
+    head, sections = split_sections(tpl)
+    # `src/billing` belongs to Billing, not to src: the wrapper directory names the
+    # layout, and only a multi-part slug (apps/web/src/auth) carries a real grouping.
+    parts = slug.split("-")
+    domain = title_of(parts[0]) if len(parts) > 1 else name
+
+    head = head.replace('title: "[Feature name] — Feature Profile"', f'title: "{name} — Feature Profile"')
+    head = head.replace("# [Feature name] — Feature Profile", f"# {name} — Feature Profile")
+    head = head.replace("**Capability domain:** [domain this feature belongs to]",
+                        f"**Capability domain:** {domain}")
+    head = head.replace("**Status:** [badge from the feature status matrix]", "**Status:** `undocumented`")
+    head = re.sub(r"\A---\n.*?\n---\n", "", head, flags=re.S)
+    head = head.replace("\n**Capability domain:**", f"\n**Scaffolded from:** `{rel_dir}` — "
+                        f"{len(files)} source file(s). {cite(root, first, 1)}\n**Capability domain:**", 1)
+
+    chunks = []
+    for n in sorted(sections):
+        lines = sections[n]
+        if n in NARRATIVE_SECTIONS:
+            lines = insert_prompt(lines)
+        elif n == 4:
+            lines = strip_rule(lines) + ["", "### Files in this feature — read by the scaffold", "",
+                             "| File | Lines | Source |", "|---|---|---|"]
+            for f in files[:80]:
+                lines.append(f"| `{rel_to(root, f)}` | {line_count(f)} | {cite(root, f, 1)} |")
+            if len(files) > 80:
+                lines.append(f"| … and {len(files) - 80} more under `{rel_dir}` | | {cite(root, first, 1)} |")
+            lines += ["", "### Endpoints under this feature", ""]
+            mine = [e for e in endpoints if e["file"].startswith(rel_dir + "/") or e["file"] == rel_dir]
+            if mine:
+                lines += ["| Marker | Path | Source |", "|---|---|---|"]
+                for e in mine[:60]:
+                    lines.append(f"| `{e['marker']}` | `{e['path']}` | "
+                                 f"<!-- SOURCE: {e['file']}:L{e['line']} --> |")
+            else:
+                lines.append("The scaffold's route patterns matched nothing under this directory.")
+            lines += ["", "### Data models under this feature", ""]
+            mym = [m for m in models if m["file"].startswith(rel_dir + "/") or m["file"] == rel_dir]
+            if mym:
+                lines += ["| File | Why it reads as a model | Source |", "|---|---|---|"]
+                for m in mym[:60]:
+                    lines.append(f"| `{m['file']}` | {m['why']} | <!-- SOURCE: {m['file']}:L{m['line']} --> |")
+            else:
+                lines.append("The scaffold's model patterns matched nothing under this directory.")
+            lines += ["", "---"]
+        elif n == 9:
+            paths = ", ".join(f"`{rel_to(root, f)}`" for f in files[:8])
+            if len(files) > 8:
+                paths += f", and {len(files) - 8} more"
+            lines = [lines[0], "", "| Item | Value |", "|---|---|",
+                     f"| Module | `{rel_dir}` |",
+                     f"| Source paths | {paths} |",
+                     "| Configuration keys | Not read by the scaffold; fill this in when the narrative is written |",
+                     "| Dependencies | Declared in the manifest; see the survey's dependency table |",
+                     f"| Administrative surface | {len(mine_count(endpoints, rel_dir))} endpoint(s), "
+                     f"{len(mine_count(models, rel_dir))} data model file(s) |",
+                     "| Status | `undocumented` |", "",
+                     "<!-- Every source path here must also appear in the work order's",
+                     "     source-reference index. -->"]
+        chunks.append("\n".join(lines).strip("\n"))
+
+    text = (SCAFFOLD_MARK + "\n\n" + head.strip("\n") + "\n\n"
+            + "\n\n".join(chunks).rstrip("\n") + "\n")
+    prompts = narrative_prompts(text)
+    fm = fm_block([("wo", "N/A"), ("title", f'"{name} — Feature Profile"'), ("version", "1.0"),
+                   ("status", "SCAFFOLD"), ("created", today), ("last-modified", today),
+                   ("reviewed-by", "N/A"), ("feature", slug), ("level", "lite"),
+                   ("scaffolded", today), ("scaffold_prompts", str(prompts)), ("validated", "false")])
+    return fm + "\n" + text
+
+
+def mine_count(items, rel_dir):
+    return [x for x in items if x["file"].startswith(rel_dir + "/") or x["file"] == rel_dir]
+
+
+def build_analysis(root, today, level, ctx):
+    """The structural survey: prose and tables, every factual line ending in the
+    file and line it was read from."""
+    name = os.path.basename(root) or "This repository"
+    stack, manifest, units = ctx["stack"], ctx["manifest"], ctx["units"]
+    man_rel = rel_to(root, manifest) if manifest else None
+    L = []
+    w = L.append
+    w(fm_block([("wo", "N/A"), ("title", f'"{name} — Repository Analysis"'), ("version", "1.0"),
+                ("status", "SCAFFOLD"), ("created", today), ("last-modified", today),
+                ("reviewed-by", "N/A"), ("level", level), ("scaffolded", today)]))
+    w(SCAFFOLD_MARK)
+    w("")
+    w(f"# {name} — Repository Analysis")
+    w("")
+    w("This is the structural survey the knowledge-base scaffold reads out of the tree: what is")
+    w("here, where it lives, and which file and line each line below was read from. It is the")
+    w("floor the description stands on, not the description — the Feature Profiles under")
+    w("`profiles/` carry that, and while their narrative sections are unwritten the status matrix")
+    w("shows them as `undocumented`.")
+    w("")
+    w("---")
+    w("")
+    w("## 1. Stack and package manager")
+    w("")
+    if manifest:
+        langs = ", ".join(stack.get("languages") or []) or "none the detector recognised"
+        fws = ", ".join(stack.get("frameworks") or []) or "none the detector recognised"
+        pm = stack.get("package_manager") or "none the detector recognised"
+        w(f"- Languages: {langs}. {cite(root, manifest, 1)}")
+        w(f"- Frameworks: {fws}. {cite(root, manifest, 1)}")
+        w(f"- Package manager: {pm}. {cite(root, manifest, 1)}")
+        w(f"- Package manifest: `{man_rel}`, {line_count(manifest)} line(s). {cite(root, manifest, 1)}")
+    else:
+        first = units[0]["files"][0] if units else None
+        w(f"- No package manifest of a shape the detector reads sits at the root, so the stack below is")
+        w(f"  read from the file extensions alone." + (f" {cite(root, first, 1)}" if first else ""))
+        if stack.get("languages"):
+            w(f"- Languages: {', '.join(stack['languages'])}." + (f" {cite(root, first, 1)}" if first else ""))
+    w("")
+    w("---")
+    w("")
+    w("## 2. Layout — the feature units")
+    w("")
+    w(f"A feature unit is a directory holding source files under a conventional root. "
+      f"{len(units)} were found, each with a profile under `profiles/`.")
+    if ctx["capped"]:
+        w("")
+        w(f"The scaffold caps discovery at {FEATURE_CAP} feature units and {ctx['found']} were found, so the "
+          f"{FEATURE_CAP} holding the most source files are profiled here and the rest are not. Raise the "
+          f"grouping by describing a parent directory, or profile the remainder by hand.")
+    w("")
+    w("| Feature | Directory | Source files | Lines | Profile | Source |")
+    w("|---|---|---|---|---|---|")
+    for u in units:
+        w(f"| {title_of(u['slug'])} | `{rel_to(root, u['dir'])}` | {len(u['files'])} | "
+          f"{sum(line_count(f) for f in u['files'])} | `profiles/{u['slug']}.md` | {cite(root, u['files'][0], 1)} |")
+    w("")
+    w("---")
+    w("")
+    w("## 3. Entry points")
+    w("")
+    if ctx["entries"]:
+        w("| Entry point | Declared as | Source |")
+        w("|---|---|---|")
+        for what, how, path, line in ctx["entries"]:
+            w(f"| {what} | {how} | {cite(root, path, line)} |")
+    else:
+        w("No manifest entry point, `main.go`, `__main__.py`, or root index file was found by the scaffold.")
+    w("")
+    w("---")
+    w("")
+    w("## 4. Endpoints")
+    w("")
+    w(f"Read by matching route decorators and handler registrations, so this is a floor rather than "
+      f"a complete API surface: {len(ctx['endpoints'])} found"
+      f"{f', capped at {EVIDENCE_CAP}' if len(ctx['endpoints']) >= EVIDENCE_CAP else ''}.")
+    w("")
+    if ctx["endpoints"]:
+        w("| Marker | Path | File | Source |")
+        w("|---|---|---|---|")
+        for e in ctx["endpoints"]:
+            w(f"| `{e['marker']}` | `{e['path']}` | `{e['file']}` | <!-- SOURCE: {e['file']}:L{e['line']} --> |")
+    else:
+        w("None of the route patterns the scaffold knows matched anything in this tree.")
+    w("")
+    w("---")
+    w("")
+    w("## 5. Data models")
+    w("")
+    w(f"Read by directory convention, file naming, and declaration shape: {len(ctx['models'])} found"
+      f"{f', capped at {EVIDENCE_CAP}' if len(ctx['models']) >= EVIDENCE_CAP else ''}.")
+    w("")
+    if ctx["models"]:
+        w("| File | Why it reads as a model | Source |")
+        w("|---|---|---|")
+        for m in ctx["models"]:
+            w(f"| `{m['file']}` | {m['why']} | <!-- SOURCE: {m['file']}:L{m['line']} --> |")
+    else:
+        w("None of the model patterns the scaffold knows matched anything in this tree.")
+    w("")
+    w("---")
+    w("")
+    w("## 6. Dependencies")
+    w("")
+    if ctx["deps"]:
+        w(f"Declared in `{man_rel}`, as written there.")
+        w("")
+        w("| Dependency | Version | Source |")
+        w("|---|---|---|")
+        for n_, v_, p_, l_ in ctx["deps"]:
+            w(f"| `{n_}` | `{v_}` | {cite(root, p_, l_)} |")
+    else:
+        w("No dependency declaration of a shape the scaffold reads was found.")
+    w("")
+    w("---")
+    w("")
+    w("## 7. What was not read, and why")
+    w("")
+    for cat, example in ctx["skipped"]:
+        w(f"- {cat} {cite(root, example, 1)}")
+    w("- Directories the rules skip everywhere — vendored dependencies, build output, virtual")
+    w("  environments, and any installed copy of the pipeline — hold code this project did not")
+    w("  write, so nothing in them is a feature of this repository.")
+    w("- Test directories are cited by the profile describing the code under test rather than")
+    w("  profiled themselves: a test says what the code should do, and that claim belongs on the code.")
+    w("")
+    w("---")
+    w("")
+    w("## 8. Provenance")
+    w("")
+    w("| Field | Value |")
+    w("|---|---|")
+    w(f"| Scaffold level | `{level}` |")
+    w(f"| Generated | {today} |")
+    w(f"| Tree hash | `{ctx['tree']}` |")
+    w(f"| Feature units | {len(units)} |")
+    w(f"| Endpoints | {len(ctx['endpoints'])} |")
+    w(f"| Data models | {len(ctx['models'])} |")
+    w("")
+    w(f"This survey was generated by the knowledge-base scaffold at level `{level}` on {today} against "
+      f"tree hash `{ctx['tree']}`.")
+    return "\n".join(L).rstrip("\n") + "\n"
+
+
+def build_empty_analysis(root, today, level):
+    """A tree with no source in it yet. Saying so plainly is a true description;
+    failing for the absence of profiles would make the step one nobody can pass."""
+    name = os.path.basename(root) or "This repository"
+    return (fm_block([("wo", "N/A"), ("title", f'"{name} — Repository Analysis"'), ("version", "1.0"),
+                      ("status", "SCAFFOLD"), ("created", today), ("last-modified", today),
+                      ("reviewed-by", "N/A"), ("level", level), ("scaffolded", today)])
+            + f"\n{SCAFFOLD_MARK}\n<!-- acp:kb-scaffold empty -->\n\n"
+            + f"# {name} — Repository Analysis\n\n"
+            + "There is no source yet: the scaffold walked the tree and found no source file outside\n"
+              "the directories the rules skip, so there is nothing here to describe.\n\n"
+              "The knowledge base grows as work orders close. Each closing work order adds the\n"
+              "profiles for the code it introduced, and re-running `acp kb scaffold` picks up every\n"
+              "feature unit that exists by then. Nothing needs to be written by hand first.\n\n"
+              "---\n\n## Provenance\n\n| Field | Value |\n|---|---|\n"
+            + f"| Scaffold level | `{level}` |\n| Generated | {today} |\n| Feature units | 0 |\n\n"
+            + f"This survey was generated by the knowledge-base scaffold at level `{level}` on {today}; "
+              "the tree held no source to survey.\n")
+
+
+def build_matrix(root, today, level, units, badges):
+    name = os.path.basename(root) or "This repository"
+    L = [fm_block([("wo", "N/A"), ("title", f'"{name} — Feature Status Matrix"'), ("version", "1.0"),
+                   ("status", "SCAFFOLD"), ("created", today), ("last-modified", today),
+                   ("reviewed-by", "N/A"), ("level", level), ("scaffolded", today)]),
+         SCAFFOLD_MARK, "",
+         f"# {name} — Feature Status Matrix", "",
+         "**Scope:** every feature unit the knowledge-base scaffold found in this tree, one row each.",
+         f"**Total features assessed:** {len(units)}", "", "---", "", "## Status Legend", "",
+         "| Badge | Status | Definition |", "|---|---|---|",
+         "| `undocumented` | Scaffolded, not described | A profile exists and its structure is filled in "
+         "from the tree; more than half the scaffold's writing prompts are still standing, so the "
+         "narrative has not been written |",
+         "| `described` | Narrative written | The writing prompts have been answered; no second reader "
+         "has checked the profile against the source |",
+         "| `validated` | Reviewed against source | The profile's frontmatter carries `validated: true` "
+         "and names a reviewer in `reviewed-by` |", "",
+         "<!-- The badge is read off each profile, not set by hand: a badge typed into this table would",
+         "     say whatever its typist believed on the day. Re-run  acp kb scaffold  to refresh it. -->",
+         "", "---", "", "## Domain: every feature unit", "",
+         "| Feature | Status | Profile | Source files | Source |", "|---|---|---|---|---|"]
+    for u in units:
+        L.append(f"| {title_of(u['slug'])} | `{badges.get(u['slug'], 'undocumented')}` | "
+                 f"`profiles/{u['slug']}.md` | {len(u['files'])} | {cite(root, u['files'][0], 1)} |")
+    if not units:
+        L.append("| — | — | — | 0 | — |")
+        L.append("")
+        L.append("No feature unit exists yet. The knowledge base grows as work orders close.")
+    counts = {b: sum(1 for u in units if badges.get(u["slug"], "undocumented") == b) for b in BADGES}
+    total = len(units) or 1
+    L += ["", "---", "", "## Summary Statistics", "", "| Status | Count | Percentage |", "|---|---|---|"]
+    for b in BADGES:
+        L.append(f"| `{b}` | {counts[b]} | {round(counts[b] * 100 / total)}% |")
+    L += ["", "---", "", "## Readiness Assessment", "",
+          "| Audience | Readiness | Justification |", "|---|---|---|",
+          f"| A session that needs context | {'Scaffold only' if counts['undocumented'] else 'Described'} | "
+          f"{counts['undocumented']} of {len(units)} profiles still carry the scaffold's writing prompts |",
+          f"| A reader acting on a claim | {'Unvalidated' if counts['validated'] < len(units) else 'Validated'} | "
+          f"{counts['validated']} of {len(units)} profiles name a reviewer |", ""]
+    return "\n".join(L).rstrip("\n") + "\n"
+
+
+# --- the scaffold command -------------------------------------------------------
+
+def read_index_rows(kb):
+    """{path relative to root: (hash, {citing profiles})} — the index as write_index
+    wants it back, so a row can be carried forward unchanged."""
+    out = {}
+    try:
+        for line in open(index_path(kb), encoding="utf-8", errors="ignore"):
+            line = line.rstrip("\n")
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                out[parts[0]] = (parts[1], set(x for x in (parts[2].split(",") if len(parts) > 2 else []) if x))
+    except OSError:
+        pass
+    return out
+
+
+def cited_rows(kb, root, names):
+    """{path: (hash, {profiles})} for a set of profile documents."""
+    rows = {}
+    for name in names:
+        path = os.path.join(kb, name.replace("/", os.sep))
+        for _ref, _hi, found in citations(path, root):
+            if not found:
+                continue
+            key = rel_to(root, os.path.realpath(found))
+            rows.setdefault(key, [hash_of(found), set()])[1].add(name)
+    return {p: (h, s) for p, (h, s) in rows.items()}
+
+
+def is_empty_kb(kb):
+    """A knowledge base the scaffold wrote for a tree that had nothing in it: the
+    index exists with no rows, and the survey says as much. Distinct from no
+    knowledge base at all, which is what exit 3 reports."""
+    if not os.path.isfile(index_path(kb)) or read_index(kb):
+        return False
+    return any("<!-- acp:kb-scaffold empty -->" in read(p) for p in md_docs(kb))
+
+
+def scan_skipped(root, kb):
+    """[(sentence, example file)] for the skipped categories actually present in
+    this tree, so section 7 cites what it passed over instead of reciting a policy.
+    One example per category is enough, and the category is pruned once found — a
+    walk through node_modules to collect a second example would cost minutes."""
+    found, cats = {}, ("tests", "vendored, generated, or build output")
+    for d, dirs, files in os.walk(root):
+        base = os.path.basename(d)
+        if base == ".git" or os.path.realpath(d) == kb or is_pipeline_dir(d):
+            dirs[:] = []
+            continue
+        cat = (cats[0] if base in TEST_DIRS else
+               cats[1] if (base in GENERATED_DIRS or base in SKIP_DIRS) else None)
+        if cat is None:
+            dirs[:] = sorted(dirs)
+            continue
+        dirs[:] = []
+        if cat in found:
+            continue
+        ex = next((os.path.join(d, f) for f in sorted(files) if os.path.splitext(f)[1] in SOURCE_EXT), None)
+        if ex:
+            found[cat] = (f"`{rel_to(root, d)}` was passed over as {cat}: it is cited by the profile "
+                          f"describing the code it covers rather than profiled as a feature itself.", ex)
+    return [found[k] for k in cats if k in found]
+
+
+def discover(root, kb, pipeline_dir):
+    """Everything the scaffold reads before it writes anything."""
+    raw = feature_units(root, kb)
+    found = len(raw)
+    capped = found > FEATURE_CAP
+    if capped:
+        raw = sorted(raw, key=lambda u: (-len(u[1]), u[0]))[:FEATURE_CAP]
+    raw.sort(key=lambda u: u[0])
+    taken, units = set(), []
+    for d, files in raw:
+        units.append({"dir": d, "files": files, "slug": feature_slug(root, d, taken)})
+    all_files = [f for u in units for f in u["files"]]
+    endpoints, models = scan_evidence(root, all_files)
+    manifest = find_manifest(root)
+    return {"units": units, "found": found, "capped": capped,
+            "endpoints": endpoints, "models": models,
+            "manifest": manifest, "deps": dependencies(root, manifest),
+            "entries": entry_points(root), "skipped": scan_skipped(root, kb),
+            "stack": detect_stack(root, pipeline_dir),
+            "tree": tree_hash(root, pipeline_dir, [rel_to(root, f) for f in all_files])}
+
+
+def write_if_scaffold(path, text, force):
+    """Write, unless the file on disk is someone's own writing. A document the
+    scaffold wrote carries its marker; one without it was written by an agent or a
+    person, and overwriting it would destroy the very thing this exists to produce."""
+    if os.path.isfile(path) and not force and SCAFFOLD_MARK not in read(path):
+        return False
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return True
+
+
+def profile_state(kb, slug, budget):
+    """(exists, still at scaffold state, text) for one feature's profile."""
+    path = os.path.join(kb, "profiles", slug + ".md")
+    if not os.path.isfile(path):
+        return False, False, ""
+    text = read(path)
+    fm = frontmatter(text)
+    b = fm.get("scaffold_prompts")
+    try:
+        b = int(b)
+    except (TypeError, ValueError):
+        # No scaffold_prompts means nobody scaffolded this: it is someone's own
+        # profile, and the scaffold does not touch it.
+        return True, False, text
+    return True, narrative_prompts(text) >= b, text
+
+
+def cmd_scaffold(a, root, kb):
+    level = a.level if a.level in LEVELS else "lite"
+    today = date.today().isoformat()
+    tpl = read(template_path("feature-profile.md"))
+    if not tpl:
+        print(f"kb scaffold: the Feature Profile template is missing "
+              f"({slash(os.path.relpath(template_path('feature-profile.md'), root))}) — "
+              f"re-run the installer with a version that ships it", file=sys.stderr)
+        return 1
+    pipeline_dir = a.pipeline_dir or DEFAULT_PIPELINE_DIR
+    if a.grow and not os.path.isdir(kb):
+        # --grow is called at close time, on every work order. Conjuring a knowledge
+        # base out of one closing work order would leave profiles with no survey
+        # around them, and it is not what the caller asked for.
+        print(f"grow: no knowledge base at {slash(os.path.relpath(kb, root))} — nothing to grow; "
+              f"`kb.py scaffold` builds one")
+        return 0
+    os.makedirs(os.path.join(kb, "profiles"), exist_ok=True)
+    ctx = discover(root, kb, pipeline_dir)
+    units = ctx["units"]
+    budget = narrative_prompts(tpl)
+
+    # --- a tree with nothing in it yet -----------------------------------------
+    if not units and not a.grow:
+        write_if_scaffold(os.path.join(kb, "analysis.md"), build_empty_analysis(root, today, level), a.force)
+        write_if_scaffold(os.path.join(kb, "status-matrix.md"), build_matrix(root, today, level, [], {}), a.force)
+        with open(os.path.join(kb, LEVEL_FILE), "w", encoding="utf-8") as f:
+            f.write(level + "\n")
+        write_index(kb, {})
+        print("scaffold: nothing to describe yet (0 features) — the knowledge base grows as work orders close")
+        return 0
+
+    # --- the profiles ------------------------------------------------------------
+    written, kept, badges = [], [], {}
+    for u in units:
+        path = os.path.join(kb, "profiles", u["slug"] + ".md")
+        exists, at_scaffold, text = profile_state(kb, u["slug"], budget)
+        # --grow adds; it does not regenerate. Otherwise a profile someone has
+        # written is left alone, and one still at scaffold state is refreshed.
+        if exists and (a.grow or (not at_scaffold and not a.force)):
+            kept.append(u["slug"])
+            badges[u["slug"]] = badge_of(text, budget)
+            continue
+        doc = build_profile(root, tpl, u["slug"], u["dir"], u["files"],
+                            ctx["endpoints"], ctx["models"], today)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(doc)
+        written.append(u["slug"])
+        badges[u["slug"]] = "undocumented"
+
+    # --- features that are gone --------------------------------------------------
+    live = {u["slug"] for u in units}
+    orphaned = []
+    for f in sorted(os.listdir(os.path.join(kb, "profiles"))):
+        if not f.endswith(".md"):
+            continue
+        slug = f[:-3]
+        if slug in live:
+            continue
+        path = os.path.join(kb, "profiles", f)
+        text = read(path)
+        fm = frontmatter(text)
+        if "feature" not in fm:
+            continue          # not the scaffold's to judge
+        orphaned.append(slug)
+        if fm.get("status") != "orphaned":
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(set_frontmatter(text, "status", "orphaned"))
+
+    # --- grow: add what is new, disturb nothing else ------------------------------
+    if a.grow:
+        added = sorted(written)
+        if added:
+            rows = read_index_rows(kb)
+            for p, (h, s) in cited_rows(kb, root, [f"profiles/{s_}.md" for s_ in added]).items():
+                if p in rows:
+                    continue          # an existing row stays as it was bound
+                rows[p] = (h, s)
+            write_index(kb, rows)
+        if added or orphaned:
+            print(f"grow: {len(added)} profiles added"
+                  f"{' (' + ', '.join(added) + ')' if added else ''}, {len(orphaned)} orphaned")
+        else:
+            print("grow: nothing new")
+        return 0
+
+    # --- the survey, the matrix, the level, the binding ---------------------------
+    write_if_scaffold(os.path.join(kb, "analysis.md"), build_analysis(root, today, level, ctx), a.force)
+    write_if_scaffold(os.path.join(kb, "status-matrix.md"),
+                      build_matrix(root, today, level, units, badges), a.force)
+    with open(os.path.join(kb, LEVEL_FILE), "w", encoding="utf-8") as f:
+        f.write(level + "\n")
+    if a.force:
+        print("scaffold: --force — every scaffolded document was regenerated, including profiles "
+              "whose narrative had been written")
+    if ctx["capped"]:
+        print(f"scaffold: {ctx['found']} candidate feature(s) found; capped at {FEATURE_CAP}, "
+              f"the ones holding the most source files")
+    if orphaned:
+        print(f"scaffold: orphaned (the directory is gone; the profile is kept): {', '.join(orphaned)}")
+    rc = cmd_bind(a, root, kb)
+    # The summary goes last so a caller reading one line of output reads this one
+    # rather than the binding's.
+    print(f"scaffold: {len(units)} feature(s), {len(written)} profile(s) written, {len(kept)} kept, "
+          f"{len(orphaned)} orphaned, {len(ctx['endpoints'])} endpoint(s), {len(ctx['models'])} model(s) "
+          f"— level {level}, tree {ctx['tree']}")
+    return rc
+
 # --- subcommands ----------------------------------------------------------------
 
 def cmd_bind(a, root, kb):
@@ -267,11 +1324,21 @@ def cmd_bind(a, root, kb):
 
 
 def classify(profs, root, index):
-    """Per profile: broken if a citation points at a file or a line that is not
-    there; else stale if a cited file's content no longer matches the binding (or
-    was never bound); else current."""
+    """Per profile: orphaned when the feature it describes is gone and the profile
+    was kept as a record; else broken if a citation points at a file or a line that
+    is not there; else stale if a cited file's content no longer matches the binding
+    (or was never bound); else current.
+
+    Orphaned is checked first and stops there. Its citations dangle by definition —
+    the code they named was deleted — and reporting that as broken on every run
+    would turn a deliberate record into a step nobody can pass again."""
     out = []
     for name, (path, cits) in profs.items():
+        if frontmatter(read(path)).get("status") == "orphaned":
+            out.append({"profile": name, "state": "orphaned", "citations": len(cits),
+                        "reason": "the directory this described is gone; the profile is kept as a record",
+                        "broken": [], "stale": []})
+            continue
         broken, stale = [], []
         for ref, hi, found in cits:
             if not found:
@@ -295,21 +1362,42 @@ def classify(profs, root, index):
 
 def cmd_status(a, root, kb):
     profs = profiles_of(kb, root) if os.path.isdir(kb) else {}
+    lvl = level_of(kb, getattr(a, "level", None))
     if not profs:
+        # A knowledge base the scaffold wrote for a tree with no source in it is a
+        # true and complete description of that tree. Exit 3 is for the case it
+        # was meant for: no knowledge base at all.
+        if os.path.isdir(kb) and is_empty_kb(kb):
+            print(f"kb: 0 profiles — nothing to describe yet")
+            return 0
         print(f"no knowledge base at {slash(os.path.relpath(kb, root))}")
         return 3
     index = read_index(kb)
     bound = os.path.isfile(index_path(kb))
     rows = classify(profs, root, index)
     counts = {s: sum(1 for r in rows if r["state"] == s) for s in ("current", "stale", "broken")}
+    orphaned = sum(1 for r in rows if r["state"] == "orphaned")
 
     exts = {("." + e.lstrip(".")).lower() for e in a.source_ext.split(",") if e.strip()} if a.source_ext else SOURCE_EXT
     cited = {rel_to(root, os.path.realpath(f)) for _n, (_p, cits) in profs.items() for _r, _h, f in cits if f}
     uncovered = [p for p in source_files(root, kb, exts) if p not in cited]
 
-    rc = 2 if counts["broken"] else (1 if counts["stale"] else 0)
-    summary = (f"kb: {len(rows)} profiles — {counts['current']} current, {counts['stale']} stale, "
-               f"{counts['broken']} broken; {len(uncovered)} uncovered source files")
+    budget = template_budget()
+    shorts = []
+    for r in rows:
+        why = None if r["state"] == "orphaned" else \
+            level_shortfall(r["profile"], read(profs[r["profile"]][0]), lvl, budget)
+        r["short"] = bool(why)
+        r["short_reason"] = why
+        if why: shorts.append((r["profile"], why))
+
+    # Freshness outranks completeness: a stale profile is wrong, an unwritten one
+    # is only unwritten, and the count of both is on the summary line either way.
+    rc = 2 if counts["broken"] else (1 if counts["stale"] else (4 if shorts else 0))
+    summary = (f"kb: {len(rows)} profiles{f' ({orphaned} orphaned)' if orphaned else ''} — "
+               f"{counts['current']} current, {counts['stale']} stale, "
+               f"{counts['broken']} broken; {len(uncovered)} uncovered source files; "
+               f"{len(shorts)} short of {lvl}")
 
     if a.json:
         print(json.dumps({
@@ -318,8 +1406,12 @@ def cmd_status(a, root, kb):
             "bound_tree": bound_tree_of(kb),
             "profiles": rows,
             "counts": {"profiles": len(rows), **counts},
+            "orphaned": orphaned,
             "uncovered": {"count": len(uncovered), "clusters": cluster(uncovered),
                           "files": uncovered[:100], "files_truncated": len(uncovered) > 100},
+            "level": lvl,
+            "short": {"level": lvl, "count": len(shorts),
+                      "profiles": [{"profile": n, "reason": why} for n, why in shorts]},
             "summary": summary,
             "exit": rc,
         }, indent=2, sort_keys=True))
@@ -328,15 +1420,22 @@ def cmd_status(a, root, kb):
     print(f"index: bound, {len(index)} file(s), bound_tree={bound_tree_of(kb)}" if bound
           else "index: not bound — no source-index.tsv; run `kb.py bind` (every profile reads as stale until then)")
     w = max([len(r["profile"]) for r in rows] + [7])
-    print(f"{'profile'.ljust(w)}  state    first problem")
-    for r in sorted(rows, key=lambda r: ({"broken": 0, "stale": 1, "current": 2}[r["state"]], r["profile"])):
-        print(f"{r['profile'].ljust(w)}  {r['state'].ljust(7)}  {r['reason'] or '-'}")
+    print(f"{'profile'.ljust(w)}  state      first problem")
+    order = {"broken": 0, "stale": 1, "current": 2, "orphaned": 3}
+    for r in sorted(rows, key=lambda r: (order[r["state"]], r["profile"])):
+        print(f"{r['profile'].ljust(w)}  {r['state'].ljust(9)}  {r['reason'] or '-'}")
     if uncovered:
         print(f"\nuncovered: {len(uncovered)} source file(s) no profile cites")
         for c in cluster(uncovered):
             print(f"  {c['dir'].ljust(w)}  {str(c['count']).rjust(5)}  {', '.join(c['examples'])}")
     else:
         print("\nuncovered: none — every source file is cited by a profile")
+    if shorts:
+        print(f"\nshort of {lvl}: {len(shorts)} profile(s)")
+        for n, why in shorts:
+            print(f"  {n.ljust(w)}  {why}")
+    else:
+        print(f"\nshort of {lvl}: none")
     print(f"\n{summary}")
     return rc
 
@@ -397,12 +1496,23 @@ def cmd_impact(a, root, kb):
 def main():
     ap = argparse.ArgumentParser(prog="kb.py", description="knowledge-base freshness, bound to source")
     sub = ap.add_subparsers(dest="cmd")
-    for name, help_text in (("bind", "record a content hash per cited source file"),
-                            ("status", "report which profiles are current, stale, or broken"),
+    for name, help_text in (("scaffold", "build the knowledge base from the tree, deterministically"),
+                            ("bind", "record a content hash per cited source file"),
+                            ("status", "report which profiles are current, stale, broken, or short of the level"),
                             ("impact", "report which profiles describe a set of changed files")):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--root", default=os.getcwd())
         p.add_argument("--kb", default=None)
+        if name in ("scaffold", "status"):
+            p.add_argument("--level", choices=LEVELS, default=None,
+                           help="lite: a profile per feature; standard: its narrative written; full: validated")
+        if name == "scaffold":
+            p.add_argument("--pipeline-dir", default=None,
+                           help=f"where the pipeline is installed, relative to the root (default {DEFAULT_PIPELINE_DIR})")
+            p.add_argument("--grow", action="store_true",
+                           help="add profiles for new features and mark vanished ones orphaned; re-bind nothing")
+            p.add_argument("--force", action="store_true",
+                           help="regenerate every scaffolded document, including profiles already written")
         if name == "status":
             p.add_argument("--json", action="store_true")
             p.add_argument("--source-ext", default=None, help="comma-separated extensions to count as source")
@@ -417,7 +1527,8 @@ def main():
     # spelled one way with paths spelled the other resolves to nothing.
     root = os.path.realpath(a.root)
     kb = os.path.realpath(a.kb) if a.kb else os.path.join(root, DEFAULT_KB)
-    return {"bind": cmd_bind, "status": cmd_status, "impact": cmd_impact}[a.cmd](a, root, kb)
+    return {"scaffold": cmd_scaffold, "bind": cmd_bind,
+            "status": cmd_status, "impact": cmd_impact}[a.cmd](a, root, kb)
 
 
 if __name__ == "__main__":

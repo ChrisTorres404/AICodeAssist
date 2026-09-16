@@ -49,7 +49,7 @@ records who investigates, who fixes, and who validates:
 bug new "<title>" --category <category> [--prompt]
 bug verify <number> --run <suite.sh>
 bug close <number>            # refuses without a VERIFICATION document
-bug promote <number>          # carry the investigation into a pack
+bug promote <number>          # carry the investigation into a playbook
 ```
 
 ---
@@ -109,8 +109,8 @@ There is no canonical list. Find the nearest precedent before writing a new
 investigation:
 
 ```bash
-pack bug "<symptom>"        # bug investigations across every installed pack
-pack search "<symptom>"     # everything, including the work order behind it
+playbook bug "<symptom>"    # bug investigations across every installed playbook
+playbook search "<symptom>" # everything, including the work order behind it
 ```
 
 A promoted bug carries its reproduction, its root cause, its fix, and the
@@ -195,7 +195,7 @@ Before you consider a bug report "created", you MUST verify:
 
 When asked to document or fix a bug:
 
-1. **Search for precedent**: `pack bug "<symptom>"`. The same failure has
+1. **Search for precedent**: `playbook bug "<symptom>"`. The same failure has
    often been investigated before.
 2. **Open it with the driver**: `bug new "<title>" --category <category>`,
    adding `--prompt` for a complex investigation. This creates the folder,

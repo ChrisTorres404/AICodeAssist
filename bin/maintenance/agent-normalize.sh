@@ -7,7 +7,7 @@
 # file patterns and contexts. Claude Code does not read those; it selects an
 # agent from its `description`. This script:
 #
-#   1. removes the dead "## Activation Triggers" section
+#   1. reads the "## Activation Triggers" section, which stays in the file
 #   2. folds its trigger content into the description when the description
 #      does not already say when to use the agent
 #   3. pins a model tier (dated ids rot; `sonnet` tracks the current release)
@@ -20,14 +20,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 - "$ROOT" <<'PY'
 import pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
-files = sorted((root/"core/agents/base").glob("*.md")) + sorted((root/"core/agents/roles").glob("*.md")) + sorted((root/"core/agents/domain").rglob("*.md"))
+files = sorted((root/"core/agents/base").glob("*.md")) + sorted((root/"core/agents/roles").glob("*.md")) + sorted((root/"core/agents/sets").rglob("*.md"))
 files = [f for f in files if f.name != "README.md"]
 stripped = folded = remodeled = marked = 0
 
 for f in files:
     s = f.read_text()
 
-    # --- capture the trigger block before removing it -------------------
+    # --- read the trigger block; the section stays in the file ----------
     m = re.search(r"^## Activation Triggers\n(.*?)(?=^## )", s, re.S | re.M)
     triggers = ""
     if m:
@@ -35,7 +35,6 @@ for f in files:
         ctx = re.search(r"\*\*(?:Triggers|Contexts):\*\*\s*(.+)", body)
         if ctx:
             triggers = re.sub(r"[`*]", "", ctx.group(1)).strip().rstrip(".")
-        s = s[:m.start()] + s[m.end():]
         stripped += 1
 
     # --- description must say when to use the agent ---------------------
@@ -63,7 +62,7 @@ for f in files:
     f.write_text(s)
 
 print(f"  agents processed  : {len(files)}")
-print(f"  dead sections gone: {stripped}")
+print(f"  trigger sections  : {stripped}")
 print(f"  descriptions fixed: {folded}")
 print(f"  model ids pinned  : {remodeled}")
 print(f"  overlay zones kept: {marked}")

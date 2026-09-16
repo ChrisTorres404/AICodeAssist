@@ -1,0 +1,6 @@
+# files whose examples legitimately contain the patterns the scanner hunts,
+# listed again here so `bin/sanitize core/agents` skips them the same way
+# `bin/sanitize core` does through core/.sanitize-ignore
+roles/release-sanitizer.md
+roles/opensource-forker.md
+roles/opensource-packager.md

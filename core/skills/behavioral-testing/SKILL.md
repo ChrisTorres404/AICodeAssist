@@ -36,7 +36,11 @@ source "$(dirname "$0")/../lib/test-helpers.sh"        # HTTP + SQL assertions
 source "$(dirname "$0")/../lib/verbose-test-framework.sh"  # richer reporting, user lifecycle
 ```
 
-`bin/pack suite "<topic>"` finds an existing suite to model yours on. The
+Both files source `lib/test-common.sh` and `lib/test-env.sh`, where every shared
+function (HTTP requests, `run_sql`, assertions, environment reset) is defined once, so
+loading both is safe and gives one correct summary.
+
+`bin/playbook suite "<topic>"` finds an existing suite to model yours on. The
 `comprehensive/` suites are the reference implementations.
 
 A suite that only checks HTTP status codes is not a behavioral test. Assert on

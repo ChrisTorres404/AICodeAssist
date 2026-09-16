@@ -49,6 +49,24 @@ gets in), a lifecycle journey (someone creates, changes, and removes a
 record), and a transaction journey (someone submits something irreversible).
 Those three catch different classes of failure.
 
+### Journeys to add when the application has them
+
+These are not in the base set because not every application has them, but each
+is a journey that breaks in production more often than the happy path, and
+each is worth a scenario of its own the moment the feature exists.
+
+| ID | Scenario | Description |
+|----|----------|-------------|
+| S-013 | Account activation | Verification link from the message through to an activated account, including an expired link and a reused link |
+| S-014 | Second-factor enrollment | Enable the second factor, store the recovery codes, confirm the next sign-in demands it |
+| S-015 | Second-factor sign-in | Sign in through the challenge, including a wrong code and a recovery code |
+| S-016 | Session timeout | Idle until the session expires, confirm the redirect, confirm silent renewal where it applies, re-authenticate |
+| S-017 | Permission boundary | A restricted account attempts an administrative journey and is refused at every entry point, including a deep link straight to the page |
+
+A journey that involves waiting — activation links, idle timeouts — is
+scripted with the configured window read from the test configuration, not with
+a literal number copied out of the code.
+
 ---
 
 ## How to Use These Tests
@@ -156,6 +174,31 @@ list for exact names before writing a scenario, and do not invent one.
 
 Every scenario ends by checking the console and network lists. A journey that
 completes while throwing errors has not passed.
+
+---
+
+## Recording the Result
+
+A scenario run is behavioral evidence and is recorded with the same vocabulary
+as every other suite: `EXECUTED — PASS`, `EXECUTED — FAIL`, or
+`NOT EXECUTED — PLAN ONLY`. A run is only PASS when every step produced its
+expected result and the console and network checks at the end were clean.
+
+Evidence for a UI scenario is:
+
+- The screenshot or page snapshot at the step that matters
+- The network entries for the calls that step made, with their status codes
+- The console output, showing there were no errors
+- Where the journey was supposed to change stored state, a read of that state
+  confirming it did
+
+Write the run into the scenario's execution log, and the report into
+`{{TESTING_DIR}}/results/` alongside the other behavioral reports. Use
+`{{PIPELINE_ROOT}}/core/templates/testing/TEST-TEMPLATE-VERIFICATION-UI.md`
+for the written verification.
+
+A scenario that stopped halfway is `EXECUTED — FAIL` at the step it stopped on,
+named. It is never reported as "mostly passed".
 
 ---
 

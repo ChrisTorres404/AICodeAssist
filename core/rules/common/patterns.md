@@ -2,7 +2,7 @@
 
 ## Search before building
 
-Before writing anything non-trivial: search the packs for precedent, then the
+Before writing anything non-trivial: search the playbooks for precedent, then the
 codebase for an existing implementation, then the ecosystem for a maintained
 library. Adopt, extend, or compose before building. Build only informed by
 what you found.

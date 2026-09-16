@@ -25,7 +25,7 @@
 #                                    with --run, execute the suite and record
 #                                    EXECUTED — PASS/FAIL from its exit code
 #   wo close <number>
-#   wo promote <number> [--pack <name>] [--allow-unsanitized]
+#   wo promote <number> [--playbook <name>] [--allow-unsanitized]
 #   wo stats                         cycle time, evidence rate, drift
 #
 # Working with others (needs the gh CLI, authenticated):
@@ -74,7 +74,13 @@ else
   WORKORDERS_DIR="${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}"
   WO_DIR="$PROJECT_ROOT/$WORKORDERS_DIR"
 fi
-PACKS_DIR="${PACKS_DIR:-$PIPELINE_ROOT/packs}"
+# PACKS_DIR was the name before 1.4.0 and is still honoured when set. An install
+# that has not been migrated yet still keeps its content under packs/.
+if [ -n "${PLAYBOOKS_DIR:-}" ]; then :
+elif [ -n "${PACKS_DIR:-}" ]; then PLAYBOOKS_DIR="$PACKS_DIR"
+elif [ ! -d "$PIPELINE_ROOT/playbooks" ] && [ -d "$PIPELINE_ROOT/packs" ]; then PLAYBOOKS_DIR="$PIPELINE_ROOT/packs"
+else PLAYBOOKS_DIR="$PIPELINE_ROOT/playbooks"
+fi
 PROJECT_SLUG="${PROJECT_SLUG:-$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g')}"
 
 die() { echo "wo: $*" >&2; exit 1; }
@@ -495,6 +501,13 @@ cmd_close() {
         fi
         echo "    Update them before the next reader trusts them, then:  acp kb bind" >&2
       fi
+    fi
+    # New code with no profile gets a stub now, cited and bound, so the knowledge
+    # base grows with the work; the stale rows above are left exactly as they are.
+    if python3 "$kbpy" scaffold --help 2>/dev/null | grep -q -- '--grow'; then
+      local grown; grown="$(cd "$PROJECT_ROOT" && python3 "$kbpy" scaffold --grow --root "$PROJECT_ROOT" --kb "$kbd" --pipeline-dir "${PIPELINE_ROOT#$PROJECT_ROOT/}" 2>/dev/null | tail -1 || true)"
+      case "$grown" in *"profiles added"*) echo "Knowledge base: $grown — their narrative is owed; the profiles say what to write." >&2; KB_IMPACT="${KB_IMPACT:+$KB_IMPACT
+}$grown";; esac
     fi
   fi
   local out="$d/WO-$n-CLOSEOUT.md"
@@ -948,32 +961,32 @@ cmd_stats() {
 }
 
 cmd_promote() {
-  local n="" pack="" allow=0 allow_ph=0
+  local n="" playbook="" allow=0 allow_ph=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --pack) pack="$2"; shift 2;;
+      --playbook|--pack) playbook="$2"; shift 2;;
       --allow-unsanitized) allow=1; shift;;
       --allow-placeholders) allow_ph=1; shift;;
       -*) die "unknown flag $1";;
       *) n="$1"; shift;;
     esac
   done
-  [ -n "$n" ] || die "usage: wo promote <number> [--pack <name>] [--allow-unsanitized] [--allow-placeholders]"
+  [ -n "$n" ] || die "usage: wo promote <number> [--playbook <name>] [--allow-unsanitized] [--allow-placeholders]"
   local d; d="$(wo_folder "$n")"; [ -n "$d" ] || die "no work order WO-$n under $WO_DIR"
   [ "$(latest_status "$d/WO-$n-VERIFICATION.md")" = PASS ] || die "refusing to promote WO-$n: the latest verification is not EXECUTED — PASS ($(latest_status "$d/WO-$n-VERIFICATION.md")). Precedent without evidence is folklore."
   if [ "$allow_ph" -eq 0 ] && [ -f "$d/WO-$n-CLOSEOUT.md" ] && grep -qE "\[Lesson [0-9]\]|\[What was delivered\]|\[Root cause\]|\[Brief|TBD|TODO" "$d/WO-$n-CLOSEOUT.md"; then
     die "refusing to promote WO-$n: the CLOSEOUT still has template placeholders (e.g. '[Lesson 1]').
     The pitfalls are the part the next project needs. Fill them in, or pass --allow-placeholders."
   fi
-  pack="${pack:-$PROJECT_SLUG}"
-  local pdir="$PACKS_DIR/$pack" tree="workorders"
+  playbook="${playbook:-$PROJECT_SLUG}"
+  local pdir="$PLAYBOOKS_DIR/$playbook" tree="workorders"
   [ -x "$PIPELINE_ROOT/bin/sanitize" ] || die "bin/sanitize is missing from $PIPELINE_ROOT/bin — refusing to promote unscanned work. Re-run install.sh."
   if true; then
     rc=0; "$PIPELINE_ROOT/bin/sanitize" "$d" --quiet >/dev/null 2>&1 || rc=$?
     if [ "$rc" -eq 2 ]; then
       if [ "$allow" -eq 0 ]; then
         die "refusing to promote WO-$n: it fails sanitization (secrets, PII, or host paths).
-    $PIPELINE_ROOT/bin/sanitize \"$d\"   shows what. Fix, or pass --allow-unsanitized for a private pack."
+    $PIPELINE_ROOT/bin/sanitize \"$d\"   shows what. Fix, or pass --allow-unsanitized for a private playbook."
       fi
     fi
   fi
@@ -1004,7 +1017,7 @@ cmd_promote() {
   solution="$( [ -f "$spec" ] && section "$spec" "Solution" 6 || true)"
   pitfalls="$( [ -f "$close" ] && section "$close" "(Lessons|Pitfalls|Gotchas|What Went Wrong)" 10 || true)"
   files="$( [ -f "$close" ] && grep -oE '\`[^\`]+\.[a-z]{1,4}\`' "$close" | sort -u | head -12 | tr '\n' ' ' || true)"
-  # A reference that silently dangles in a pack is worse than none: mark what travelled.
+  # A reference that silently dangles in a playbook is worse than none: mark what travelled.
   local f2="" ref
   for ref in $files; do
     local bare="${ref#\`}"; bare="${bare%\`}"; local carried_as=""
@@ -1026,8 +1039,8 @@ cmd_promote() {
     if [ -n "$pitfalls" ]; then printf '%s\n' "$pitfalls" | sed 's/^/    /'; else printf '    _(none recorded — add what would have saved you time)_\n'; fi
     printf '\n'
   } > "$entry"
-  "$PIPELINE_ROOT/bin/pack" catalog "$pack" >/dev/null 2>&1 || true
-  echo "WO-$n promoted to pack '$pack': $pdir/$tree/$b"
+  PLAYBOOKS_DIR="$PLAYBOOKS_DIR" "$PIPELINE_ROOT/bin/playbook" catalog "$playbook" >/dev/null 2>&1 || true
+  echo "WO-$n promoted to playbook '$playbook': $pdir/$tree/$b"
   echo "Catalog entry written: $entry (CATALOG.md regenerated from catalog/)"
   echo "Edit the Pitfalls lines now, while you still remember."
 }

@@ -18,21 +18,36 @@
 #   --full        every tier
 #
 # Options:
-#   --verbose     Show full output from each suite
+#   --verbose     Show full output from each suite        (env VERBOSE=true)
 #   --no-prep     Skip environment preparation
-#   --stop-fail   Stop on the first suite failure
+#   --stop-fail   Stop on the first suite failure         (env STOP_ON_FAIL=true)
+#   --show-config Print the loaded configuration first    (env SHOW_CONFIG=true)
 #   --list        List the suites that would run — and the suite files present
 #                 but unlisted, which no regression ever runs — then exit
+#   -h, --help    Print this header and exit
 #   --tier X      Run only tier X (e.g. --tier security)
 #   --type X      Run only suites of type X (e.g. --type unit). Composes with
 #                 --tier and with the modes.
+#   --include-unlisted
+#                 Also run the suite files present in the suites directory that
+#                 no manifest row names, as a final "unlisted" tier. For a
+#                 project whose manifest is not filled in yet; the manifest
+#                 stays the thing a regression is defined by.
 #
 # Environment:
 #   ACTIVE_ENV        LOCAL_DEV (default) | LOCAL_TEST | DOCKER
 #   SUITES_DIR        where the suite scripts live
 #   SUITES_MANIFEST   path to the manifest
 #   TEST_RESULTS_DIR  where anything written goes (see ../lib/paths.sh)
+#   VERBOSE           true is the same as --verbose
+#   STOP_ON_FAIL      true is the same as --stop-fail
+#   SHOW_CONFIG       true is the same as --show-config
 #   See config/test-config.env for the rest.
+#
+# Between tiers it puts the system back into a known state — the cache flush
+# and the prep SQL the project configured, then a connection-pool check — so a
+# tier is not failed by what the tier before it left behind. Both are inert
+# until REDIS_FLUSH or TEST_PREP_SQL is configured.
 # ============================================================================
 
 set +e  # a failing suite must not abort the run
@@ -45,6 +60,48 @@ CONFIG_FILE="${TEST_CONFIG:-$SCRIPT_DIR/../config/test-config.env}"
 # shellcheck source=../lib/paths.sh
 . "$SCRIPT_DIR/../lib/paths.sh"
 MANIFEST="$SUITES_MANIFEST"
+
+# ============================================================================
+# ARGUMENTS
+# ============================================================================
+# Parsed before the configuration is loaded, so --verbose and --show-config
+# reach the configuration file itself. The environment forms (VERBOSE,
+# STOP_ON_FAIL, SHOW_CONFIG) are the defaults; a flag overrides them.
+MODE="standard"
+case "${VERBOSE:-}" in true|1|yes) VERBOSE=true;; *) VERBOSE=false;; esac
+case "${STOP_ON_FAIL:-}" in true|1|yes) STOP_ON_FAIL=true;; *) STOP_ON_FAIL=false;; esac
+case "${SHOW_CONFIG:-}" in true|1|yes) SHOW_CONFIG=true;; *) SHOW_CONFIG=false;; esac
+SKIP_PREP=false
+LIST_ONLY=false
+INCLUDE_UNLISTED=false
+FILTER_TIER=""
+FILTER_TYPE=""
+NEXT_IS=""
+
+for arg in "$@"; do
+    case $arg in
+        --quick)      MODE="quick" ;;
+        --standard)   MODE="standard" ;;
+        --full)       MODE="full" ;;
+        --verbose)    VERBOSE=true ;;
+        --no-prep)    SKIP_PREP=true ;;
+        --stop-fail)  STOP_ON_FAIL=true ;;
+        --show-config) SHOW_CONFIG=true ;;
+        --list)       LIST_ONLY=true ;;
+        --include-unlisted) INCLUDE_UNLISTED=true ;;
+        --tier)       NEXT_IS="tier" ;;
+        --type)       NEXT_IS="type" ;;
+        -h|--help)    awk 'NR>1 && /^#/ {sub(/^#[ ]?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
+        *)
+            case "$NEXT_IS" in
+                tier) FILTER_TIER="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')";;
+                type) FILTER_TYPE="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')";;
+            esac
+            NEXT_IS=""
+            ;;
+    esac
+done
+export VERBOSE STOP_ON_FAIL SHOW_CONFIG
 
 # Source configuration
 if [ -f "$CONFIG_FILE" ]; then
@@ -63,67 +120,24 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-# Defaults (config file normally supplies these)
-API_BASE="${API_BASE:-{{API_BASE_URL}}}"
-HEALTH_PATH="${HEALTH_PATH:-/health}"
-# The health endpoint is usually at the host root (/health), not under the API
-# prefix. Try both and use the first that answers 200.
-health_url() {
-  local host; host="$(printf '%s' "$API_BASE" | sed -E 's|^(https?://[^/]+).*|\1|')"
-  local u
-  for u in "${API_BASE%/}${HEALTH_PATH}" "${host}${HEALTH_PATH}"; do
-    [ "$(curl -s -o /dev/null -w '%{http_code}' -A "${TEST_USER_AGENT:-harness}" "$u" 2>/dev/null)" = "200" ] && { printf '%s' "$u"; return 0; }
-  done
-  printf '%s' "${API_BASE%/}${HEALTH_PATH}"; return 1
-}
-
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-5432}"
-DB_USER="${DB_USER:-$USER}"
-DB_NAME="${DB_NAME:-}"
-REDIS_HOST="${REDIS_HOST:-localhost}"
-REDIS_PORT="${REDIS_PORT:-6379}"
-
-# A browser User-Agent: services that score clients for risk, or block unknown
-# agents, treat curl-like agents as suspicious.
-export TEST_USER_AGENT="${TEST_USER_AGENT:-Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36}"
-
-# Parse arguments
-MODE="standard"
-VERBOSE=false
-SKIP_PREP=false
-STOP_ON_FAIL=false
-LIST_ONLY=false
-FILTER_TIER=""
-FILTER_TYPE=""
-NEXT_IS=""
-
-for arg in "$@"; do
-    case $arg in
-        --quick)      MODE="quick" ;;
-        --standard)   MODE="standard" ;;
-        --full)       MODE="full" ;;
-        --verbose)    VERBOSE=true ;;
-        --no-prep)    SKIP_PREP=true ;;
-        --stop-fail)  STOP_ON_FAIL=true ;;
-        --list)       LIST_ONLY=true ;;
-        --tier)       NEXT_IS="tier" ;;
-        --type)       NEXT_IS="type" ;;
-        *)
-            case "$NEXT_IS" in
-                tier) FILTER_TIER="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')";;
-                type) FILTER_TYPE="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')";;
-            esac
-            NEXT_IS=""
-            ;;
-    esac
-done
+# Where the service is, whether a database is configured, how to release a
+# congested pool and how to put the system back into a known state — one copy,
+# shared with the suites' own libraries.
+# shellcheck source=../lib/test-env.sh
+. "$SCRIPT_DIR/../lib/test-env.sh"
+export TEST_USER_AGENT
 
 # Results tracking
 declare -a PASSED_SUITES
 declare -a FAILED_SUITES
 declare -a SKIPPED_SUITES
 START_TIME=$(date +%s)
+
+# Set once --stop-fail has fired. Every tier checks it, because a tier is
+# invoked as `run_tier ... || true` — the `|| true` is what keeps one tier's
+# failure from aborting the summary, and it would equally swallow the signal
+# to stop. The flag is the signal that survives it.
+RUN_ABORTED=false
 
 # ============================================================================
 # SUITE INVENTORY — from the manifest (tier|type|file|label)
@@ -138,6 +152,7 @@ INTEGRATION_TESTS=()
 PERFORMANCE_TESTS=()
 INFRASTRUCTURE_TESTS=()
 RECENT_TESTS=()
+UNLISTED_TESTS=()
 
 load_manifest() {
     [ -f "$MANIFEST" ] || { echo "No suite manifest at $MANIFEST — add tier|type|file|label lines."; return 0; }
@@ -171,18 +186,8 @@ print_header() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
-db_configured() {
-    [ -n "${DB_NAME:-}" ] && command -v psql > /dev/null 2>&1
-}
-
-# Terminate idle connections left behind by a suite, so the next one is not
-# blocked by an exhausted pool. No-op when no database is configured.
-release_idle_db_connections() {
-    db_configured || return 0
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres -t -A -c \
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB_NAME' AND state = 'idle' AND pid <> pg_backend_pid();" \
-        > /dev/null 2>&1 || true
-}
+# db_configured, release_idle_db_connections, recover_db_pool and
+# reset_test_environment all come from ../lib/test-env.sh.
 
 run_suite() {
     local file="$1"
@@ -213,6 +218,7 @@ run_suite() {
             FAILED_SUITES+=("$name")
             if [ "$STOP_ON_FAIL" = true ]; then
                 echo -e "\n  ${RED}--stop-fail: aborting remaining suites${NC}"
+                RUN_ABORTED=true
                 return 1
             fi
         fi
@@ -234,6 +240,7 @@ run_suite() {
             if [ "$STOP_ON_FAIL" = true ]; then
                 rm -f "$log_file"
                 echo -e "\n  ${RED}--stop-fail: aborting remaining suites${NC}"
+                RUN_ABORTED=true
                 return 1
             fi
         fi
@@ -249,6 +256,7 @@ run_tier() {
     shift
     local tests=("$@")
 
+    [ "$RUN_ABORTED" = true ] && return 0
     [ ${#tests[@]} -eq 0 ] && return 0
 
     if [ -n "$FILTER_TIER" ]; then
@@ -298,30 +306,35 @@ list_suites() {
     done
 }
 
-# Suite files on disk that no manifest row names. They never run in a
-# regression, and an unlisted suite is the commonest way for a check to be
-# written once and then quietly stop being evidence for anything.
+# Suite files on disk that no manifest row names — answered by the shared
+# resolver in ../lib/paths.sh, so the report script and the interactive runner
+# cannot come to a different answer about the same directory.
+collect_unlisted() {
+    unlisted_suite_files "$MANIFEST"
+}
+
 list_unlisted_suites() {
-    [ -d "$SUITES_DIR" ] || return 0
-    local path rel listed entry file found=0
-    for path in "$SUITES_DIR"/*.sh "$SUITES_DIR"/*/*.sh; do
-        [ -f "$path" ] || continue
-        rel="${path#"$SUITES_DIR"/}"
-        case "$rel" in _*|*/_*|*helpers*) continue;; esac
-        listed=false
-        for entry in "${ESSENTIAL_TESTS[@]}" "${CORE_TESTS[@]}" "${EXTENDED_TESTS[@]}" \
-                     "${SECURITY_TESTS[@]}" "${INTEGRATION_TESTS[@]}" "${PERFORMANCE_TESTS[@]}" \
-                     "${INFRASTRUCTURE_TESTS[@]}" "${RECENT_TESTS[@]}"; do
-            [ -n "$entry" ] || continue
-            IFS=':' read -r file _ _ <<< "$entry"
-            [ "$file" = "$rel" ] && { listed=true; break; }
-        done
-        if [ "$listed" = false ]; then
-            [ "$found" -eq 0 ] && echo -e "\n${YELLOW}Present but not in the manifest (never runs in a regression):${NC}"
-            found=1
-            echo -e "  ${YELLOW}--${NC}   $rel"
-        fi
-    done
+    local rel found=0
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        [ "$found" -eq 0 ] && echo -e "\n${YELLOW}Present but not in the manifest (never runs in a regression):${NC}"
+        found=1
+        echo -e "  ${YELLOW}--${NC}   $rel"
+    done <<EOF
+$(collect_unlisted)
+EOF
+}
+
+# --include-unlisted turns those files into a final tier, so a project whose
+# manifest is not filled in yet can still run everything it has written.
+load_unlisted() {
+    local rel
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        UNLISTED_TESTS+=("$rel::$rel")
+    done <<EOF
+$(collect_unlisted)
+EOF
 }
 
 # ============================================================================
@@ -331,49 +344,26 @@ list_unlisted_suites() {
 prepare_environment() {
     echo -e "${MAGENTA}  Preparing test environment...${NC}"
 
-    # 1. The service under test must answer before anything is claimed about it
-    local health
-    health=$(curl -s -o /dev/null -w "%{http_code}" -A "$TEST_USER_AGENT" \
-        "$(health_url)" 2>/dev/null || echo "000")
-    if [ "$health" != "200" ]; then
-        echo -e "  ${RED}Service not responding at ${API_BASE}${HEALTH_PATH} or the host root (HTTP $health)${NC}"
+    # Health check, known-state reset, pool check — one implementation, in
+    # ../lib/test-env.sh, so the report script does exactly the same thing.
+    # A non-zero return means the service is not there: nothing below could
+    # mean anything, so the run stops rather than reporting failures.
+    if ! prepare_test_environment; then
         echo -e "  ${RED}Start the service under test, then run this again.${NC}"
         exit 1
     fi
-    echo -e "  ${GREEN}Service healthy${NC} (HTTP $health)"
-
-    # 2. Optional: flush the cache/rate limiter so limits do not leak between runs
-    if [ "${REDIS_FLUSH:-0}" = "1" ] && command -v redis-cli > /dev/null 2>&1; then
-        echo -ne "  ${DIM}Flushing Redis...${NC}"
-        redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" FLUSHDB > /dev/null 2>&1 || true
-        echo -e "\r  ${GREEN}Redis flushed${NC}                               "
-    fi
-
-    # 3. Optional: project-supplied SQL that resets state before a run
-    if [ -n "${TEST_PREP_SQL:-}" ] && db_configured; then
-        echo -ne "  ${DIM}Running TEST_PREP_SQL...${NC}"
-        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "$TEST_PREP_SQL" \
-            > /dev/null 2>&1 || echo -e "  ${YELLOW}TEST_PREP_SQL failed${NC}"
-        echo -e "\r  ${GREEN}Prep SQL applied${NC}                            "
-    fi
-
-    # 4. Connection pool health
-    if db_configured; then
-        local idle_count
-        idle_count=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c \
-            "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = '$DB_NAME' AND state = 'idle';" 2>/dev/null || echo "0")
-        idle_count=$(echo "$idle_count" | tr -d '[:space:]')
-        if [ "${idle_count:-0}" -gt 8 ] 2>/dev/null; then
-            echo -e "  ${YELLOW}DB pool: $idle_count idle connections — releasing...${NC}"
-            release_idle_db_connections
-            sleep 2
-            echo -e "  ${GREEN}Pool released${NC}"
-        else
-            echo -e "  ${GREEN}DB pool healthy${NC} ($idle_count idle connections)"
-        fi
-    fi
 
     echo ""
+}
+
+# Between tiers: release a congested pool and put the system back into the
+# state the next tier expects. The suites that just ran are what built the
+# state that would otherwise fail the next ones, which is why this happens at
+# every tier boundary rather than once at the start.
+between_tiers() {
+    [ "$RUN_ABORTED" = true ] && return 0
+    recover_db_pool
+    reset_test_environment
 }
 
 # ============================================================================
@@ -393,7 +383,12 @@ if [ "$LIST_ONLY" = true ]; then
     list_suites "INFRASTRUCTURE (--full)"      "${INFRASTRUCTURE_TESTS[@]}"
     list_suites "RECENT (--full)"              "${RECENT_TESTS[@]}"
 
-    list_unlisted_suites
+    if [ "$INCLUDE_UNLISTED" = true ]; then
+        load_unlisted
+        list_suites "UNLISTED (--include-unlisted)" "${UNLISTED_TESTS[@]}"
+    else
+        list_unlisted_suites
+    fi
 
     TOTAL_QUICK=${#ESSENTIAL_TESTS[@]}
     TOTAL_STANDARD=$((TOTAL_QUICK + ${#CORE_TESTS[@]} + ${#EXTENDED_TESTS[@]}))
@@ -424,21 +419,31 @@ run_tier "essential" "${ESSENTIAL_TESTS[@]}" || true
 
 # --- standard: core + extended ---------------------------------------------
 if [ "$MODE" = "standard" ] || [ "$MODE" = "full" ]; then
-    release_idle_db_connections
+    between_tiers
     run_tier "core" "${CORE_TESTS[@]}" || true
-    release_idle_db_connections
+    between_tiers
     run_tier "extended" "${EXTENDED_TESTS[@]}" || true
 fi
 
 # --- full: everything else --------------------------------------------------
 if [ "$MODE" = "full" ]; then
-    release_idle_db_connections
+    between_tiers
     run_tier "security" "${SECURITY_TESTS[@]}" || true
+    between_tiers
     run_tier "integration" "${INTEGRATION_TESTS[@]}" || true
-    release_idle_db_connections
+    between_tiers
     run_tier "performance" "${PERFORMANCE_TESTS[@]}" || true
+    between_tiers
     run_tier "infrastructure" "${INFRASTRUCTURE_TESTS[@]}" || true
+    between_tiers
     run_tier "recent" "${RECENT_TESTS[@]}" || true
+fi
+
+# --- unlisted: only when asked for, always last -----------------------------
+if [ "$INCLUDE_UNLISTED" = true ]; then
+    load_unlisted
+    between_tiers
+    run_tier "unlisted" "${UNLISTED_TESTS[@]}" || true
 fi
 
 # ============================================================================

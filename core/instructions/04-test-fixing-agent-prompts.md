@@ -1,7 +1,9 @@
 # Test Fixing — Agent Prompt Library
 
 Ready-to-use delegation prompts for a systematic test-fixing session. Used
-with `{{PIPELINE_ROOT}}/core/instructions/03-e2e-test-fix-rules.md`.
+with `{{PIPELINE_ROOT}}/core/instructions/03-e2e-test-fix-rules.md`, in its
+Phase 4. Longer prompts that drive a whole session by hand are in
+`{{PIPELINE_ROOT}}/core/instructions/05-reusable-test-fixing-prompts.md`.
 
 Every template is a shape. Replace the bracketed parts with real values from
 this project and delete the lines that do not apply. A template sent with its
@@ -19,6 +21,8 @@ validates it.
 where something is documented — before forming a theory.
 
 **Agent:** `code-explorer`, or the built-in `Explore` agent for a broad sweep
+**Route to:** a fast model — the work is search, not reasoning
+**Expect back in:** 5-10 minutes
 
 ### Template — convention and schema history
 
@@ -74,6 +78,8 @@ commit history. Return a chronological summary with file references.
 **Use when** you have a specific failure and need the root cause traced.
 
 **Agent:** `support-engineer-expert`
+**Route to:** a strong reasoning model — the work is inference over indirect evidence
+**Expect back in:** 10-20 minutes
 
 ### Template — an endpoint returns the wrong thing
 
@@ -167,6 +173,9 @@ Do not edit anything. Return findings.
 exists.
 
 **Agent:** `database-validator-expert`
+**Route to:** a strong model with data-store expertise — the queries are easy, the
+conclusions are not
+**Expect back in:** 10-15 minutes
 
 ### Template — is it wired up
 
@@ -280,6 +289,10 @@ Two more, when the symptom fits:
 
 - Data is missing or wrong and nothing threw — `silent-failure-hunter`
 - The build or type-check itself is broken — `build-error-resolver`
+
+If a delegation runs far past the time above, the prompt was too broad. Narrow
+it to one question, name the files to start from, and send it again rather than
+waiting.
 
 ### The loop
 

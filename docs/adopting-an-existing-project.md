@@ -104,7 +104,7 @@ reading, because they say why each step exists and what it cost to learn.
     stale check, an unmet precondition. Of ten in one adoption, three traced to a single
     unreviewed change, four to editor timing, two to shared data, and two warranted a bug.
 19. **Promote what earned it.** `wo promote` carries the suites that produced the evidence into
-    the pack, and marks any referenced file that did not travel. `pack lint` tells you which
+    the playbook, and marks any referenced file that did not travel. `playbook lint` tells you which
     entries still have placeholder pitfalls, which are the part the next project actually needs.
 
 ## What the tool still does not do

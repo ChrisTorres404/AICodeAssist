@@ -74,10 +74,10 @@ function calculateCoverage(tests) {
 function generateBadge(coverage) {
   const rate = parseFloat(coverage.overallCoverage);
 
-  if (rate >= 95) return { text: '✅ EXCELLENT', color: 'green' };
-  if (rate >= 80) return { text: '✅ GOOD', color: 'green' };
-  if (rate >= 60) return { text: '⚠️ ACCEPTABLE', color: 'yellow' };
-  return { text: '❌ NEEDS WORK', color: 'red' };
+  if (rate >= 95) return { text: 'EXCELLENT', color: 'green' };
+  if (rate >= 80) return { text: 'GOOD', color: 'green' };
+  if (rate >= 60) return { text: 'ACCEPTABLE', color: 'yellow' };
+  return { text: 'NEEDS WORK', color: 'red' };
 }
 
 // Main execution
@@ -105,10 +105,10 @@ console.log('╔═════════════════════�
 console.log('║   Behavioral Test Coverage Report                      ║');
 console.log('╚════════════════════════════════════════════════════════╝');
 console.log('');
-console.log(`📄 File:           ${path.basename(filePath)}`);
-console.log(`📅 Analyzed:       ${new Date().toLocaleString()}`);
+console.log(`File:             ${path.basename(filePath)}`);
+console.log(`Analyzed:         ${new Date().toLocaleString()}`);
 console.log('');
-console.log('📊 Test Statistics:');
+console.log('Test statistics:');
 console.log('─────────────────────────────────────────────────────────');
 console.log(`  Total Tests:      ${coverage.total}`);
 console.log(`  Executed:         ${coverage.executed} (${coverage.executionRate}%)`);
@@ -116,17 +116,17 @@ console.log(`  Passed:           ${coverage.passed}`);
 console.log(`  Failed:           ${coverage.failed}`);
 console.log(`  Not Executed:     ${coverage.notExecuted}`);
 console.log('');
-console.log('📈 Coverage Metrics:');
+console.log('Coverage metrics:');
 console.log('─────────────────────────────────────────────────────────');
 console.log(`  Execution Rate:   ${coverage.executionRate}%`);
 console.log(`  Pass Rate:        ${coverage.passRate}% (of executed)`);
 console.log(`  Overall Coverage: ${coverage.overallCoverage}%`);
 console.log('');
-console.log(`🏆 Overall Grade:   ${badge.text}`);
+console.log(`Overall grade:    ${badge.text}`);
 console.log('');
 
 // Breakdown by status
-console.log('📋 Test Breakdown:');
+console.log('Test breakdown:');
 console.log('─────────────────────────────────────────────────────────');
 
 const passedTests = tests.filter(t => t.passed);
@@ -134,20 +134,20 @@ const failedTests = tests.filter(t => t.failed);
 const notExecutedTests = tests.filter(t => !t.executed);
 
 if (passedTests.length > 0) {
-  console.log(`  ✅ PASSED (${passedTests.length}):`);
+  console.log(`  PASSED (${passedTests.length}):`);
   passedTests.slice(0, 5).forEach(t => console.log(`     - Test ${t.id}`));
   if (passedTests.length > 5) console.log(`     ... and ${passedTests.length - 5} more`);
   console.log('');
 }
 
 if (failedTests.length > 0) {
-  console.log(`  ❌ FAILED (${failedTests.length}):`);
+  console.log(`  FAILED (${failedTests.length}):`);
   failedTests.forEach(t => console.log(`     - Test ${t.id}`));
   console.log('');
 }
 
 if (notExecutedTests.length > 0) {
-  console.log(`  📋 NOT EXECUTED (${notExecutedTests.length}):`);
+  console.log(`  NOT EXECUTED (${notExecutedTests.length}):`);
   notExecutedTests.slice(0, 5).forEach(t => console.log(`     - Test ${t.id}`));
   if (notExecutedTests.length > 5) console.log(`     ... and ${notExecutedTests.length - 5} more`);
   console.log('');
@@ -159,7 +159,7 @@ console.log('');
 // Write summary to file for CI/CD
 const summaryContent = `Behavioral Tests: ${coverage.overallCoverage}% Coverage
 Total: ${coverage.total} | Passed: ${coverage.passed} | Failed: ${coverage.failed} | Not Executed: ${coverage.notExecuted}
-Status: ${coverage.failed === 0 && coverage.executed > 0 ? '✅ ALL PASS' : coverage.failed > 0 ? '❌ FAILURES' : '⏳ PENDING'}
+Status: ${coverage.failed === 0 && coverage.executed > 0 ? 'ALL PASS' : coverage.failed > 0 ? 'FAILURES' : 'PENDING'}
 `;
 
 // One results directory for everything the harness writes; harness/lib/paths.sh
@@ -168,17 +168,17 @@ const summaryPath = process.env.COVERAGE_SUMMARY_FILE
   || path.join(process.env.TEST_RESULTS_DIR || 'results', 'coverage-summary.txt');
 fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
 fs.writeFileSync(summaryPath, summaryContent);
-console.log(`📝 Summary written to: ${summaryPath}`);
+console.log(`Summary written to: ${summaryPath}`);
 console.log('');
 
 // Exit code
 if (coverage.failed > 0) {
-  console.log('⚠️  Exit code: 1 (tests failed)');
+  console.log('Exit code: 1 (tests failed)');
   process.exit(1);
 } else if (coverage.executed === 0) {
-  console.log('⚠️  Exit code: 2 (no tests executed)');
+  console.log('Exit code: 2 (no tests executed)');
   process.exit(2);
 } else {
-  console.log('✅ Exit code: 0 (all tests passed)');
+  console.log('Exit code: 0 (all tests passed)');
   process.exit(0);
 }

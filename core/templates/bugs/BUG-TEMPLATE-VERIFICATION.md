@@ -43,7 +43,7 @@ mapping is traced from the suite's source and this section must say so.
 - Expected: [what should have happened]
 - [Where the defect was reached from — entry point, input, state]
 
-**Status:** VERIFIED — the defect was real and observable
+**Status:** [VERIFIED | NOT VERIFIED] — the defect was real and observable
 
 ---
 
@@ -52,14 +52,14 @@ mapping is traced from the suite's source and this section must say so.
 **Source:** the fix in [file or component]
 
 **Checks:**
-- Check 2.1: [The same steps, re-run against the fixed code] — PASS
-- Check 2.2: [The boundary case the fix turns on] — PASS
+- Check 2.1: [The same steps, re-run against the fixed code] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
+- Check 2.2: [The boundary case the fix turns on] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - Observed after the fix: [real output]
 - [Underlying state is now correct: what was inspected and what it showed]
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -68,14 +68,14 @@ mapping is traced from the suite's source and this section must say so.
 **Source:** `{{TESTING_DIR}}/suites/bug-XXXX-[slug].sh`
 
 **Checks:**
-- Check 3.1: [The check that fails if the defect returns] — PASS
+- Check 3.1: [The check that fails if the defect returns] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - The check was seen to fail against the unfixed code: [how that was shown]
 - It is listed in the manifest under tier `[tier]`, type `[type]`, so a
   regression run executes it
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -92,7 +92,7 @@ mapping is traced from the suite's source and this section must say so.
 
 **Remediation:** [What still has to happen]
 
-**Status:** PARTIAL — Requires follow-up
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED] — [what still needs follow-up]
 
 ---
 

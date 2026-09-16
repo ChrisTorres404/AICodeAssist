@@ -12,7 +12,7 @@
 #
 # Scanned: every *.sh and every extension-less file whose shebang names a shell,
 # under the repository root, excluding .git, node_modules, dist, __pycache__,
-# packs, and Examples_for_claude.
+# playbooks, and Examples_for_claude.
 #
 # bin/dev/dev-toggle.sh is exempt from the macOS-command rule alone: it is
 # documented at the top of the file as macOS-only and cannot be written twice.
@@ -46,7 +46,7 @@ collect() {
   LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/acp-portability.XXXXXX")"
   find "$ROOT" \
       \( -name .git -o -name node_modules -o -name dist -o -name __pycache__ \
-         -o -name packs -o -name Examples_for_claude -o -name results \) -prune \
+         -o -name playbooks -o -name Examples_for_claude -o -name results \) -prune \
       -o -type f -print 2>/dev/null |
   while IFS= read -r f; do
     case "${f#$ROOT/}" in "$SELF_REL") continue;; esac

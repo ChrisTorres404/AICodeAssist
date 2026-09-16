@@ -19,3 +19,14 @@ Execution Record and the Overall status line to the drivers, and keeps its promp
 of the template it stands in for, so the close gate's budget still means the same thing. It also
 checks the shared template says how its traceability was obtained: recorded per-check lines when the
 suite emits them, traced from the suite's source when it does not.
+
+It also refuses a template that arrives with a result already in it. An acceptance audit found
+fifteen rows across the shipped templates that ended in `— PASS`, or in `EXECUTED — PASS`, or that
+came with the checkbox already ticked — a pass no run produced. Those rows survive rendering: the
+author fills in the document around them, the close gate counts a filled row, and the work order
+closes on evidence the template typed for it. Every markdown template under `core/templates` is read
+outside its code fences, and a line that ends in a pass, or a `- [x]`, fails this evaluation with
+the file and line named. Two things are deliberately left alone: a suite template is a script, and a
+script that prints PASS at run time is printing a real result; and `- [X]` in upper case is the
+closeout templates' count placeholder — "[X] tests passing", "Coverage: [X]%" — which is a prompt,
+not a claim.

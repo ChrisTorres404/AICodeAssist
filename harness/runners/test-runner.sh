@@ -7,8 +7,17 @@
 # one tier, or hunting a flake by repeating a suite. It holds no tests of its
 # own — everything it offers is a suite file on disk, listed in the manifest.
 #
-#   ./test-runner.sh              interactive menu
-#   ./test-runner.sh --list       print the inventory and exit
+#   ./test-runner.sh                   interactive menu
+#   ./test-runner.sh --list            print the inventory and exit
+#   ./test-runner.sh --suite <file>    run one suite and keep its evidence
+#   ./test-runner.sh --suite <file> --repeat 20
+#                                      run it repeatedly, to catch a flake
+#
+# --suite takes a path relative to the suites directory, an absolute path, or a
+# suite number from --list. It is the single-file form: one run, one timestamped
+# log under TEST_RESULTS_DIR, and the suite's own exit code passed back, so it
+# can stand in a script or a CI step. (`wo verify <n> --run <file>` is the same
+# run recorded against a work order.)
 #
 # Every log it keeps goes under TEST_RESULTS_DIR — the same directory every
 # other runner writes to. See ../lib/paths.sh.
@@ -43,7 +52,10 @@ DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-API_BASE="${API_BASE:-{{API_BASE_URL}}}"
+# The rendered default lives in a variable: `${API_BASE:-{{...}}}` would
+# append the extra braces to an API_BASE that is already set.
+_default_api_base='{{API_BASE_URL}}'
+API_BASE="${API_BASE:-$_default_api_base}"
 HEALTH_PATH="${HEALTH_PATH:-/health}"
 # The health endpoint is usually at the host root (/health), not under the API
 # prefix. Try both and use the first that answers 200.
@@ -82,19 +94,10 @@ load_manifest() {
 }
 
 # Suite files present on disk but absent from the manifest — worth surfacing,
-# because an unlisted suite never runs in a regression.
+# because an unlisted suite never runs in a regression. Answered by the shared
+# resolver in ../lib/paths.sh.
 unlisted_suites() {
-  [ -d "$SUITES_DIR" ] || return 0
-  local path rel listed f
-  for path in "$SUITES_DIR"/*.sh "$SUITES_DIR"/*/*.sh; do
-    [ -f "$path" ] || continue
-    rel="${path#"$SUITES_DIR"/}"
-    listed=false
-    for f in "${SUITE_FILES[@]:-}"; do
-      [ "$f" = "$rel" ] && { listed=true; break; }
-    done
-    [ "$listed" = false ] && echo "$rel"
-  done
+  unlisted_suite_files "$MANIFEST"
 }
 
 suite_count() { echo "${#SUITE_FILES[@]}"; }
@@ -271,7 +274,8 @@ repeat_suite() {
 check_service() {
   local code
   code=$(curl -s -o /dev/null -w "%{http_code}" \
-    -A "${TEST_USER_AGENT:-harness}" "$(health_url)" 2>/dev/null || echo "000")
+    -A "${TEST_USER_AGENT:-harness}" "$(health_url)" 2>/dev/null || true)
+  code="${code:-000}"
   if [ "$code" = "200" ]; then
     echo -e "${GREEN}Service healthy${NC} at $(health_url) (HTTP $code)"
   else
@@ -298,9 +302,79 @@ coverage_report() {
 
 load_manifest
 
-if [ "${1:-}" = "--list" ]; then
-  list_suites
-  exit 0
+# --- non-interactive forms --------------------------------------------------
+# Resolve what --suite was given: a suite number from the listing, a path
+# relative to the suites directory, or a path anywhere on disk. Three lines
+# come back — file, label, and the directory the file is relative to — because
+# a function called in a command substitution cannot set a variable for its
+# caller, and the directory has to travel with the answer.
+resolve_suite() {
+  local want="$1" i dir base
+
+  case "$want" in
+    ''|*[!0-9]*) ;;
+    *)  i=$((want - 1))
+        if [ "$i" -ge 0 ] && [ "$i" -lt "$(suite_count)" ]; then
+          printf '%s\n%s\n%s' "${SUITE_FILES[$i]}" "${SUITE_LABELS[$i]}" "$SUITES_DIR"
+          return 0
+        fi
+        echo "no suite #$want in the manifest" >&2
+        return 1
+        ;;
+  esac
+
+  if [ -f "$SUITES_DIR/$want" ]; then
+    printf '%s\n%s\n%s' "$want" "$(basename "$want" .sh)" "$SUITES_DIR"
+    return 0
+  fi
+  if [ -f "$want" ]; then
+    # A suite kept outside the suites directory still runs: run_suite_file
+    # joins the file to a directory, so hand back the one it belongs to.
+    dir="$(cd "$(dirname "$want")" && pwd)"
+    base="$(basename "$want")"
+    printf '%s\n%s\n%s' "$base" "$(basename "$base" .sh)" "$dir"
+    return 0
+  fi
+  echo "no such suite: $want" >&2
+  return 1
+}
+
+SUITE_ARG=""
+REPEAT_N=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)   list_suites; exit 0;;
+    --suite)  SUITE_ARG="${2:?--suite needs a suite file or number}"; shift 2;;
+    --repeat) REPEAT_N="${2:?--repeat needs a count}"; shift 2;;
+    -h|--help) awk 'NR>1 && /^#/ {sub(/^#[ ]?/,""); print; next} NR>1 {exit}' "$0"; exit 0;;
+    *) echo "unknown argument: $1" >&2; exit 2;;
+  esac
+done
+
+if [ -n "$SUITE_ARG" ]; then
+  resolved="$(resolve_suite "$SUITE_ARG")" || exit 2
+  suite_file="$(printf '%s' "$resolved" | sed -n '1p')"
+  suite_label="$(printf '%s' "$resolved" | sed -n '2p')"
+  SUITES_DIR="$(printf '%s' "$resolved" | sed -n '3p')"
+  mkdir -p "$TEST_RESULTS_DIR"
+  if [ -n "$REPEAT_N" ]; then
+    passed=0; failed=0
+    for run in $(seq 1 "$REPEAT_N"); do
+      echo -e "${DIM}--- run $run of $REPEAT_N ---${NC}"
+      if run_suite_file "$suite_file" "$suite_label" > /dev/null 2>&1; then
+        passed=$((passed + 1)); echo -e "  ${GREEN}PASS${NC}"
+      else
+        failed=$((failed + 1)); echo -e "  ${RED}FAIL${NC}"
+      fi
+    done
+    echo ""
+    echo -e "${BOLD}$suite_label: $passed/$REPEAT_N passed${NC}"
+    [ "$failed" -gt 0 ] && echo -e "${YELLOW}Flaky or broken — a suite that does not pass every time is not evidence.${NC}"
+    [ "$failed" -eq 0 ]
+    exit $?
+  fi
+  run_suite_file "$suite_file" "$suite_label"
+  exit $?
 fi
 
 while true; do

@@ -26,13 +26,13 @@ for pair in "../wa $a" "../wb $b"; do set -- $pair
     git add -A >/dev/null; git -c user.email=e@x -c user.name=e commit -q -m "WO-$2 promoted" ) || exit 1
 done
 git merge --no-edit wa >/dev/null 2>&1 || { echo "first merge failed"; exit 1; }
-git ls-files --error-unmatch .aicodepipeline/packs/p/CATALOG.md >/dev/null 2>&1 && { echo "CATALOG.md is tracked; it is generated and must be ignored"; exit 1; }
+git ls-files --error-unmatch .aicodepipeline/playbooks/p/CATALOG.md >/dev/null 2>&1 && { echo "CATALOG.md is tracked; it is generated and must be ignored"; exit 1; }
 if ! git merge --no-edit wb >/dev/null 2>&1; then
   echo "CONFLICT merging the second parallel promotion:"; git diff --name-only --diff-filter=U | sed 's/^/    /'; git merge --abort 2>/dev/null; exit 1
 fi
-[ -f ".aicodepipeline/packs/p/catalog/WO-$a.md" ] && [ -f ".aicodepipeline/packs/p/catalog/WO-$b.md" ] || { echo "both catalog entries should survive the merge"; ls .aicodepipeline/packs/p/catalog 2>/dev/null; exit 1; }
-./.aicodepipeline/bin/pack catalog >/dev/null
-cat_txt="$(cat .aicodepipeline/packs/p/CATALOG.md)"; case "$cat_txt" in *"WO-$a"*) ;; *) echo "regenerated CATALOG.md missing WO-$a"; exit 1;; esac
+[ -f ".aicodepipeline/playbooks/p/catalog/WO-$a.md" ] && [ -f ".aicodepipeline/playbooks/p/catalog/WO-$b.md" ] || { echo "both catalog entries should survive the merge"; ls .aicodepipeline/playbooks/p/catalog 2>/dev/null; exit 1; }
+./.aicodepipeline/bin/playbook catalog >/dev/null
+cat_txt="$(cat .aicodepipeline/playbooks/p/CATALOG.md)"; case "$cat_txt" in *"WO-$a"*) ;; *) echo "regenerated CATALOG.md missing WO-$a"; exit 1;; esac
 case "$cat_txt" in *"WO-$b"*) ;; *) echo "regenerated CATALOG.md missing WO-$b"; exit 1;; esac
-out="$(./.aicodepipeline/bin/pack search "Alpha" 2>&1)"; case "$out" in *"WO-$a"*) ;; *) echo "pack search does not find the entry:"; echo "$out"; exit 1;; esac
+out="$(./.aicodepipeline/bin/playbook search "Alpha" 2>&1)"; case "$out" in *"WO-$a"*) ;; *) echo "playbook search does not find the entry:"; echo "$out"; exit 1;; esac
 exit 0

@@ -137,7 +137,7 @@ Good pattern:
 ## Integration with this pipeline
 
 - Use `readiness-check` after recovery if code was changed.
-- Use `wo promote` when the failure pattern is worth carrying into the pack catalog as a pitfall; later skill.
+- Use `wo promote` when the failure pattern is worth carrying into the playbook catalog as a pitfall; later skill.
 - Use `council` when the issue is not technical failure but decision ambiguity.
 - Use `project-onboarding` if the failure came from conflicting local state or repo drift.
 
@@ -155,5 +155,5 @@ Always provide:
 
 - Work is a work order: open it with `wo new`, size it honestly, fill the SPEC before code.
 - Verification means behavioural tests that **ran**: `wo verify <n> --run <suite>` writes the status from the exit code. `NOT EXECUTED — PLAN ONLY` is honest; a typed `PASS` is not.
-- Search the packs before building: `pack search "<problem>"`.
+- Search the playbooks before building: `playbook search "<problem>"`.
 - Route by area: `wo new --area`, `bug new --category`; the routing tables are in `core/rules/common/`.

@@ -30,10 +30,10 @@ SOFTWARE.
 
 ## Other adapted skills
 
-Each of these is credited inline in the skill it informed and was rewritten
-for this pipeline's lifecycle.
+Each of these was rewritten for this pipeline; this file is the only place the
+original is credited.
 
 - `core/skills/react-performance` — adapted from Vercel Labs `react-best-practices` (MIT, copyright Vercel Engineering), https://github.com/vercel-labs/agent-skills
 - `core/skills/postgres-patterns` — adapted from the Supabase Agent Skills (MIT), https://github.com/supabase/agent-skills
-- `core/skill-packs/ml/recsys-pipeline-architect` — adapted from https://github.com/mturac/recsys-pipeline-architect
+- `core/skill-sets/ml/recsys-pipeline-architect` — adapted from https://github.com/mturac/recsys-pipeline-architect
 - `core/skills/autonomous-loops` — describes loop patterns published by @disler, @AnandChowdhary, and @enitrat; the descriptions are original, the patterns are theirs

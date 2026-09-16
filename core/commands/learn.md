@@ -6,7 +6,7 @@ Look back over the session for anything that cost time and would cost it again: 
 
 For each, put it where it will be read next time, in this order of preference:
 
-1. **A pitfall on the work order or bug** (`wo note` / the CLOSEOUT's lessons), then `wo promote` so the pack catalog carries it.
+1. **A pitfall on the work order or bug** (`wo note` / the CLOSEOUT's lessons), then `wo promote` so the playbook catalog carries it.
 2. **A "Lessons from Production" entry** on the agent that owns the mechanism, in the installed `.claude/agents/` overlay for this project.
 3. **A hook rule** in `.claude/hook-rules/` when a pattern in a command or file should warn or block.
 4. **A rule** in `.claude/rules/` only if it is short and applies to every session.

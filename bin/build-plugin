@@ -15,7 +15,7 @@
 set -euo pipefail
 case "${1:-}" in -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0;; esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# One source of truth: the driver carries the version, the packager reads it.
+# One source of truth: the driver carries the version, the build reads it.
 VERSION="$(sed -n 's/^VERSION="\([^"]*\)".*/\1/p' "$(dirname "${BASH_SOURCE[0]}")/acp" | head -1)"
 [ -n "$VERSION" ] || { echo "build-plugin: could not read VERSION from bin/acp" >&2; exit 1; }
 [ "${1:-}" = "--version" ] && VERSION="$2"
@@ -28,7 +28,7 @@ for d in "$ROOT"/core/skills/*/; do cp -R "$d" "$OUT/skills/$(basename "$d")"; d
 cp -p "$ROOT"/core/commands/*.md "$OUT/commands/"
 cp -R "$ROOT"/core/rules/. "$OUT/rules/"
 cp -p "$ROOT"/core/workflows/*.js "$OUT/workflows/" 2>/dev/null || true
-cp -p "$ROOT"/bin/acp "$ROOT"/bin/wo "$ROOT"/bin/bug "$ROOT"/bin/pack "$ROOT"/bin/sanitize "$ROOT"/bin/detect-stack "$ROOT"/bin/stack-specialist "$OUT/bin/"
+cp -p "$ROOT"/bin/acp "$ROOT"/bin/wo "$ROOT"/bin/bug "$ROOT"/bin/playbook "$ROOT"/bin/pack "$ROOT"/bin/sanitize "$ROOT"/bin/detect-stack "$ROOT"/bin/stack-specialist "$OUT/bin/"
 mkdir -p "$OUT/hooks/scripts" "$OUT/hooks/rules"
 cp -p "$ROOT"/core/hooks/*.py "$ROOT"/core/hooks/*.sh "$OUT/hooks/scripts/"
 cp -p "$ROOT"/core/hooks/rules/*.md "$OUT/hooks/rules/"
@@ -62,10 +62,10 @@ cat > "$OUT/.claude-plugin/plugin.json" <<JSON
 {
   "name": "aicodepipeline",
   "version": "$VERSION",
-  "description": "Christian Torres's AI engineering pipeline: an evidence-gated work-order lifecycle, a bug lifecycle, packs of precedent, a behavioral test harness, 95 agents, skills, hooks with profiles, per-language rules, and a source-traced documentation lifecycle.",
+  "description": "Christian Torres's AI engineering pipeline: an evidence-gated work-order lifecycle, a bug lifecycle, playbooks of precedent, a behavioral test harness, 96 agents, skills, hooks with profiles, per-language rules, and a source-traced documentation lifecycle.",
   "author": { "name": "Christian Torres", "url": "https://github.com/ChrisTorres404" },
-  "homepage": "https://github.com/ChrisTorres404/AICodePipeline",
-  "repository": "https://github.com/ChrisTorres404/AICodePipeline",
+  "homepage": "https://github.com/ChrisTorres404/AICodeAssist",
+  "repository": "https://github.com/ChrisTorres404/AICodeAssist",
   "license": "MIT",
   "keywords": ["work-orders", "evidence", "behavioral-testing", "agents", "skills", "hooks", "rules", "methodology"],
   "userConfig": {
@@ -83,7 +83,7 @@ cat > "$OUT/.claude-plugin/marketplace.json" <<JSON
   "metadata": { "description": "AICodePipeline — evidence-gated engineering with AI agents" },
   "plugins": [ {
     "name": "aicodepipeline", "source": "./", "version": "$VERSION",
-    "description": "Work orders that close only on executed evidence, packs of precedent, a behavioral harness, 95 agents, skills, hooks, per-language rules, and source-traced documentation.",
+    "description": "Work orders that close only on executed evidence, playbooks of precedent, a behavioral harness, 96 agents, skills, hooks, per-language rules, and source-traced documentation.",
     "author": { "name": "Christian Torres" }, "license": "MIT", "category": "workflow",
     "keywords": ["work-orders", "evidence", "testing", "agents", "hooks", "rules"], "strict": false
   } ]
@@ -96,7 +96,7 @@ cat > "$OUT/README.md" <<'MD'
 Install: `claude plugin add <path-or-repo>` then `/plugin install aicodepipeline`.
 
 Work orders live in `Workspace/Docs/WorkOrders/` under the git root by default.
-Drivers: `${CLAUDE_PLUGIN_ROOT}/bin/acp` (front door), `wo`, `bug`, `pack`, `sanitize`, `detect-stack`.
+Drivers: `${CLAUDE_PLUGIN_ROOT}/bin/acp` (front door), `wo`, `bug`, `playbook`, `sanitize`, `detect-stack`.
 Hook profile: `ACP_HOOK_PROFILE=minimal|standard|strict`.
 
 Rules are not auto-installed in plugin mode; copy the sets you need from

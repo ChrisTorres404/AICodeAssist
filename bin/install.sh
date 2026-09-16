@@ -6,7 +6,7 @@
 #
 #   minimal   rules, agents, commands, the six lifecycle skills; no hooks
 #   standard  everything above plus all skills and hooks           (default)
-#   full      standard plus every domain agent pack
+#   full      standard plus every agent set and skill set
 #
 # Reads <project>/pipeline.config.sh, copies core/ and harness/ into
 # <project>/$PIPELINE_ROOT with every {{VAR}} resolved, wires the agents and
@@ -48,7 +48,7 @@ CONFIG="$TARGET/pipeline.config.sh"
 export API_BASE_URL="${API_BASE_URL:-http://localhost:3001/api/v1}" WEB_ORIGIN="${WEB_ORIGIN:-http://localhost:3000}"
 
 VARS=(PROJECT_NAME PROJECT_SLUG PROJECT_DOMAIN GITHUB_REPO PROJECT_ROOT PIPELINE_ROOT
-      WORKSPACE_DIR DOCS_DIR WORKORDERS_DIR BUGS_DIR TESTING_DIR SESSIONS_DIR
+      WORKSPACE_DIR DOCS_DIR WORKORDERS_DIR BUGS_DIR TESTING_DIR SESSIONS_DIR KNOWLEDGE_DIR
       API_APP ADMIN_APP PORTAL_APP DEV_APP WEB_APP SDK_PKG DB_NAME CLI_NAME API_BASE_URL WEB_ORIGIN
       PROJECT_DOMAIN_RE DEV_SUBDOMAINS PROD_IP)
 
@@ -114,14 +114,20 @@ mkdir -p "$DEST/core/agents/overlays"; cp -R "$RECOVERY/overlays/." "$DEST/core/
 [ -n "$(ls -A "$RECOVERY/harness-config" 2>/dev/null)" ] && { cp -R "$RECOVERY/harness-config/." "$DEST/harness/config/"; say "harness/config kept from the previous install"; }
 echo "$PROFILE" > "$DEST/.profile"
 mkdir -p "$DEST/bin"
-cp -p "$SRC/bin/acp" "$SRC/bin/wo" "$SRC/bin/bug" "$SRC/bin/pack" "$SRC/bin/sanitize" "$SRC/bin/detect-stack" "$SRC/bin/stack-specialist" "$SRC/bin/new-project" "$SRC/bin/install.sh" "$SRC/bin/build-plugin" "$SRC/bin/eval" "$SRC/bin/lint" "$DEST/bin/"
+cp -p "$SRC/bin/acp" "$SRC/bin/wo" "$SRC/bin/bug" "$SRC/bin/playbook" "$SRC/bin/pack" "$SRC/bin/sanitize" "$SRC/bin/detect-stack" "$SRC/bin/stack-specialist" "$SRC/bin/new-project" "$SRC/bin/install.sh" "$SRC/bin/build-plugin" "$SRC/bin/eval" "$SRC/bin/lint" "$DEST/bin/"
 mkdir -p "$DEST/bin/dev"
 cp -p "$SRC"/bin/dev/*.sh "$DEST/bin/dev/"
-chmod +x "$DEST"/bin/acp "$DEST"/bin/wo "$DEST"/bin/bug "$DEST"/bin/pack "$DEST"/bin/sanitize "$DEST"/bin/detect-stack "$DEST"/bin/stack-specialist "$DEST"/bin/new-project "$DEST"/bin/install.sh "$DEST"/bin/build-plugin "$DEST"/bin/eval "$DEST"/bin/lint "$DEST"/bin/dev/*.sh
-mkdir -p "$DEST/packs"
-[ -f "$DEST/packs/README.md" ] || cp "$SRC/packs/README.md" "$DEST/packs/README.md"
-[ -f "$DEST/packs/INDEX.md" ] || cp "$SRC/packs/INDEX.md" "$DEST/packs/INDEX.md"
-say "copied core/ harness/ bin/ and an empty packs/"
+chmod +x "$DEST"/bin/acp "$DEST"/bin/wo "$DEST"/bin/bug "$DEST"/bin/playbook "$DEST"/bin/pack "$DEST"/bin/sanitize "$DEST"/bin/detect-stack "$DEST"/bin/stack-specialist "$DEST"/bin/new-project "$DEST"/bin/install.sh "$DEST"/bin/build-plugin "$DEST"/bin/eval "$DEST"/bin/lint "$DEST"/bin/dev/*.sh
+# packs/ was the name before 1.4.0. An install that still has content there is
+# moved once, so promoted work keeps working under the new name.
+if [ -d "$DEST/packs" ] && [ -n "$(ls -A "$DEST/packs" 2>/dev/null)" ] && [ ! -d "$DEST/playbooks" ]; then
+  mv "$DEST/packs" "$DEST/playbooks"
+  say "moved packs/ to playbooks/ (packs/ was the old name)"
+fi
+mkdir -p "$DEST/playbooks"
+[ -f "$DEST/playbooks/README.md" ] || cp "$SRC/playbooks/README.md" "$DEST/playbooks/README.md"
+[ -f "$DEST/playbooks/INDEX.md" ] || cp "$SRC/playbooks/INDEX.md" "$DEST/playbooks/INDEX.md"
+say "copied core/ harness/ bin/ and an empty playbooks/"
 
 export "${VARS[@]}"
 # One process renders every file: the per-file, per-variable loop this replaces
@@ -186,33 +192,37 @@ if [ -d "$DEST/core/agents/overlays" ]; then
   done
 fi
 rm -f "$TARGET/.claude/agents/README.md"
-[ "$PROFILE" = "full" ] && AGENT_PACKS="$(ls "$DEST/core/agents/domain" | grep -v README | tr '\n' ' ')"
-[ "$PROFILE" = "full" ] && SKILL_PACKS="$(ls -d "$DEST"/core/skill-packs/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
-for sp in ${SKILL_PACKS:-}; do
-  [ -d "$DEST/core/skill-packs/$sp" ] || { echo "  WARNING — skill pack '$sp' not found"; continue; }
+# AGENT_PACKS and SKILL_PACKS were the names before 1.4.0 and are read when the
+# new ones are unset, so an existing pipeline.config.sh keeps working.
+AGENT_SETS="${AGENT_SETS:-${AGENT_PACKS:-}}"
+SKILL_SETS="${SKILL_SETS:-${SKILL_PACKS:-}}"
+[ "$PROFILE" = "full" ] && AGENT_SETS="$(ls "$DEST/core/agents/sets" | grep -v README | tr '\n' ' ')"
+[ "$PROFILE" = "full" ] && SKILL_SETS="$(ls -d "$DEST"/core/skill-sets/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+for sp in ${SKILL_SETS:-}; do
+  [ -d "$DEST/core/skill-sets/$sp" ] || { echo "  WARNING — skill set '$sp' not found"; continue; }
   mkdir -p "$TARGET/.claude/skills"
-  for d in "$DEST/core/skill-packs/$sp"/*/; do
+  for d in "$DEST/core/skill-sets/$sp"/*/; do
     [ -f "$d/SKILL.md" ] || continue
     rm -rf "$TARGET/.claude/skills/$(basename "$d")"; cp -R "$d" "$TARGET/.claude/skills/$(basename "$d")"
   done
-  say "skill pack '$sp' installed"
+  say "skill set '$sp' installed"
 done
-python3 - "$TARGET/.claude/agents" "$DEST/core/agents/domain" "${AGENT_PACKS:-}" <<'PYEOF'
+python3 - "$TARGET/.claude/agents" "$DEST/core/agents/sets" "${AGENT_SETS:-}" <<'PYEOF'
 import os, sys
-installed, domain, selected = sys.argv[1:4]
+installed, sets_dir, selected = sys.argv[1:4]
 sel = set(selected.split()); removed = 0
-if os.path.isdir(domain) and os.path.isdir(installed):
-    for pk in os.listdir(domain):
-        d = os.path.join(domain, pk)
+if os.path.isdir(sets_dir) and os.path.isdir(installed):
+    for pk in os.listdir(sets_dir):
+        d = os.path.join(sets_dir, pk)
         if not os.path.isdir(d) or pk in sel: continue
         for f in os.listdir(d):
             if f.endswith(".md") and f != "README.md" and os.path.exists(os.path.join(installed, f)):
                 os.remove(os.path.join(installed, f)); removed += 1
-if removed: print(f"  reconciled: {removed} domain agent(s) from packs not selected removed")
+if removed: print(f"  reconciled: {removed} agent(s) from sets not selected removed")
 PYEOF
-for ap in ${AGENT_PACKS:-}; do
-  if [ -d "$DEST/core/agents/domain/$ap" ]; then cp -p "$DEST"/core/agents/domain/"$ap"/*.md "$TARGET/.claude/agents/"; say "agent pack installed: $ap"
-  else echo "  WARNING: no agent pack named '$ap' (available: $(ls "$DEST/core/agents/domain" | grep -v README | tr '\n' ' '))" >&2; fi
+for ap in ${AGENT_SETS:-}; do
+  if [ -d "$DEST/core/agents/sets/$ap" ]; then cp -p "$DEST"/core/agents/sets/"$ap"/*.md "$TARGET/.claude/agents/"; say "agent set installed: $ap"
+  else echo "  WARNING: no agent set named '$ap' (available: $(ls "$DEST/core/agents/sets" | grep -v README | tr '\n' ' '))" >&2; fi
 done
 
 # Workflows — executable review pipeline, discoverable by name
@@ -224,7 +234,7 @@ cp -p "$DEST"/core/commands/*.md "$TARGET/.claude/commands/"
 
 # Skills — the methodology, loaded on demand rather than hoped-for
 mkdir -p "$TARGET/.claude/skills"
-LIFECYCLE="work-order bug-triage behavioral-testing session-handoff pack-search project-onboarding"
+LIFECYCLE="work-order bug-triage behavioral-testing session-handoff playbook-search project-onboarding"
 for d in "$DEST"/core/skills/*/; do
   [ -d "$d" ] || continue
   n="$(basename "$d")"
@@ -234,19 +244,19 @@ for d in "$DEST"/core/skills/*/; do
 done
 # Reconcile: anything pipeline-owned that this profile does not select is removed;
 # the user's own skills and agents (names the pipeline does not ship) are never touched.
-python3 - "$TARGET/.claude/skills" "$DEST/core/skills" "$DEST/core/skill-packs" "$PROFILE" "${SKILL_PACKS:-}" "$LIFECYCLE" <<'PYEOF'
+python3 - "$TARGET/.claude/skills" "$DEST/core/skills" "$DEST/core/skill-sets" "$PROFILE" "${SKILL_SETS:-}" "$LIFECYCLE" <<'PYEOF'
 import os, shutil, sys
-installed, core, packs, profile, selected_packs, lifecycle = sys.argv[1:7]
+installed, core, sets_dir, profile, selected_sets, lifecycle = sys.argv[1:7]
 owned = set(os.listdir(core)) if os.path.isdir(core) else set()
-pack_skills = {}
-if os.path.isdir(packs):
-    for pk in os.listdir(packs):
-        d = os.path.join(packs, pk)
-        if os.path.isdir(d): pack_skills[pk] = set(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)))
-for ss in pack_skills.values(): owned |= ss
+set_skills = {}
+if os.path.isdir(sets_dir):
+    for pk in os.listdir(sets_dir):
+        d = os.path.join(sets_dir, pk)
+        if os.path.isdir(d): set_skills[pk] = set(x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x)))
+for ss in set_skills.values(): owned |= ss
 if profile == "minimal": selected = set(lifecycle.split())
 else: selected = set(x for x in owned if x in os.listdir(core)) if os.path.isdir(core) else set()
-for pk in selected_packs.split(): selected |= pack_skills.get(pk, set())
+for pk in selected_sets.split(): selected |= set_skills.get(pk, set())
 removed = 0
 if os.path.isdir(installed):
     for name in os.listdir(installed):
@@ -334,12 +344,14 @@ if (cd "$TARGET" && git rev-parse --git-dir >/dev/null 2>&1); then
   SHARED=0
   if [ "$(cd "$TARGET" && git rev-parse --git-dir 2>/dev/null)" != "$(cd "$TARGET" && git rev-parse --git-common-dir 2>/dev/null)" ]; then SHARED=1; fi
   PREC="$(dirname "$CMSG")/pre-commit"
+  PPUSH="$(dirname "$CMSG")/pre-push"
   if [ "$PROFILE" = minimal ]; then
     # minimal means no hooks, and that has to include these. Only ours are removed.
     if [ -f "$CMSG" ] && grep -q 'acp:commit-msg:wo-reference' "$CMSG" 2>/dev/null; then
       rm -f "$CMSG"; say "commit-msg: pipeline hook removed (minimal profile installs no hooks)"
     else say "commit-msg: none installed (minimal profile)"; fi
     if [ -f "$PREC" ] && grep -q 'acp:pre-commit:check' "$PREC" 2>/dev/null; then rm -f "$PREC"; say "pre-commit: pipeline hook removed (minimal profile)"; fi
+    if [ -f "$PPUSH" ] && grep -q 'acp:pre-push:protect' "$PPUSH" 2>/dev/null; then rm -f "$PPUSH"; say "pre-push: pipeline hook removed (minimal profile)"; fi
   elif [ -f "$CMSG" ] && ! grep -q 'acp:commit-msg:wo-reference' "$CMSG" 2>/dev/null; then
     say "commit-msg: left your existing hook alone; to add the traceability check, call"
     say "            \"\$(git rev-parse --show-toplevel)/$REL_DEST/core/hooks/wo-reference.py\" \"\$@\" from it"
@@ -373,6 +385,24 @@ exec "\$acp" check --staged
 PRECEOF
       chmod +x "$PREC"
       say "pre-commit: the rules run on every commit (${PREC#"$TARGET"/})"
+    fi
+    # Shared history at push time, under any agent. The markdown hook rule that
+    # blocks `git push --force` reads the text of a tool call, so it only fires
+    # inside Claude Code; git runs this whoever is pushing.
+    if [ -f "$PPUSH" ] && ! grep -q 'acp:pre-push:protect' "$PPUSH" 2>/dev/null; then
+      say "pre-push: left your existing hook alone; to add the shared-branch protection, call"
+      say "          \"\$(git rev-parse --show-toplevel)/$REL_DEST/core/hooks/pre-push.sh\" \"\$@\" from it"
+      say "          (it reads the ref lines git puts on stdin, so pass those through too)"
+    else
+      cat > "$PPUSH" <<PPUSHEOF
+#!/usr/bin/env sh
+# acp:pre-push:protect — installed by AICodePipeline, safe to delete
+hook="\$(git rev-parse --show-toplevel 2>/dev/null)/$REL_DEST/core/hooks/pre-push.sh"
+[ -x "\$hook" ] || exit 0
+exec "\$hook" "\$@"
+PPUSHEOF
+      chmod +x "$PPUSH"
+      say "pre-push: a force push or deletion of a shared branch is refused (${PPUSH#"$TARGET"/})"
     fi
   fi
 else

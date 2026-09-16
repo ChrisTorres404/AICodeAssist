@@ -1,6 +1,6 @@
 ---
 name: release-sanitizer
-description: Independent auditor that verifies a directory is safe to share before it leaves the machine. Scans for secrets, personal identifiers, internal infrastructure, host-specific paths, and dangerous files, and produces a PASS/FAIL report. Use PROACTIVELY before publishing a pack, open-sourcing a repository, or handing any code or documentation to someone outside the project.
+description: Independent auditor that verifies a directory is safe to share before it leaves the machine. Scans for secrets, personal identifiers, internal infrastructure, host-specific paths, and dangerous files, and produces a PASS/FAIL report. Use PROACTIVELY before publishing a playbook, open-sourcing a repository, or handing any code or documentation to someone outside the project.
 model: sonnet
 tools: Read, Grep, Glob, Bash
 ---

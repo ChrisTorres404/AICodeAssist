@@ -73,7 +73,8 @@ for n in $(seq 1 "$COUNT"); do
     '{($ef): $e, ($pf): $p} + $extra')
 
   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API_BASE}${AUTH_REGISTER_PATH}" \
-    -H "Content-Type: application/json" -A "$UA" -d "$body" || echo "000")
+    -H "Content-Type: application/json" -A "$UA" -d "$body" || true)
+  code="${code:-000}"
 
   case "$code" in
     2*)   registered=$((registered + 1));;

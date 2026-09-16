@@ -18,6 +18,13 @@ bad() { fail=$((fail + 1)); printf '  FAIL %s — %s\n' "$1" "$2"; }
 
 pipeline_root="${PIPELINE_ROOT:-.aicodepipeline}"
 bl="$root/${TESTING_DIR:-Workspace/Testing}/results/BASELINE.md"
+
+# A brand new project has nothing here yet. That is not a failure of the project;
+# this step becomes real when there is something to run, and says so until then.
+if "$root/$pipeline_root/bin/detect-stack" "$root" --json 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("empty") else 1)' 2>/dev/null; then
+  ok "nothing to measure yet: the tree has no source files; this step counts again once there is"
+  echo "== $pass passed, $fail failed"; exit 0
+fi
 wo_bin="$root/$pipeline_root/bin/wo"
 fix="run  acp baseline  (or  acp baseline --command '<your test command>'  when the tool cannot find one)"
 

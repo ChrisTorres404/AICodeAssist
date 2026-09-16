@@ -1,9 +1,107 @@
 # Changelog
 
-### 1.3.0 — intake, and a knowledge base that stays true
+### 1.4.0
 
-Installation is not done when the files are in place; it is done when the
-project has been measured and described. Both are now work orders.
+- `packs/` is now `playbooks/` and `bin/pack` is `bin/playbook`; skill packs
+  are skill sets (`SKILL_SETS`, `--skill-set`) and agent packs are agent sets
+  (`AGENT_SETS`, `--agent-set`); the old names are still accepted and install
+  migrates an existing `packs/` directory
+- the knowledge base has levels, set at install with `KNOWLEDGE_LEVEL` or
+  `new-project --kb-level`. `acp kb scaffold` builds the `lite` level from the
+  source tree: an analysis, one profile per feature with every citation
+  resolving to a file and line, the status matrix, and the bound source index.
+  Re-running it adds new features, marks vanished ones orphaned, and never
+  overwrites narrative someone wrote. `standard` requires the narrative
+  written and `full` requires it validated; `acp kb status` exits 4 and lists
+  the profiles short of the level (`kb-levels`)
+- intake runs the scaffold, so the knowledge-base step passes on a fresh
+  install; `wo close` runs it in grow mode so a new feature gets a profile stub
+  when the work order that added it closes
+- on a project with no source yet, the baseline, suites, and knowledge-base
+  intake steps pass with a note; `detect-stack` reports an empty tree
+  (`intake-work-orders`)
+- `acp check` runs three rules that were only session hooks: UI drift,
+  formatting (report only, never writes), and type errors with `--types` or
+  `ACP_CHECK_TYPES=1`. Strict is `--strict`, `ACP_STRICT=1`, or
+  `ACP_HOOK_PROFILE=strict`, so a strict project is strict at commit time too
+  (`parity-without-claude`)
+- install writes a git `pre-push` hook that refuses a force push to, or
+  deletion of, `main`, `master`, `develop`, `production`, or `release/*`;
+  `ACP_ALLOW_FORCE_PUSH=1` overrides; the minimal profile installs none;
+  doctor reports it
+- `acp commands`, `acp command <name>`, `acp skills`, and `acp skill <name>`
+  print the slash commands and skills as text; `AGENTS.md` has a section on
+  working under any agent (`reach-without-claude`)
+- README: a table of every rule and where it runs under Claude Code and under
+  any other agent
+- doctor reports a knowledge base short of its level and the pre-push hook
+- agent definitions restored to the full source versions, checked section by
+  section: activation triggers on 34 agents, 54 agents extended with the
+  sections that had been dropped, `scalar-expert` added. The two identity SDK
+  agents use the configured placeholders instead of fixed paths
+- the work-order comment standard is the header block from the source
+  (`WO-####`, `DATE`, `WHAT`, `WHY`, `DATA`, `IMPACT`), with a one-line form
+  for small files and a dated tag for changed regions; the validators accept
+  the three forms and nothing else. Two validators regained checklist items
+  that had been dropped (strict mode, typed functions and props, constrained
+  generics, import order, migration error handling)
+- methodology documents restored to the full source versions, section by
+  section, code blocks and worked examples included, and extended where the
+  product had added something:
+  `MANDATORY-TESTING-METHODOLOGY.md` (behavioural tests against the running
+  system instead of end-to-end tests with mocks, the four phases, evidence
+  requirements, both CI recipes, the state-only verification mode, and one
+  status vocabulary: PASS, FAIL, PLAN ONLY, PRECONDITION FAILED, RUNNING),
+  `MANDATORY-WO-METHODOLOGY.md` (folder rules, workflow, finding work orders,
+  the series rule, the code comment standard, the size policy stated
+  plainly), `PROJECT-RULES.md` (implementation order, code quality checklists,
+  component extraction, import rules, forbidden database operations)
+- new methodology documents: `SYSTEMATIC-TEST-FIXING-METHODOLOGY.md`,
+  `AGENT-OUTPUT-STANDARDS.md`, `DATABASE-GOLD-STANDARD-METHODOLOGY.md`,
+  `TEST-INVENTORY-AND-GAP-ANALYSIS.md`, and `core/methodology/README.md` as
+  the index
+- `core/instructions/` completed: `00-test-fixing-quick-start.md`,
+  `01-create-work-orders.md`, `02-next-session-rules.md`,
+  `05-reusable-test-fixing-prompts.md` added; `03`, `04`, and the README
+  restored to their full form with every command and worked example
+- `core/rules/ui/`: the 100-line extraction trigger is a mandatory checklist
+  row again beside the hard limits (page 150, component 200, modal 50, form
+  80, table 100); structure rules gain the read-first and examples sections;
+  `coding-style.md` and `work-orders.md` gain the import and folder rules
+- templates: `WO-TEMPLATE-MASTER.md` (the full work-order template in one
+  document); File(s), Assignee, and Evidence columns; the four-row
+  behavioural testing phase; manual verification scenarios and the closure
+  checklist; bug and testing READMEs index every file; bug number ranges have
+  upper bounds; `NEXT-SESSION-TEMPLATE.md`; `DESIGN-SYSTEM-INSTRUCTIONS.md`
+  and `DESIGN-SYSTEM-MIGRATION-GUIDE.md` as fill-in templates
+- `core/templates/reference/`: incident postmortem, QA smoke test, port
+  allocation standard, database normalization audit, test accounts registry,
+  and documentation index templates
+- seven skills added or extended from the source guides: `react-patterns`,
+  `nextjs-patterns`, `nestjs-patterns`, `sdk-standards`, `database-seeding`
+  (with a reference seeder implementation), `project-setup`,
+  `typeorm-patterns`, `database-backup` (with `backup.sh`),
+  `guard-application-order`
+- `docs/patterns/`: behavioural suites in CI with a results dashboard, and
+  the rationale for the four-layer validation design
+- harness: `harness/lib/test-env.sh` holds the shared environment functions
+  (health check, pool release and recovery, cache flush, known-state reset);
+  `test-helpers.sh` gains the 32 helpers the source suites use (CSRF,
+  register, login, refresh with rotation, logout, authenticated requests,
+  lockout, response parsing, assertions, `test_start`/`test_pass`/
+  `print_summary`), every endpoint and header name configurable in
+  `test-config.env`; the runner recovers the connection pool and resets state
+  between every tier; `--stop-fail` stops the run; `test-runner.sh --suite`
+  runs one suite with timestamped evidence; `run-behavioral-tests.sh` accepts
+  the runner's flags and keeps full per-check evidence;
+  `harness/runners/test-cli.sh` is the interactive CLI
+- `bin/sanitize` accepts more than one directory
+- `KNOWLEDGE_DIR` is rendered at install like the other directory variables
+
+### 1.3.0
+
+Install now opens six intake work orders, and the knowledge base is built from the
+project's own code.
 
 - `acp install` and `new-project` open six intake work orders, each with a
   shipped spec that is complete prose and a shipped suite that proves the step:
@@ -31,12 +129,12 @@ project has been measured and described. Both are now work orders.
 - the knowledge directory is excluded from the evidence fingerprint, so
   describing the code does not stale evidence about it
 
-### 1.2.0 — enforcement that does not depend on the agent
+### 1.2.0
 
-A paired trial under Codex showed the fifteen session hooks, ninety-five agents and
-one hundred sixty-two skills all inert, while the drivers, the templates and the one
-git hook did the work. So the rules now live where every tool can reach them, and
-the Claude Code layer is the early warning rather than the enforcement:
+Under a coding agent other than Claude Code, the session hooks, agents, and skills were
+not used; the drivers, templates, and git hook did the work. The rules now run in places
+every tool reaches, and the Claude Code hooks are an early warning rather than the
+enforcement:
 
 - `acp check` runs the rule set over the staged changes, changes since a ref, an
   explicit list of paths, or what a work order has changed since it opened; it
@@ -51,7 +149,7 @@ the Claude Code layer is the early warning rather than the enforcement:
   runs it on every pull request
 - standard and large work orders refuse to close without a filled-in review by
   someone who did not implement them; `WO-####-REVIEW.md` is scaffolded at
-  `wo new`, and `ACP_SKIP_REVIEW=1` says so out loud (`review-required`)
+  `wo new`; `ACP_SKIP_REVIEW=1` overrides with a warning (`review-required`)
 - the routed specialists are written into the work order's own prompt with the
   path to each definition, so whatever tool does the work reads them; `acp agent`
   and `acp agents --area` reach the catalog from a shell
@@ -61,11 +159,11 @@ the Claude Code layer is the early warning rather than the enforcement:
   (`instructions-for-every-tool`)
 - `wo new --paths` binds a work order's evidence to part of a monorepo
   (`wo-paths-scope`)
-- a project with no git gets the exact command that turns the backstop on, from
-  install and from doctor. The work-order tier holds without it
+- a project with no git repository is given the command to create one, by install
+  and by doctor. The work-order checks run without it
 
-Found by adopting the pipeline into a mature monorepo and migrating its record,
-twenty-nine findings; the defects each have a regression evaluation:
+Fixes from installing the pipeline into an existing monorepo and migrating its record.
+Each defect has a regression evaluation:
 
 - the fingerprint binds to file content whether or not git tracks the file yet, so
   committing between verify and close no longer stales the evidence; the suite that
@@ -101,23 +199,21 @@ twenty-nine findings; the defects each have a regression evaluation:
 - the drivers resolve their roots physically, so a project under a symlinked
   path fingerprints the same tree from every entry point
 
-### 1.1.4 — first public release
+### 1.1.4
 
 The 1.1.3 tree, prepared for a public repository:
 
-- the README is written for someone who has never seen the pipeline: the problem,
-  what you get, five minutes to a first work order, a day with it, what it will
-  not do, and the evidence so far, with the reference material after
+- README rewritten for first-time readers
 - inline references to other projects removed from three skills and agents; the
   notices file is the one place another project is named
 - an example key in the release-sanitizer agent's teaching table rewritten so it
   no longer matches a real credential's shape
 - release assets: a source archive and the Claude Code plugin, with checksums
 
-### 1.1.3 — the installed project as a test target
+### 1.1.3
 
-Findings from a blind recovery run on a mature codebase and two rounds of
-independent review, each with a regression evaluation under `harness/evals/`:
+Fixes from a recovery run on an existing codebase and two rounds of independent
+review, each with a regression evaluation under `harness/evals/`:
 
 - **Upgrading: re-run `acp install <project>` in each project you maintain.**
   It is the only migration path. It replaces the pipeline's own hooks by their
@@ -131,7 +227,7 @@ independent review, each with a regression evaluation under `harness/evals/`:
   get the same guarantee, as the README shows
 - `new-project` initialises the repository before installing, so scaffolded
   projects get the hook; previously there was no repository to wire it into
-- an installed copy self-tests honestly: evaluations needing source-repository
+- in an installed copy, evaluations needing source-repository
   fixtures skip with a reason instead of failing, and two checks that scanned
   directories an install does not ship were scoping their scan wrong
 - `acp doctor` opens, verifies and closes a throwaway work order in the layout
@@ -146,8 +242,7 @@ independent review, each with a regression evaluation under `harness/evals/`:
 - the database-URL rule keys its exemption off the password rather than the
   username, so documentation examples stop reading as critical findings
 
-Found by an adversarial review of the commit above, 23 scenarios against a
-frozen build:
+Fixes from an independent review of 23 scenarios against a frozen build:
 
 - work-order and bug identities are reserved atomically, so simultaneous
   creators no longer all receive the same number, and a number carried by two
@@ -162,8 +257,7 @@ frozen build:
   for suites that write into the tree by design
 - the git hook is installed where git actually looks: a linked worktree keeps
   its hooks in the shared directory, and `core.hooksPath` moves them again
-  (`worktree-hook`). doctor reports a hook that is present but not executable as
-  the inactive thing it is
+  (`worktree-hook`). doctor reports a hook that is present but not executable
 - the traceability hook reads the authored message as written, comment lines
   included, because `--cleanup=verbatim` records them and the hook cannot see
   the command line that chose it
@@ -176,10 +270,10 @@ frozen build:
 - a bounded command is killed with its whole process group, so a timeout no
   longer returns while the work it started carries on
 
-### 1.1.2 — parallel-work fixes
+### 1.1.2
 
-Found by building a four-module app with four agents working simultaneously in
-separate worktrees:
+Fixes from building a four-module application with four agents working at the same
+time in separate worktrees:
 
 - `wo promote` and `bug promote` write one catalog entry file per item under
   `packs/<name>/catalog/`; `pack catalog` assembles `CATALOG.md` from them and
@@ -191,7 +285,7 @@ separate worktrees:
   (`suite-self-starting`)
 - the documentation hook ignores template placeholder SOURCE paths
 
-### 1.1.1 — round-two audit fixes
+### 1.1.1
 
 Findings from an independent consumer audit of 1.1.0, each with a regression
 evaluation under `harness/evals/`:
@@ -324,13 +418,12 @@ held to the same evidence discipline as building it.
 
 ### First-run fixes
 
-Found by installing a clean copy and using it as a first-time developer would.
+Fixes from installing a clean copy and using it for the first time.
 
 - `install.sh` refuses to install the installed copy over itself and re-runs
   from the source it recorded; copy failures abort instead of half-installing.
 - Verification and bug closeout templates ship no pre-filled PASS rows,
-  approvals, or deployment claims — fabricated evidence is the thing this
-  pipeline exists to prevent.
+  approvals, or deployment claims.
 - `acp doctor` is profile-aware, understands plugin mode, and checks only the
   pipeline's own template variables.
 - The test framework no longer sets `-e` at library scope, works without a TTY,

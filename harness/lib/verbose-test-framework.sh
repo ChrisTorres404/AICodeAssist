@@ -8,6 +8,20 @@
 # - Complete responses
 # - SQL queries and results
 # - Why each test passed or failed
+#
+# What it defines is the transcript: the log_* functions, the suite banners,
+# and the assertions whose value is the before/after they print. Everything it
+# shares with test-helpers.sh and test-framework.sh — section_header, the HTTP
+# verbs, run_sql, auth_body, random_email, create_test_user, delete_test_user,
+# assert_http_status, assert_json_equals, assert_sql_equals — comes from
+# test-common.sh, and db_configured and reset_test_environment from
+# test-env.sh. Nothing here redefines any of them.
+#
+# That rule was written by this file. It once carried its own
+# reset_test_environment which called redis-cli directly and never read
+# CACHE_FLUSH_CMD, so a project whose limiter is not Redis had a known-state
+# step that silently did nothing — and which of the two bodies a suite got
+# depended only on the order it sourced the libraries in.
 # ============================================================================
 
 # ============================================================================
@@ -17,10 +31,15 @@
 # Auto-source test-config.env if available (provides correct per-environment defaults)
 _FRAMEWORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _TEST_CONFIG="$_FRAMEWORK_DIR/../config/test-config.env"
-if [ -f "$_TEST_CONFIG" ] && [ -z "$_TEST_CONFIG_LOADED" ]; then
+if [ -f "$_TEST_CONFIG" ] && [ -z "${_TEST_CONFIG_LOADED:-}" ]; then
   source "$_TEST_CONFIG"
   export _TEST_CONFIG_LOADED=1
 fi
+
+# The shared definitions, and through them test-env.sh. Sourced before this
+# file's own defaults so an exported value still wins over both.
+# shellcheck source=./test-common.sh
+. "$_FRAMEWORK_DIR/test-common.sh"
 
 # API Configuration — test-config.env supplies these; the fallbacks keep the
 # framework usable when sourced on its own.
@@ -86,15 +105,9 @@ export TEST_START_TIME=""
 # LOGGING FUNCTIONS
 # ============================================================================
 
-# Print a section header
-section_header() {
-  local title="$1"
-  echo ""
-  echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════════════════╗${NC}"
-  printf "${BOLD}${CYAN}║${NC} %-70s ${BOLD}${CYAN}║${NC}\n" "$title"
-  echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════════════════╝${NC}"
-  echo ""
-}
+# section_header comes from test-common.sh: a titled rule rather than the box
+# this file drew, because a box is drawn to a fixed width and a longer title
+# broke the frame. subsection_header below is unchanged.
 
 # Print a subsection header
 subsection_header() {
@@ -277,140 +290,25 @@ log_debug() {
 # HTTP REQUEST FUNCTIONS
 # ============================================================================
 
-# Make HTTP request and capture full details
-# Usage: http_request METHOD URL [BODY] [EXTRA_HEADERS...]
-# Returns: Sets HTTP_CODE, HTTP_BODY, HTTP_HEADERS, HTTP_DURATION
-http_request() {
-  local method="$1"
-  local url="$2"
-  local body="$3"
-  shift 3
-  local extra_headers=("$@")
-
-  # Build curl command
-  local curl_cmd="curl -s -w '\n---HTTP_META---\nHTTP_CODE:%{http_code}\nTIME_TOTAL:%{time_total}\nTIME_CONNECT:%{time_connect}\n'"
-  curl_cmd="$curl_cmd -X $method"
-  curl_cmd="$curl_cmd -H 'Content-Type: application/json'"
-  curl_cmd="$curl_cmd -H 'Accept: application/json'"
-
-  # Add extra headers
-  for header in "${extra_headers[@]}"; do
-    curl_cmd="$curl_cmd -H '$header'"
-  done
-
-  # Add body if present
-  if [ -n "$body" ]; then
-    curl_cmd="$curl_cmd -d '$body'"
-  fi
-
-  curl_cmd="$curl_cmd '$url'"
-
-  # Log the command
-  log_command "$curl_cmd"
-
-  # Execute request
-  local start_time=$(date +%s)
-  local response
-
-  # Build header args array — a browser User-Agent always, plus an Origin
-  # header, which CSRF guards commonly require on state-changing requests.
-  local -a header_args=(-H "Content-Type: application/json" -H "Accept: application/json" -A "$TEST_USER_AGENT")
-
-  # Check if caller already provides an Origin header
-  local has_origin=false
-  for header in "${extra_headers[@]}"; do
-    [[ "$header" == Origin:* ]] && has_origin=true
-  done
-
-  if [ "$has_origin" = "false" ] && [ -n "${ORIGIN:-}" ]; then
-    header_args+=(-H "Origin: $ORIGIN")
-  fi
-
-  for header in "${extra_headers[@]}"; do
-    [ -n "$header" ] && header_args+=(-H "$header")
-  done
-
-  if [ -n "$body" ]; then
-    response=$(curl -s -w '\n---HTTP_META---\nHTTP_CODE:%{http_code}\nTIME_TOTAL:%{time_total}\n' \
-      -X "$method" \
-      "${header_args[@]}" \
-      -d "$body" \
-      "$url" 2>&1)
-  else
-    response=$(curl -s -w '\n---HTTP_META---\nHTTP_CODE:%{http_code}\nTIME_TOTAL:%{time_total}\n' \
-      -X "$method" \
-      "${header_args[@]}" \
-      "$url" 2>&1)
-  fi
-
-  local end_time=$(date +%s)
-
-  # Parse response
-  HTTP_BODY=$(echo "$response" | sed '/---HTTP_META---/,$d')
-  HTTP_CODE=$(echo "$response" | grep "HTTP_CODE:" | cut -d: -f2)
-  HTTP_DURATION=$((end_time - start_time))
-
-  # Log request and response
-  log_request "$method" "$url" "" "$body"
-  log_response "$HTTP_CODE" "$HTTP_BODY" "$HTTP_DURATION"
-}
-
-# Convenience wrappers
-http_get() {
-  http_request "GET" "$@"
-}
-
-http_post() {
-  http_request "POST" "$@"
-}
-
-http_put() {
-  http_request "PUT" "$@"
-}
-
-http_patch() {
-  http_request "PATCH" "$@"
-}
-
-http_delete() {
-  http_request "DELETE" "$@"
-}
+# http_request and the per-verb wrappers http_get, http_post, http_put,
+# http_patch and http_delete come from test-common.sh. They behave exactly as
+# they did here — HTTP_CODE, HTTP_BODY and HTTP_DURATION, a browser
+# User-Agent, an Origin header unless the caller sends one — and call the
+# log_command, log_request and log_response above when this file is loaded, so
+# the transcript is the same. Two things they no longer do wrong: a GET with no
+# body argument no longer trips `set -u`, and an empty header list no longer
+# trips it on bash 3.2.
 
 # ============================================================================
 # DATABASE FUNCTIONS
 # ============================================================================
 
-# Execute SQL query
-# Usage: run_sql "SELECT * FROM table"
-# Returns: Sets SQL_RESULT, SQL_ROW_COUNT
-db_configured() {
-  [ -n "${DB_NAME:-}" ] && command -v psql > /dev/null 2>&1
-}
-
-run_sql() {
-  local query="$1"
-
-  if ! db_configured; then
-    log_warn "no database configured (set DB_NAME) — skipping query"
-    SQL_RESULT=""; SQL_ROW_COUNT=0
-    return 1
-  fi
-
-  log_sql "$query"
-
-  SQL_RESULT=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "$query" 2>&1)
-  local exit_code=$?
-
-  if [ $exit_code -eq 0 ]; then
-    SQL_ROW_COUNT=$(echo "$SQL_RESULT" | grep -c "^" || echo "0")
-    log_sql_result "$SQL_RESULT" "$SQL_ROW_COUNT"
-  else
-    log_sql_result "ERROR: $SQL_RESULT" "0"
-    SQL_ROW_COUNT=0
-  fi
-
-  return $exit_code
-}
+# db_configured comes from test-env.sh and run_sql from test-common.sh. run_sql
+# still sets SQL_RESULT and SQL_ROW_COUNT and still calls log_sql and
+# log_sql_result above; it sends that transcript to stderr and the bare result
+# to stdout, so a captured query — count=$(run_sql "select count(*) ...") —
+# reads the value and not the transcript. SQL_ROW_COUNT is 0 for an empty
+# result now, where it used to count the empty line as a row.
 
 # Execute SQL and return single value
 sql_value() {
@@ -430,23 +328,9 @@ sql_count() {
 # ASSERTION FUNCTIONS
 # ============================================================================
 
-# Assert HTTP status code
-# Usage: assert_http_status 200
-assert_http_status() {
-  local expected="$1"
-  local message="${2:-HTTP status should be $expected}"
-
-  log_validation "Checking HTTP status code"
-  log_comparison "$expected" "$HTTP_CODE"
-
-  if [ "$HTTP_CODE" = "$expected" ]; then
-    log_pass "$message"
-    return 0
-  else
-    log_fail "Expected HTTP $expected, got $HTTP_CODE"
-    return 1
-  fi
-}
+# assert_http_status comes from test-common.sh and still answers this file's
+# call shape — assert_http_status 200 ["message"], against the last request —
+# as well as test-helpers.sh's, which makes the request itself.
 
 # Assert response contains JSON field
 # Usage: assert_json_field "user.id" "should have user ID"
@@ -468,26 +352,9 @@ assert_json_field() {
   fi
 }
 
-# Assert response JSON field equals value
-# Usage: assert_json_equals "status" "active" "Status should be active"
-assert_json_equals() {
-  local field="$1"
-  local expected="$2"
-  local message="${3:-$field should equal $expected}"
-
-  local actual=$(echo "$HTTP_BODY" | jq -r ".$field" 2>/dev/null)
-
-  log_validation "Checking $field equals expected value"
-  log_comparison "$expected" "$actual"
-
-  if [ "$actual" = "$expected" ]; then
-    log_pass "$message"
-    return 0
-  else
-    log_fail "Expected $field='$expected', got '$actual'"
-    return 1
-  fi
-}
+# assert_json_equals comes from test-common.sh and still answers this file's
+# call shape — assert_json_equals field expected ["message"], against the last
+# response — as well as test-helpers.sh's explicit-response one.
 
 # Assert response contains string
 # Usage: assert_response_contains "success" "Should indicate success"
@@ -506,27 +373,9 @@ assert_response_contains() {
   fi
 }
 
-# Assert SQL returns expected value
-# Usage: assert_sql_equals "SELECT count FROM table" "5" "Should have 5 rows"
-assert_sql_equals() {
-  local query="$1"
-  local expected="$2"
-  local message="${3:-SQL result should equal $expected}"
-
-  run_sql "$query"
-  local actual=$(echo "$SQL_RESULT" | head -1 | xargs)
-
-  log_validation "Checking SQL result equals expected"
-  log_comparison "$expected" "$actual"
-
-  if [ "$actual" = "$expected" ]; then
-    log_pass "$message"
-    return 0
-  else
-    log_fail "Expected '$expected', got '$actual'"
-    return 1
-  fi
-}
+# assert_sql_equals comes from test-common.sh, in the same
+# query/expected/message form this file used. test-framework.sh's assert_sql is
+# the id-and-name form of the same assertion.
 
 # Assert SQL returns rows
 # Usage: assert_sql_has_rows "SELECT * FROM table WHERE x = 1"
@@ -570,45 +419,37 @@ assert_sql_no_rows() {
 # TEST SETUP/TEARDOWN
 # ============================================================================
 
-# Build a JSON credential body from the configured field names, merged with
-# AUTH_EXTRA_LOGIN_FIELDS (a JSON object, empty by default).
-auth_body() {
-  local email="$1"
-  local password="$2"
-  local extra="${AUTH_EXTRA_LOGIN_FIELDS:-}"
-  [ -n "$extra" ] || extra='{}'
+# auth_body comes from test-common.sh, which also takes the extra fields as a
+# third argument; called with two, it merges AUTH_EXTRA_LOGIN_FIELDS exactly as
+# this file's copy did.
 
-  jq -n \
-    --arg ef "${AUTH_EMAIL_FIELD:-email}" --arg e "$email" \
-    --arg pf "${AUTH_PASSWORD_FIELD:-password}" --arg p "$password" \
-    --argjson extra "$extra" \
-    '{($ef): $e, ($pf): $p} + $extra'
+# Everything a response says about the session, into the TEST_* variables a
+# suite reads. Each field is located by a configured jq expression, and one the
+# response does not carry is simply not set — an API that returns an access
+# token and nothing else needs no configuration at all.
+capture_session_vars() {
+  local body="$1" v
+
+  v=$(echo "$body" | jq -r "${AUTH_TOKEN_JQ:-.access_token} // empty" 2>/dev/null)
+  [ -n "$v" ] && TEST_ACCESS_TOKEN="$v"
+  v=$(echo "$body" | jq -r "${AUTH_REFRESH_TOKEN_JQ:-.refresh_token} // empty" 2>/dev/null)
+  [ -n "$v" ] && TEST_REFRESH_TOKEN="$v"
+  v=$(echo "$body" | jq -r "${AUTH_CSRF_TOKEN_JQ:-.csrf_token} // empty" 2>/dev/null)
+  [ -n "$v" ] && TEST_CSRF_TOKEN="$v"
+  v=$(echo "$body" | jq -r "${AUTH_USER_ID_JQ:-.user.id} // empty" 2>/dev/null)
+  [ -n "$v" ] && TEST_USER_ID="$v"
+  v=$(echo "$body" | jq -r "${AUTH_SESSION_ID_JQ:-.session.id} // empty" 2>/dev/null)
+  [ -n "$v" ] && TEST_SESSION_ID="$v"
+  return 0
 }
 
-# Register a throwaway account through AUTH_REGISTER_PATH.
-# Sets TEST_USER_EMAIL, TEST_USER_PASSWORD and, when the response carries one,
-# TEST_ACCESS_TOKEN (read with AUTH_TOKEN_JQ).
-create_test_user() {
-  local email="${1:-$(random_email)}"
-  local password="${2:-${TEST_PASSWORD:-TestPassword123!}}"
+# create_test_user comes from test-common.sh. It sets the same TEST_* session
+# variables, through capture_session_vars above, and still applies
+# AUTH_POST_REGISTER_SQL; it additionally echoes the response body, which is
+# what test-helpers.sh's copy did.
 
-  log_action "Registering test user: $email"
-
-  http_post "${API_BASE}${AUTH_REGISTER_PATH}" "$(auth_body "$email" "$password")"
-
-  if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
-    TEST_USER_EMAIL="$email"
-    TEST_USER_PASSWORD="$password"
-    TEST_ACCESS_TOKEN=$(echo "$HTTP_BODY" | jq -r "${AUTH_TOKEN_JQ} // empty" 2>/dev/null)
-    log_info "Registered $email"
-    return 0
-  fi
-
-  log_warn "Failed to register test user: HTTP $HTTP_CODE"
-  return 1
-}
-
-# Log in through AUTH_LOGIN_PATH. Sets TEST_ACCESS_TOKEN from AUTH_TOKEN_JQ.
+# Log in through AUTH_LOGIN_PATH. Sets the same TEST_* session variables as
+# create_test_user, so a suite can go on to refresh, act and log out.
 login_test_user() {
   local email="${1:-$TEST_USER_EMAIL}"
   local password="${2:-$TEST_USER_PASSWORD}"
@@ -618,12 +459,12 @@ login_test_user() {
   http_post "${API_BASE}${AUTH_LOGIN_PATH}" "$(auth_body "$email" "$password")"
 
   if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
-    TEST_ACCESS_TOKEN=$(echo "$HTTP_BODY" | jq -r "${AUTH_TOKEN_JQ} // empty" 2>/dev/null)
-    if [ -z "$TEST_ACCESS_TOKEN" ]; then
-      log_warn "Login succeeded but no token at '${AUTH_TOKEN_JQ}'"
+    capture_session_vars "$HTTP_BODY"
+    if [ -z "${TEST_ACCESS_TOKEN:-}" ]; then
+      log_warn "Login succeeded but no token at '${AUTH_TOKEN_JQ:-.access_token}'"
       return 1
     fi
-    log_info "Login successful"
+    log_info "Login successful${TEST_SESSION_ID:+, session $TEST_SESSION_ID}"
     return 0
   fi
 
@@ -631,21 +472,9 @@ login_test_user() {
   return 1
 }
 
-# Remove a user the harness created. Requires AUTH_USER_CLEANUP_SQL, whose
-# {email} placeholder is substituted; without it, cleanup is skipped loudly
-# rather than guessing at a schema.
-delete_test_user() {
-  local email="${1:-$TEST_USER_EMAIL}"
-
-  if [ -z "${AUTH_USER_CLEANUP_SQL:-}" ]; then
-    log_warn "AUTH_USER_CLEANUP_SQL not set — skipping cleanup of $email"
-  else
-    log_action "Deleting test user: $email"
-    run_sql "${AUTH_USER_CLEANUP_SQL//\{email\}/$email}"
-  fi
-
-  unset TEST_USER_EMAIL TEST_USER_PASSWORD TEST_ACCESS_TOKEN
-}
+# delete_test_user comes from test-common.sh: the same AUTH_USER_CLEANUP_SQL,
+# the same refusal to guess at a schema without it, and the same unset of the
+# TEST_* session variables afterwards.
 
 # Reset captured request/response state between tests.
 reset_test_state() {
@@ -653,22 +482,12 @@ reset_test_state() {
   unset SQL_RESULT SQL_ROW_COUNT
 }
 
-# Put the system into a known state before a batch of tests.
-# REDIS_FLUSH=1 flushes the configured Redis database (rate limiters, caches);
-# TEST_PREP_SQL, when set, is executed against DB_NAME. Both default to off, so
-# this is a no-op unless the project asks for it.
-reset_test_environment() {
-  if [ "${REDIS_FLUSH:-0}" = "1" ] && command -v redis-cli > /dev/null 2>&1; then
-    log_action "Flushing Redis at ${REDIS_HOST:-localhost}:${REDIS_PORT:-6379}"
-    redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" FLUSHDB > /dev/null 2>&1 || \
-      log_warn "Redis flush failed"
-  fi
-
-  if [ -n "${TEST_PREP_SQL:-}" ] && db_configured; then
-    log_action "Running TEST_PREP_SQL"
-    run_sql "$TEST_PREP_SQL" > /dev/null 2>&1 || log_warn "TEST_PREP_SQL failed"
-  fi
-}
+# reset_test_environment comes from test-env.sh, along with its alias
+# clean_risk_state. The copy that used to live here called redis-cli directly
+# and never read CACHE_FLUSH_CMD, so a project whose rate limiter is not Redis
+# had a known-state step that did nothing and said nothing. The shared one
+# flushes through flush_rate_limiter, which honours CACHE_FLUSH_CMD, and then
+# applies TEST_PREP_SQL.
 
 # ============================================================================
 # TEST SUITE FUNCTIONS
@@ -777,10 +596,9 @@ random_string() {
   cat /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9' | fold -w "$length" | head -n 1
 }
 
-# Generate random email
-random_email() {
-  echo "${TEST_USER_PREFIX:-harness_}$(random_string 8)_$(date +%s)@${TEST_EMAIL_DOMAIN:-example.com}"
-}
+# random_email comes from test-common.sh. It uses the clock and $RANDOM rather
+# than random_string above, so it works in a shell that has loaded only the
+# shared helpers.
 
 # Sleep with message
 sleep_with_message() {
@@ -800,12 +618,16 @@ export -f log_action log_command log_request log_response
 export -f log_sql log_sql_result log_validation log_comparison
 export -f log_pass log_fail log_skip log_warn log_info log_debug
 export -f http_request http_get http_post http_put http_patch http_delete
-export -f run_sql sql_value sql_count db_configured
+export -f run_sql run_psql sql_value sql_count db_configured
 export -f assert_http_status assert_json_field assert_json_equals
 export -f assert_response_contains assert_sql_equals assert_sql_has_rows assert_sql_no_rows
 export -f auth_body create_test_user login_test_user delete_test_user
-export -f reset_test_state reset_test_environment
+export -f reset_test_state reset_test_environment clean_risk_state flush_rate_limiter
 export -f start_suite end_suite print_db_stats
 export -f wait_for_api random_string random_email sleep_with_message
+# The shared internals the functions above call. An exported function whose
+# helpers were left behind breaks in the child shell that inherits it, which is
+# a harder failure to read than a missing function.
+export -f _harness_is_func _harness_log _harness_pass _harness_fail
 
 echo -e "${DIM}Verbose Test Framework v2.0 loaded${NC}"

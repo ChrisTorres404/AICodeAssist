@@ -29,6 +29,9 @@ nyan_progress() {
   local trail=""
   local trail_length=$((percentage / 5))  # Max 20 blocks at 100%
 
+  # `i` is local: bash scopes dynamically, so an undeclared loop variable here
+  # would overwrite the loop variable of whatever called this.
+  local i
   for i in $(seq 1 $trail_length); do
     local color_idx=$(((i - 1) % 6))
     trail="${trail}${RAINBOW[$color_idx]}━${NC}"

@@ -109,9 +109,9 @@ docs/
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
-| [0001](0001-use-nextjs.md) | Use Next.js as frontend framework | accepted | 2026-01-15 |
-| [0002](0002-postgres-over-mongo.md) | PostgreSQL over MongoDB for primary datastore | accepted | 2026-01-20 |
-| [0003](0003-rest-over-graphql.md) | REST API over GraphQL | accepted | 2026-02-01 |
+| `0001` (`0001-use-nextjs.md`) | Use Next.js as frontend framework | accepted | 2026-01-15 |
+| `0002` (`0002-postgres-over-mongo.md`) | PostgreSQL over MongoDB for primary datastore | accepted | 2026-01-20 |
+| `0003` (`0003-rest-over-graphql.md`) | REST API over GraphQL | accepted | 2026-02-01 |
 ```
 
 ## Decision Detection Signals
@@ -181,5 +181,5 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 
 - Work is a work order: open it with `wo new`, size it honestly, fill the SPEC before code.
 - Verification means behavioural tests that **ran**: `wo verify <n> --run <suite>` writes the status from the exit code. `NOT EXECUTED — PLAN ONLY` is honest; a typed `PASS` is not.
-- Search the packs before building: `pack search "<problem>"`.
+- Search the playbooks before building: `playbook search "<problem>"`.
 - Route by area: `wo new --area`, `bug new --category`; the routing tables are in `core/rules/common/`.

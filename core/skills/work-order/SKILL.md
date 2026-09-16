@@ -9,15 +9,15 @@ A work order is a folder, never a loose file. It carries the specification, the
 task breakdown, the checklist, the implementation prompt, and — at the end —
 evidence that the work was verified.
 
-## Before creating one: search the packs
+## Before creating one: search the playbooks
 
 ```bash
-{{PIPELINE_ROOT}}/bin/pack search "<the problem>"
+{{PIPELINE_ROOT}}/bin/playbook search "<the problem>"
 ```
 
 If a work order already covers this, read it first. Most of the hard thinking
 may already be recorded, including the mistakes. Starting from precedent is not
-cheating; it is the reason the packs exist.
+cheating; it is the reason the playbooks exist.
 
 ## Create
 
@@ -31,7 +31,7 @@ SPEC is enough. `standard` is the full set. `large` adds SDK and UI documents.
 Every size needs VERIFICATION to close; that never relaxes.
 
 This creates the folder and the documents the size requires. Do not create them by
-hand — the driver enforces naming and numbering that `bin/pack` and the index
+hand — the driver enforces naming and numbering that `bin/playbook` and the index
 depend on.
 
 Then fill in the SPEC **before writing code**. A spec that is written after the
@@ -99,7 +99,7 @@ tempted to work around the guard, the correct move is to run the tests.
 ```
 
 When a closed work order is worth carrying to the next project, promote it.
-It is copied into your project's pack with a catalog entry extracted from the
+It is copied into your project's playbooks with a catalog entry extracted from the
 SPEC and CLOSEOUT. Then edit the **Pitfalls** lines. That is the part that
 saves someone a week. Promotion refuses unverified work and work that fails
 `bin/sanitize`.

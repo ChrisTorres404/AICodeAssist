@@ -37,15 +37,15 @@ section must say so.
 **Source:** WO-XXXX-SPEC.md, Section X
 
 **Tests:**
-- Test 1.1: [Description] — PASS
-- Test 1.2: [Description] — PASS
+- Test 1.1: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
+- Test 1.2: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - The confirmation panel is visible once the form is submitted
 - Its heading text matches the copy the spec asks for
 - Screenshot recorded beside the run
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -54,16 +54,16 @@ section must say so.
 **Source:** WO-XXXX-SPEC.md, Section Y
 
 **Tests:**
-- Test 2.1: [Description] — PASS
-- Test 2.2: [Description] — PASS
-- Test 2.3: [Description] — PASS
+- Test 2.1: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
+- Test 2.2: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
+- Test 2.3: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - Submitting an empty required field renders the field-level error
 - The invalid field is marked so assistive technology announces it
 - Nothing is submitted and the route does not change
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -72,13 +72,13 @@ section must say so.
 **Source:** WO-XXXX-SPEC.md, Section Z
 
 **Tests:**
-- Test 3.1: [Description] — PASS
+- Test 3.1: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - Activating the primary control lands on the route the spec names
 - The view for that route rendered: [what proves it, not just the URL]
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -95,7 +95,7 @@ section must say so.
 
 **Remediation:** [What needs to be done]
 
-**Status:** PARTIAL — Requires follow-up
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED] — [what still needs follow-up]
 
 ---
 

@@ -1,6 +1,9 @@
 # Session Handoff Template
 
-Produced by the `/next-session` command. Filename convention:
+Produced by the `/next-session` command. This is the annotated copy: every
+heading carries a note on what belongs under it. `NEXT-SESSION-TEMPLATE.md`
+beside it is the same eight sections as a blank form, for when you know the
+format already. Filename convention:
 
 ```
 next-session--<context>--YYYY-MM-DD--HHMM.md
@@ -58,7 +61,7 @@ For each:
 - For each change:
 
 - **File(s):**
-    - `apps/api-server/src/...`
+    - `{{API_APP}}/src/...`
     - `...`
 - **What Changed:**
     - Added/updated controllers, services, DTOs, entities, middleware, guards, etc.
@@ -72,8 +75,8 @@ For each:
 
 - For each change:
 - **File(s):**
-    - `apps/admin-web/src/features/...`
-    - `apps/frontend-web/src/...`
+    - `{{ADMIN_APP}}/src/features/...`
+    - `{{WEB_APP}}/src/...`
 - **What Changed:**
     - New pages, components, hooks, modals, forms, navigation, etc.
 - **Important Components / Hooks:**
@@ -85,6 +88,7 @@ For each:
 ### 3.3 Shared / Types / Utilities
 
 - **File(s):**
+    - `{{SDK_PKG}}/src/...`
     - `packages/shared-types/src/...`
     - `libs/utils/...`
 - **What Changed:**

@@ -55,7 +55,7 @@ An autonomous loop is a work order with a repeating body. It gets the same evide
 
 ### After
 - Summarise what the loop did, what it changed, what it could not finish
-- Anything learned becomes a pack entry or a Common Issue on the agent it exposed
+- Anything learned becomes a playbook entry or a Common Issue on the agent it exposed
 
 ## Stall Detection
 ```

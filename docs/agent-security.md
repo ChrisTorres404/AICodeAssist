@@ -12,7 +12,7 @@ This pipeline ships the mechanical parts. The rest is how you run it.
 
 | Risk | Mechanism |
 |---|---|
-| Credentials, personal data, or host paths leaving with your work | `bin/sanitize` on every share; `wo promote` and `new-project --pack` refuse on FAIL |
+| Credentials, personal data, or host paths leaving with your work | `bin/sanitize` on every share; `wo promote` and `new-project --playbook` refuse on FAIL |
 | Invisible or bidirectional unicode hiding instructions in agents, skills, or rules | `acp lint` rejects it |
 | Secrets committed | `commit-quality` hook blocks credential-like staged lines |
 | Agents weakening lint, format, or strictness config to pass checks | `config-protection` hook blocks edits to existing config |
@@ -53,7 +53,7 @@ Do these before running anything autonomous:
 
 - **Project configuration is executable.** `.claude/settings.json`, hooks, and MCP configuration ship with the repository. Cloning a repository and opening the tool runs them once the directory is trusted. Review them like code in every pull request.
 - **Hook rules are policy.** They live in the repository and in `.claude/hook-rules/`. A change to a `block` rule is a security change and is reviewed as one.
-- **Packs are content.** They are read by agents as precedent. A poisoned pack is a poisoned context. `wo promote` sanitises what goes in; review what you import from elsewhere.
+- **Playbooks are content.** They are read by agents as precedent. A poisoned playbook is a poisoned context. `wo promote` sanitises what goes in; review what you import from elsewhere.
 
 ## When something goes wrong
 

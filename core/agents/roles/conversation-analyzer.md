@@ -61,7 +61,7 @@ Prioritize high-frequency, high-severity behaviors first.
    - a **hook rule** (pattern in a command or file → warn or block)
    - a **rule** in `core/rules/` (short, always loaded)
    - an **agent** change (a missing check in a role's checklist)
-   - a **pack** entry (`wo promote`, with the pitfall written down)
+   - a **playbook** entry (`wo promote`, with the pitfall written down)
    - nothing: a one-off
 4. Write each as a concrete proposal with the exact file and text
 
@@ -69,7 +69,7 @@ Prioritize high-frequency, high-severity behaviors first.
 | Signal in the transcript | Likely mechanism |
 |---|---|
 | "no, don't do X" and X was a command | hook rule on that command pattern |
-| "you already fixed this last week" | pack catalog pitfall, or a rule |
+| "you already fixed this last week" | playbook catalog pitfall, or a rule |
 | a fix that took three attempts | the first two are common issues for the agent's Common Issues section |
 | the user pasted the same context twice | CLAUDE.md or onboarding gap |
 | a claim of "tests pass" without output | evidence gate should have caught it; check the profile |

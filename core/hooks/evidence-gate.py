@@ -46,7 +46,7 @@ def main():
     root = sh(["git", "rev-parse", "--show-toplevel"]).strip()
     if not root: return 0
     changed = [l[3:].strip() for l in sh(["git", "-C", root, "status", "--porcelain", "-uall"]).splitlines() if l.strip()]
-    changed = [c for c in changed if "/packs/" not in f"/{c}"]   # promoted copies are archives, not work in progress
+    changed = [c for c in changed if "/playbooks/" not in f"/{c}"]   # promoted copies are archives, not work in progress
     changed = [c.split(" -> ")[-1] for c in changed]
     problems, warnings = [], []
 

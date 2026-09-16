@@ -32,15 +32,15 @@ section must say so.
 **Source:** WO-XXXX-SPEC.md, Section X
 
 **Tests:**
-- Test 1.1: [Description] — PASS
-- Test 1.2: [Description] — PASS
+- Test 1.1: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
+- Test 1.2: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - HTTP 200 returned with expected payload
 - Database record created correctly
 - Activity recorded for the event
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -49,16 +49,16 @@ section must say so.
 **Source:** WO-XXXX-SPEC.md, Section Y
 
 **Tests:**
-- Test 2.1: [Description] — PASS
-- Test 2.2: [Description] — PASS
-- Test 2.3: [Description] — PASS
+- Test 2.1: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
+- Test 2.2: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
+- Test 2.3: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - Error handling returns correct status codes
 - Validation rejects invalid input
 - Rate limiting applied correctly
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -67,12 +67,12 @@ section must say so.
 **Source:** WO-XXXX-SPEC.md, Section Z
 
 **Tests:**
-- Test 3.1: [Description] — PASS
+- Test 3.1: [Description] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Evidence Summary:**
 - [Summary of evidence]
 
-**Status:** VERIFIED
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED]
 
 ---
 
@@ -89,7 +89,7 @@ section must say so.
 
 **Remediation:** [What needs to be done]
 
-**Status:** PARTIAL — Requires follow-up
+**Status:** [VERIFIED | PARTIAL | NOT VERIFIED] — [what still needs follow-up]
 
 ---
 
@@ -180,7 +180,7 @@ None — All critical requirements verified.
 > passing tests are not production readiness.
 
 - [ ] **Read through ALL changed files** — Line by line review completed
-- [ ] **No debug logging** — uses the project's logger
+- [ ] **No debug logging** — no `console.log` statements or the equivalent in this stack; uses the project's logger
 - [ ] **No magic numbers** — Extracted to configuration or constants
 - [ ] **Proper typing** — No `any` types, proper validation
 - [ ] **Error handling complete** — Clear messages, proper exception types
@@ -199,6 +199,17 @@ None — All critical requirements verified.
 ---
 
 ## Sign-Off
+
+Counts first, in this shape, so the tally can be read without reading the
+document. Every number comes from a run; `Y` is the number of tests planned.
+
+```
+**Verification Status:**
+- EXECUTED: X/Y tests
+- PASSED: X/X tests
+- FAILED: 0 tests
+- Production Ready: YES/NO
+```
 
 **Verification Status:** [COMPLETE / PARTIAL / BLOCKED]
 

@@ -19,7 +19,7 @@ pattern list). Use it sparingly and never for real secrets.
 
 Exit codes: 0 PASS, 1 PASS WITH WARNINGS, 2 FAIL, 3 usage error.
 
-Used by bin/install.sh and bin/new-project to refuse installing a pack that
+Used by bin/install.sh and bin/new-project to refuse installing a playbook that
 fails, unless --allow-unsanitized is passed to them.
 """
 import argparse, os, re, sys
@@ -68,7 +68,7 @@ HOST_FILE_EXT = {e.lstrip(".") for e in TEXT_EXT if e} | {
     "min", "test", "spec", "stories", "config", "sample", "template",
     "bundle", "chunk", "types", "schema", "proto", "gradle", "kts", "properties"}
 
-# Roots of dotted identifier chains in the languages the packs carry code for.
+# Roots of dotted identifier chains in the languages the playbooks carry code for.
 # Nothing that starts with one of these is a host name.
 CODE_ROOT_LABELS = {"self", "this", "cls", "super", "window", "document", "process",
                     "module", "exports", "console", "globalthis", "navigator"}
@@ -248,15 +248,23 @@ def main():
         def error(self, message):
             self.print_usage(sys.stderr); print(f"sanitize: error: {message}", file=sys.stderr); sys.exit(3)
     ap = _AP(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("dir")
+    ap.add_argument("dirs", nargs="+", metavar="dir", help="one or more directories to scan")
     ap.add_argument("--report")
     ap.add_argument("--allow", action="append", default=[], help="regex; matching lines are ignored")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
-    if not os.path.isdir(a.dir):
-        print(f"sanitize: {a.dir} is not a directory", file=sys.stderr); return 3
+    for d in a.dirs:
+        if not os.path.isdir(d):
+            print(f"sanitize: {d} is not a directory", file=sys.stderr); return 3
     allow = [re.compile(x) for x in a.allow]
-    findings, n = scan(a.dir, allow)
+    findings, n = [], 0
+    for d in a.dirs:
+        fs, scanned = scan(d, allow)
+        if len(a.dirs) > 1:   # keep paths distinguishable across directories
+            base = os.path.basename(os.path.abspath(d))
+            fs = [(pid, sev, os.path.join(base, rel), ln, label, snip) for pid, sev, rel, ln, label, snip in fs]
+        findings += fs; n += scanned
+    title = ", ".join(os.path.basename(os.path.abspath(d)) for d in a.dirs)
     crit = [f for f in findings if f[1] == "CRITICAL"]
     warn = [f for f in findings if f[1] == "WARNING"]
     verdict = "FAIL" if crit else ("PASS WITH WARNINGS" if warn else "PASS")
@@ -264,7 +272,7 @@ def main():
     by_cat = {}
     for f in findings:
         by_cat.setdefault(f[0], []).append(f)
-    lines = [f"# Sanitization Report: {os.path.basename(os.path.abspath(a.dir))}", "",
+    lines = [f"# Sanitization Report: {title}", "",
              f"**Date:** {date.today().isoformat()}  ", f"**Files scanned:** {n}  ",
              f"**Verdict:** {verdict}", "",
              "| Category | Severity | Findings | Files |", "|---|---|---|---|"]

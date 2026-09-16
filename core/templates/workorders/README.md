@@ -35,33 +35,72 @@ WO-XXXX-[Descriptive-Name]/
 | `WO-TEMPLATE-PROMPT.md` | AI implementation prompt | Always |
 | `WO-TEMPLATE-CLOSEOUT.md` | Closeout report template | On completion |
 
-### Alternative Main Spec Template
+### Alternative Main Spec Templates
 
 | Template | Purpose | When to Use |
 |----------|---------|-------------|
 | `WO-TEMPLATE-MAIN.md` | High-level work order spec (less detailed) | Simple WOs without code |
+| `WO-TEMPLATE-SPEC-ANALYSIS.md` | Spec shaped for an investigation rather than a build | `--area analysis` or `--area docs` |
+| `WO-TEMPLATE-MASTER.md` | Every section of the methodology in one document | A cross-cutting work order best read as one argument, or handed to someone who should not have to open five files. Also the reference shape: it shows how the per-document set fits together |
 
 ### Specialized Templates (Use when applicable)
 
 | Template | Purpose | When to Use |
 |----------|---------|-------------|
-| `WO-TEMPLATE-SDK-IMPLEMENTATION.md` | SDK resource/method design | WO involves SDK work |
+| `WO-TEMPLATE-SDK-IMPLEMENTATION.md` | Client-library resource and method design | WO touches the client library or SDK |
 | `WO-TEMPLATE-UI-IMPLEMENTATION.md` | UI component specifications | WO involves frontend UI work |
+| `WO-TEMPLATE-REVIEW.md` | Review record before close | Rendered by the driver when a work order needs a reviewer's sign-off |
+
+### Closeout Templates
+
+| Template | Purpose | When to Use |
+|----------|---------|-------------|
+| `WO-TEMPLATE-CLOSEOUT.md` | Closeout report | On completion |
+| `WO-TEMPLATE-CLOSEOUT-UI.md` | Closeout whose deliverables are components, pages, state and styles | On completion of a UI work order — `wo close` picks it automatically |
 
 ---
 
 ## How to Create a New Work Order
 
-Do not copy these templates by hand. The driver renders the right set for the
-size you choose, numbers the work order, and records the routing.
+Do not copy these templates by hand. The driver does steps 1 to 3 for you; you
+do 4 and 5. The steps are written out so you can tell whether the driver did
+what it should, and so the shape is clear if you ever have to build one by hand.
+
+### Step 1: Create the Folder
 
 ```bash
-pack search "<problem>"                      # precedent first, always
+playbook search "<problem>"                  # precedent first, always
 wo new "<title>" --size standard --area backend --priority P1
+```
+
+The driver picks the next free number, creates
+`{{WORKORDERS_DIR}}/WO-XXXX-[Descriptive-Name]/`, and records the routing at the
+top of the spec. Do not choose a number by hand — two people choosing collide.
+
+### Step 2: Copy Core Templates (REQUIRED)
+
+Rendered into the folder under their final names:
+
+- `WO-TEMPLATE-SPEC.md` → `WO-XXXX-SPEC.md` (technical spec with code)
+- `WO-TEMPLATE-CHECKLIST.md` → `WO-XXXX-CHECKLIST.md`
+- `WO-TEMPLATE-TASK-BREAKDOWN.md` → `WO-XXXX-TASK-BREAKDOWN.md`
+- `WO-TEMPLATE-PROMPT.md` → `WO-XXXX-Prompt.md`
+
+**Alternative:** for a work order with no code design to record,
+`WO-TEMPLATE-MAIN.md` → `WO-XXXX-[Title].md` in place of the SPEC. `--size
+trivial` and `--size small` choose it automatically; `--area analysis` and
+`--area docs` use `WO-TEMPLATE-SPEC-ANALYSIS.md` instead.
+
+### Step 3: Copy Specialized Templates (if applicable)
+
+```bash
 wo new "<title>" --size large --sdk --ui     # adds the specialized documents
 ```
 
-Then:
+- `WO-TEMPLATE-SDK-IMPLEMENTATION.md` → `WO-XXXX-sdk-implementation.md` (with `--sdk`)
+- `WO-TEMPLATE-UI-IMPLEMENTATION.md` → `WO-XXXX-ui-implementation.md` (with `--ui`, or `--area ui`)
+
+### Step 4: Fill In Details
 
 1. **Fill in the SPEC before writing code.** A spec written afterwards is a
    description, not a specification.
@@ -69,22 +108,43 @@ Then:
    bracket left in it is an unfinished document.
 3. **Track state with the driver**: `wo start`, `wo block`, `wo note`,
    `wo status`.
-4. **Close with evidence**: `wo verify <n> --run <suite>` then `wo close <n>`.
-   The closeout is generated; it is refused without a verification document.
 
-`WO-TEMPLATE-MAIN.md` is the lighter alternative to the SPEC for a work order
-with no code design to record; `--size trivial` and `--size small` use the
-lighter shapes automatically.
+### Step 5: On Completion
+
+**Close with evidence.** `wo verify <n> --run <suite>` writes the verification
+from the suite's exit code, and then:
+
+```bash
+wo close <n>
+```
+
+- `WO-TEMPLATE-CLOSEOUT.md` → `WO-XXXX-CLOSEOUT.md`
+
+The closeout is generated, and `wo close` is refused without a verification
+document that says `EXECUTED — PASS`.
 
 ---
 
-## Good Examples
+## Gold Standard Examples
 
-There is no canonical list. Search for the nearest precedent:
+A gold standard work order is one a later reader can implement from: a spec
+with no brackets left in it, a task breakdown whose files exist, a verification
+that was executed, and a closeout whose lessons are specific. Keep a short list
+of yours here as you close them — one per area is enough.
+
+| Area | Gold standard in this project |
+|---|---|
+| `backend` | `[WO-XXXX-<name>]` |
+| `frontend` / `ui` | `[WO-XXXX-<name>]` |
+| `auth` / `security` | `[WO-XXXX-<name>]` |
+| `database` | `[WO-XXXX-<name>]` |
+
+Until that list exists, there is no canonical one. Search for the nearest
+precedent instead:
 
 ```bash
-pack wo "<problem>"      # work orders across every installed pack
-pack index               # everything, by completeness
+playbook wo "<problem>"  # work orders across every installed playbook
+playbook index           # everything, by completeness
 ```
 
 A promoted work order carries its spec, its verification, and the pitfalls
@@ -113,7 +173,42 @@ wo new "Report ingestion service" --series 1200     # the next free 12xx
 ```
 
 Choose the bands to match this project's own domains, and write them down in
-the project `CLAUDE.md` once you have. There is no universal scheme.
+the project `CLAUDE.md` once you have. There is no universal scheme. The shape
+one project arrived at, as an illustration only — yours will differ:
+
+| Series | Theme |
+|--------|-------|
+| 0000-0099 | Foundation — core platform setup |
+| 0100-0199 | The first subsystem |
+| 0200-0299 | Authorization model |
+| 0300-0399 | Public API and client library |
+| 0400-0499 | The primary user-facing flows |
+| 0500-0599 | The browser-side library |
+| 0600-0699 | Background jobs and scheduling |
+| 0700-0799 | Notifications — email, push, webhooks |
+| 0800-0899 | Import, export, and bulk operations |
+| 0900-0999 | Configuration and settings |
+| 1000-1099 | Security hardening |
+| 1100-1199 | Data model and schema migrations |
+| 1200-1299 | Reporting |
+| 1300-1399 | Search and indexing |
+| 1400-1499 | Observability — logging, metrics, dashboards |
+| 1500-1599 | Performance and capacity |
+| 1600-1699 | Caching and invalidation |
+| 1700-1799 | Integrations with external systems |
+| 1800-1899 | Developer experience and tooling |
+| 1900-1999 | Product and developer documentation |
+| 2000-2099 | Build, packaging, and release |
+| 2100-2199 | Admin interface |
+| 2200-2299 | End-user interface |
+| 2300-2399 | Accessibility and internationalization |
+| 2400-2499 | Test infrastructure |
+| 2500-2599 | Deployment and infrastructure |
+| 3000-3099 | Compliance and audit trail |
+| 3100-3199 | Support and operability |
+| 3200-3299 | Usage and billing |
+
+Leave gaps. A band that fills up is cheaper to split than to renumber.
 
 `--area` is the other half: it records who implements, who backs them up, and
 who validates, and prints the routing when the work order is opened.

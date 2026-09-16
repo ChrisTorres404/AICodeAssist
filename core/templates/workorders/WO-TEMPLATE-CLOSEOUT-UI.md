@@ -81,9 +81,9 @@
 
 ## Checklist Completion
 
-- [x] [Checklist item 1]
-- [x] [Checklist item 2]
-- [x] [Checklist item 3]
+- [ ] [Checklist item 1]
+- [ ] [Checklist item 2]
+- [ ] [Checklist item 3]
 - [ ] [Any incomplete items - explain why]
 
 ---

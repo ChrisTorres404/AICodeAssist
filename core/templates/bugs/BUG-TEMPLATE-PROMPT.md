@@ -123,7 +123,18 @@ If the fix involves:
 - **Database changes**: Add migration and update entity
 - **Type changes**: Update types in both backend and SDK
 
-Read the full architecture rules:
+Read the full architecture rules before changing anything across a layer:
+
+- `{{PIPELINE_ROOT}}/core/rules/common/patterns.md` — the layering rule and how
+  a change propagates through it
+- `{{PIPELINE_ROOT}}/core/rules/common/coding-style.md` — the conventions a fix
+  has to match
+- `{{PIPELINE_ROOT}}/core/rules/common/testing.md` — what counts as evidence
+- `{{PIPELINE_ROOT}}/core/rules/common/security.md` — if the fix touches
+  authentication, authorization, or anything handling untrusted input
+- The stack's own rule set under `{{PIPELINE_ROOT}}/core/rules/` — plus
+  `{{DOCS_DIR}}/` for whatever this project has written down about its own
+  architecture
 
 ---
 

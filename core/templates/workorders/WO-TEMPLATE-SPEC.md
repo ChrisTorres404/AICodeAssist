@@ -4,6 +4,7 @@
 **Effort:** [X hours/days]
 **Dependencies:** [WO-<other>, WO-<other> or None]
 **Blocks:** [WO-<other> or None]
+**Related finding:** [Audit, security review, bug, or incident that prompted this, or None]
 
 ---
 
@@ -69,7 +70,62 @@ Follow the naming and structure of the migrations already in that directory.
 
 ---
 
-## Files to Modify
+## Layer Compliance
+
+Fill in every layer this work touches; write "N/A" for the ones it does not.
+A layer that is skipped here is a layer nobody verified.
+
+### Data Flow
+
+```
+[store] -> [model/entity] -> [service or handler] -> [transport] -> [client library] -> [UI]
+```
+
+Mark where this work order adds or changes a step.
+
+### Data Layer
+
+| Change | Table / Collection / Column | Description |
+|--------|------------------------------|-------------|
+| ADD | `[name]` | [Purpose] |
+| MODIFY | `[name]` | [What changes] |
+| MIGRATE | `[migration name]` | [What it does, and its rollback] |
+
+### Service / API Layer
+
+| Type | Name | Path / Signature | Description |
+|------|------|------------------|-------------|
+| Service | `[Name]` | — | [Business logic] |
+| Handler | `[Name]` | `[METHOD] /v1/[path]` | [What it exposes] |
+| Input type | `[Name]` | — | [Validation rules] |
+| Access control | `[Name]` | — | [What it authorizes] |
+
+### Client Library Layer
+
+| Method | Signature | File | Description |
+|--------|-----------|------|-------------|
+| `[resource].[method]()` | `([input]) -> [Result]` | `{{SDK_PKG}}/[path]` | [Usage] |
+
+### UI Layer
+
+The UI consumes the client library. It does not call the transport directly:
+a component issuing its own HTTP request bypasses the library's auth, retry,
+error shaping, and types, and it will drift. If a screen needs something the
+client library does not expose, the fix is a client-library method, not a
+direct call.
+
+---
+
+## Files Created and Modified
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `[path/to/new/file]` | [What it is] |
+| `{{TESTING_DIR}}/suites/wo-XXXX-[feature].sh` | Behavioral suite |
+
+### Modified Files
 
 | File | Changes |
 |------|---------|
@@ -97,6 +153,11 @@ Add to `.env` (if applicable):
 - [ ] [Test case 1]
 - [ ] [Test case 2]
 - [ ] [Test case 3]
+
+### Integration Tests
+- [ ] [The module wired to its real collaborators — the seam the unit tests mocked]
+- [ ] [The persistence path — what was written, and that it reads back]
+- [ ] [The failure path across the seam — timeout, rejection, or rollback]
 
 ### Behavioral Tests (verification evidence)
 Suite: `{{TESTING_DIR}}/suites/wo-XXXX-[feature].sh`
@@ -145,6 +206,9 @@ closes the work order.
 3. [Impact of rollback]
 4. [Data considerations]
 
+**Warning:** [Any data loss, breaking change, or one-way migration this
+rollback cannot undo. Write "None" only after checking.]
+
 ---
 
 ## API Changes (if applicable)
@@ -177,6 +241,16 @@ Response ([error_status]):
 | Endpoint | Change |
 |----------|--------|
 | `[METHOD] /v1/[path]` | [Description of change] |
+
+### Error Codes
+
+| Code | Status | Message | Cause |
+|------|--------|---------|-------|
+| `[CODE_NOT_FOUND]` | 404 | [User-facing message] | [What produces it] |
+| `[CODE_LIMIT_EXCEEDED]` | 400 | [User-facing message] | [What produces it] |
+| `[CODE_FORBIDDEN]` | 403 | [User-facing message] | [What produces it] |
+
+Every error path the behavioral suite exercises appears here.
 
 ---
 
@@ -215,15 +289,71 @@ Response ([error_status]):
 2. [User action 2] → [System response]
 3. [etc.]
 
+### Design System Compliance
+
+- [ ] Built from the project's existing component primitives
+- [ ] Styled with the project's design tokens — no ad-hoc values
+- [ ] Follows the nearest existing component of the same kind: `[name it]`
+- [ ] Loading, empty, and error states implemented
+- [ ] Every theme the project ships, dark mode included
+- [ ] Accessible: labelled controls, keyboard reachable, meaningful roles
+- [ ] Responsive from phone width upward
+- [ ] Carries the `WO-XXXX` comment block
+
 ---
 
-**Acceptance Criteria:**
-- [ ] [Criterion 1]
-- [ ] [Criterion 2]
-- [ ] [Criterion 3]
-- [ ] [Criterion 4]
+## Acceptance Criteria
+
+Each criterion must be testable by someone who did not write it.
+
+### Functional
+- [ ] [Specific behavior that must work]
+- [ ] [Specific behavior that must work]
+- [ ] [Edge case handling]
+
+### Security
+- [ ] [What authenticates the new surface]
+- [ ] [What authorizes it]
+- [ ] [What is recorded in the audit trail]
+
+### Performance
+- [ ] [Latency target]
+- [ ] [Throughput or volume target]
+- [ ] No regression on [the existing path this shares code with]
+
+### Code Quality
+- [ ] Build succeeds
+- [ ] Type check and linter clean
+- [ ] Unit coverage at or above the project's threshold for changed files
+
+### Layer Compliance
+- [ ] A client-library method exists for every new endpoint
+- [ ] Types on both sides of the boundary match
+- [ ] The UI uses the client library only
+
+### Regression
 - [ ] All existing tests pass
 - [ ] New tests pass
+
+---
+
+## Related Documentation
+
+- [Design note, architecture decision record, or prior spec]
+- [API or schema reference]
+- [Security or compliance review]
+- [Related work order, and how it relates]
+
+---
+
+## Prior Art and Alternatives (if applicable)
+
+| Capability | [Alternative A] | [Alternative B] | {{PROJECT_NAME}} after this WO |
+|------------|-----------------|-----------------|-------------------------------|
+| [Capability 1] | [How they do it] | [How they do it] | [What we do, and why] |
+| [Capability 2] | [How they do it] | [How they do it] | [What we do, and why] |
+
+Use this only when the design is a deliberate divergence worth recording.
 
 ---
 

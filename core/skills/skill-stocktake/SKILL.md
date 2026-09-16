@@ -131,7 +131,7 @@ Evaluation is **holistic AI judgment** — not a numeric rubric. Guiding dimensi
 - Do NOT write "unchanged" alone — always restate the core evidence
 - For **Retire**: state (1) what specific defect was found, (2) what covers the same need instead
   - Bad: `"Superseded"`
-  - Good: `"disable-model-invocation: true already set; superseded by the pack catalog which covers all the same patterns plus confidence scoring. No unique content remains."`
+  - Good: `"disable-model-invocation: true already set; superseded by the playbook catalog which covers all the same patterns plus confidence scoring. No unique content remains."`
 - For **Merge**: name the target and describe what content to integrate
   - Bad: `"Overlaps with X"`
   - Good: `"42-line thin content; Step 4 of chatlog-to-article already covers the same workflow. Integrate the 'article angle' tip as a note in that skill."`
@@ -196,5 +196,5 @@ Obtain via Bash: `date -u +%Y-%m-%dT%H:%M:%SZ`. Never use a date-only approximat
 
 - Work is a work order: open it with `wo new`, size it honestly, fill the SPEC before code.
 - Verification means behavioural tests that **ran**: `wo verify <n> --run <suite>` writes the status from the exit code. `NOT EXECUTED — PLAN ONLY` is honest; a typed `PASS` is not.
-- Search the packs before building: `pack search "<problem>"`.
+- Search the playbooks before building: `playbook search "<problem>"`.
 - Route by area: `wo new --area`, `bug new --category`; the routing tables are in `core/rules/common/`.

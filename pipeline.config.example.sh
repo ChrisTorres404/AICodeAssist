@@ -26,6 +26,7 @@ export WORKORDERS_DIR="Workspace/Docs/WorkOrders"
 export BUGS_DIR="Workspace/Docs/Bugs"
 export TESTING_DIR="Workspace/Testing"
 export KNOWLEDGE_DIR="Workspace/Docs/KnowledgeBase"   # the repository described: analysis, feature profiles, source index
+export KNOWLEDGE_LEVEL="lite"                        # lite: scaffolded by the tool at intake | standard: narrative written | full: validated
 export SESSIONS_DIR="Workspace/Sessions"
 
 # --- Application layout (used by agents to locate code) -------------------
@@ -37,9 +38,9 @@ export DEV_APP="apps/dev"
 export WEB_APP="apps/web"
 export SDK_PKG="packages/sdk"
 
-# --- Optional domain agent packs (space-separated; see core/agents/domain/) --
-export AGENT_PACKS=""                       # e.g. "identity"  (core/agents/domain/)
-export SKILL_PACKS=""                       # e.g. "healthcare network"  (core/skill-packs/)
+# --- Optional agent sets and skill sets (space-separated) ------------------
+export AGENT_SETS=""                        # e.g. "identity"  (core/agents/sets/)
+export SKILL_SETS=""                        # e.g. "healthcare network"  (core/skill-sets/)
 
 # --- Test harness ---------------------------------------------------------
 export API_BASE_URL="http://localhost:3001/api/v1"   # where behavioural suites send requests

@@ -18,7 +18,12 @@ npx tsc --noEmit        # or the project's type-check command
 npm run lint            # or the project's lint command
 ```
 
-Errors are fixed before reporting, not reported as caveats.
+In a multi-package repository, run both from the package that owns the
+changed files, not from the repository root — a root-level check can pass
+while the app's own configuration rejects the same code.
+
+Errors are fixed before reporting, not reported as caveats. Import errors
+especially: a broken import is not a caveat, it is unfinished work.
 
 Then the `frontend-validator-expert` checks: directory placement, line
 limits, import paths, duplication, `any` in props, work-order headers.

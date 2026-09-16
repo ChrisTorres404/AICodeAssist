@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # A verification document has to fit the thing being verified: a bug has a
-# reproduction, not a spec, and a UI change is evidenced by what rendered.
+# reproduction, not a spec, and a UI change is evidenced by what rendered — and
+# no template may arrive with a result already in it.
 set -uo pipefail
 cd "$PIPELINE_ROOT" || { echo "no PIPELINE_ROOT"; exit 1; }
 
@@ -82,4 +83,35 @@ case "$sec" in
   *) fail "the shared verification template does not say that an unlabelled suite leaves the mapping traced by hand" "$sec";;
 esac
 
-exit 0
+# --- no template ships a result nobody produced -----------------------------
+# The templates are what an author starts from, and the close gate reads what
+# is in them. A row that arrives already saying PASS is a pass no run produced:
+# the author fills in the rest of the document around it, the gate counts a
+# filled row, and the work order closes on evidence that was typed by the
+# template. The same goes for a checkbox that arrives ticked.
+#
+# Documents only. A suite template under core/templates is a script, and a
+# script that prints "PASS" at run time is printing a real result.
+#
+# A tick is `- [x]`, lower case. `- [X]` is left alone on purpose: the closeout
+# templates use [X] as a count placeholder — "- [X] tests passing",
+# "Coverage: [X]%" — and those are prompts to fill in, not claims.
+prefilled="$(
+  find core/templates -type f -name '*.md' | sort | while IFS= read -r f; do
+    awk -v F="$f" '
+      /^[[:space:]]*```/ { code = !code; next }
+      code { next }
+      {
+        line = $0
+        sub(/[[:space:]]+$/, "", line)
+        sub(/\|[[:space:]]*$/, "", line)          # a table row ends in a pipe
+        sub(/[[:space:]]+$/, "", line)
+        if (line ~ /(—|-)[[:space:]]*(EXECUTED[[:space:]]*(—|-)[[:space:]]*)?PASS$/)
+          printf "  %s:%d: %s\n", F, FNR, $0
+        else if ($0 ~ /^[[:space:]]*[-*][[:space:]]+\[x\]/)
+          printf "  %s:%d: %s\n", F, FNR, $0
+      }' "$f"
+  done
+)"
+[ -z "$prefilled" ] && exit 0
+fail "a template ships a status nobody produced: blank the result, leave the prompt" "$prefilled"

@@ -4,7 +4,7 @@ Proves the sanitizer reports internal host names, and leaves public ones alone.
 
 The sanitizer described itself as catching "internal infrastructure" while its
 infra rules only covered private IPs, public IPs, SSH connection strings and
-`.pem` references. A pack carrying an internal fully-qualified domain name —
+`.pem` references. A playbook carrying an internal fully-qualified domain name —
 `iam-core.hollow-a.da11.delivery.engineering` — was cleared with "Clear. Safe
 to share." Nothing looked at host names at all.
 

@@ -45,9 +45,13 @@ curl -s {{API_BASE_URL}}/health | jq '.version'
 
 ## Test Results
 
+Every status below is a choice, not a default: take it from the run's real exit
+code and delete the options that did not happen. A row still carrying the full
+set of options has not been filled in.
+
 ### PASSED Tests
 
-#### Test 1.1: [Test Name] — EXECUTED — PASS
+#### Test 1.1: [Test Name] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Command:**
 ```bash
@@ -74,7 +78,7 @@ curl -X POST {{API_BASE_URL}}/auth/login \
 
 ---
 
-#### Test 1.2: [Test Name] — EXECUTED — PASS
+#### Test 1.2: [Test Name] — [EXECUTED — PASS | EXECUTED — FAIL | NOT EXECUTED — PLAN ONLY]
 
 **Command:**
 ```bash
@@ -210,11 +214,11 @@ LIMIT 1;
 
 ```
 [Timestamp] Starting WO-XXXX test execution
-[Timestamp] Test 1.1: PASS
-[Timestamp] Test 1.2: PASS
-[Timestamp] Test 2.1: FAIL - HTTP 500
-[Timestamp] Test 3.1: SKIP - prerequisite not configured
-[Timestamp] Execution complete: 2 passed, 1 failed, 1 skipped
+[Timestamp] Test 1.1: [PASS | FAIL | SKIP]
+[Timestamp] Test 1.2: [PASS | FAIL | SKIP]
+[Timestamp] Test 2.1: [PASS | FAIL | SKIP] - [reason, when not PASS]
+[Timestamp] Test 3.1: [PASS | FAIL | SKIP] - [reason, when not PASS]
+[Timestamp] Execution complete: [N] passed, [N] failed, [N] skipped
 ```
 
 ---

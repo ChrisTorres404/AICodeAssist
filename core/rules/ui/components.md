@@ -20,6 +20,8 @@ paths:
 - **Follow existing patterns.** Read a sibling before writing a new one.
 - **No duplicates.** Search before creating. Two components that do the same
   thing is a defect, not a convenience.
+- **Separable layout, logic, and presentation.** A component that fetches,
+  decides, and renders is three components.
 - **No `any` in props.** Strict types for every prop.
 - **Every new file carries the work-order header:**
 
@@ -28,6 +30,20 @@ paths:
 ```
 
 One line, first in the file, on new files only; see the coding-style rule.
+
+## Search before creating: the decision ladder
+
+Before writing any component, search for one that already does the job.
+
+| What you find | What you do |
+|---|---|
+| A component that fully satisfies the need | Reuse it as it is |
+| A component that partly satisfies it | Extend it, keeping its existing callers working |
+| Nothing close | Only then write a new one |
+
+Write a new component only when no suitable one exists *and* extending an
+existing one would be the wrong shape. Record which of the three happened in
+the work order; "I looked and found nothing" is a finding, not an excuse.
 
 ## Consistency the design system owns
 

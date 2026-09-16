@@ -95,7 +95,7 @@ All configuration is via environment variables. See \`.env.example\`:
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See `CONTRIBUTING.md`.
 ```
 
 **CLAUDE.md Rules:**
@@ -168,7 +168,7 @@ cd {repo}
 ./setup.sh
 \`\`\`
 
-See [CLAUDE.md](CLAUDE.md) for detailed commands and architecture.
+See `CLAUDE.md` for detailed commands and architecture.
 
 ## Prerequisites
 
@@ -204,7 +204,7 @@ claude    # Start Claude Code — reads CLAUDE.md automatically
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md)
+See `CONTRIBUTING.md`
 ```
 
 **README Rules:**

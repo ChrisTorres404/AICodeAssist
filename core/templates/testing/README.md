@@ -6,11 +6,18 @@
 
 ## Available Templates
 
+Everything in this directory, one line each.
+
 | Template | Purpose | When to Use |
 |----------|---------|-------------|
 | `TEST-TEMPLATE-HARNESS.md` | Test harness document | Creating test plans before execution |
 | `TEST-TEMPLATE-EXECUTION.md` | Execution results | Recording test run outcomes |
 | `TEST-TEMPLATE-VERIFICATION.md` | Verification report | WO closeout verification evidence |
+| `TEST-TEMPLATE-VERIFICATION-UI.md` | Verification report for browser-rendered evidence | Closing a UI work order, where the evidence is what rendered |
+| `UI-TEST-TEMPLATE.md` | Browser test suite document — steps, assertions, execution record | Planning and recording a UI suite driven through a browser |
+| `SUITE-TEMPLATE.sh` | Executable behavioural suite scaffold | What `wo suite <n>` renders; a suite that starts the service itself |
+| `INTEGRATION-SUITE-TEMPLATE.sh` | Executable suite scaffold for a boundary crossing | A suite against a third party, a queue, or a webhook |
+| `examples/` | Two worked suites and their README | Reading a finished suite before writing your first one |
 
 ---
 
@@ -55,6 +62,52 @@ Use this when creating verification evidence for WO closeouts. This template:
 
 ---
 
+### TEST-TEMPLATE-VERIFICATION-UI.md
+
+The same document for a work order whose evidence is what the browser rendered:
+an element present, text matching, a route reached, a control reachable from the
+keyboard, contrast, no console errors, a screenshot kept. `wo verify` picks it
+over the shared one for a UI work order.
+
+**When to use:** Closing out a UI work order.
+
+**Output file naming:** `WO-XXXX-VERIFICATION.md`, inside the work-order folder
+
+---
+
+### UI-TEST-TEMPLATE.md
+
+The browser-driven counterpart of the harness document: numbered steps with the
+browser command for each, assertions, an execution record per run, and error
+scenarios.
+
+**When to use:** Planning a UI suite, and recording each run of it.
+
+**Output file naming:** `ui-<feature-slug>.md`
+
+---
+
+### SUITE-TEMPLATE.sh and INTEGRATION-SUITE-TEMPLATE.sh
+
+The executable scaffolds. `wo suite <n>` renders `SUITE-TEMPLATE.sh` into
+`{{TESTING_DIR}}/suites/`; the integration variant is for a suite that crosses a
+boundary. Both start the service themselves when nothing is listening and create
+their own fixtures, so the suite runs for anyone and not only for its author.
+
+**When to use:** Whenever a work order or bug needs behavioural evidence.
+
+**Output file naming:** `wo-XXXX-<feature>.sh` or `bug-XXXX-<slug>.sh`
+
+---
+
+### examples/
+
+Two finished suites — an authentication flow and a CRUD path with state
+verification — plus a README explaining what each demonstrates. Read one before
+writing your first suite.
+
+---
+
 ## How to Use Templates
 
 1. **Copy the template** to the appropriate location
@@ -84,7 +137,7 @@ After all tests pass, you MUST also verify code quality:
 ### Code Quality Checklist (Before Declaring Done)
 
 - [ ] **Read through ALL changed files** — Line by line review
-- [ ] **No debug logging** — uses the project's logger
+- [ ] **No debug logging** — no `console.log` or its equivalent in this stack; uses the project's logger
 - [ ] **No magic numbers** — Extracted to configuration
 - [ ] **No dev fallbacks** — Removed temporary code
 - [ ] **Proper typing and validation** — No `any` types

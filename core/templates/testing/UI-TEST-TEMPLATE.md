@@ -1,6 +1,7 @@
 # UI Test Suite: [FEATURE-NAME]
 
 > **Suite ID**: ui-[feature-slug]
+> **Created**: YYYY-MM-DD
 > **Related WO/BUG**: WO-XXXX / BUG-XXXX
 > **Application**: {{WEB_APP}}
 > **Base URL**: {{WEB_ORIGIN}}

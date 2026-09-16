@@ -59,7 +59,7 @@ Every command you write down, you ran. A command that fails goes in as
 
 ## 4. Seed the work
 
-- Run `{{PIPELINE_ROOT}}/bin/pack packs` and note which packs apply.
+- Run `{{PIPELINE_ROOT}}/bin/playbook list` and note which playbooks apply.
 - If the project has obvious gaps the stack rules flag, open them as
   work orders with `wo new --size small` rather than fixing them silently.
 

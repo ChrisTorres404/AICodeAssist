@@ -6,17 +6,19 @@
 # individual driver. The drivers remain standalone scripts you can call or
 # edit directly.
 #
-#   acp init <path> [--name N] [--domain D] [--pack P]   new project from nothing
+#   acp init <path> [--name N] [--domain D] [--playbook P]  new project from nothing
 #   acp install <path>                                   add to an existing project
 #   acp doctor [path]                                    is the install healthy?
 #   acp baseline [--command '<cmd>'] [--dry-run]         run the project's own tests once and record the first measurement
 #   acp intake [status|inventory]                        the work orders a project completes before it is operational
 #   acp kb status|bind|impact                            the knowledge base: what describes the code, and whether it still does
-#   acp wo|bug|pack|sanitize|detect-stack <args>         forward to the driver
+#   acp wo|bug|playbook|sanitize|detect-stack <args>     forward to the driver
 #   acp check [--staged|--since REF|--paths P...]        the rules over a set of files; blocks on secrets,
 #                                                        weakened config, closeouts without evidence
 #   acp agent <name>                                     print a specialist's definition (any tool can read it)
 #   acp agents [--area A]                                list specialists, or the ones routed for an area
+#   acp commands | acp command <name>                    the slash commands as instructions any agent can read
+#   acp skills | acp skill <name>                        the skills, the same way
 #   acp ci github                                        add a workflow that runs the rules on every pull request
 #   acp lint [--strict]                                  validate agents, skills, hooks, rules
 #   acp eval list|run [name]|new <name>                  the pipeline's own behavioural evaluations
@@ -28,7 +30,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BIN="$ROOT/bin"
-VERSION="1.3.0"
+VERSION="1.4.0"
 
 usage() { sed -n '3,/^# -\{20,\}$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
@@ -107,12 +109,13 @@ doctor() {
   fi
   if [ -d "$dest" ]; then
     ok "pipeline installed at $proot/"
-    for b in acp wo bug pack sanitize detect-stack stack-specialist; do [ -x "$dest/bin/$b" ] && ok "bin/$b executable" || bad "bin/$b missing or not executable (re-run install)"; done
+    for b in acp wo bug playbook sanitize detect-stack stack-specialist; do [ -x "$dest/bin/$b" ] && ok "bin/$b executable" || bad "bin/$b missing or not executable (re-run install)"; done
     for h in "$dest"/core/hooks/*.py "$dest"/core/hooks/*.sh; do [ -x "$h" ] || bad "hook $(basename "$h") not executable"; done
     ok "profile: $profile"
     local unres vre="PROJECT_NAME|PROJECT_SLUG|PROJECT_DOMAIN|GITHUB_REPO|PROJECT_ROOT|PIPELINE_ROOT|WORKSPACE_DIR|DOCS_DIR|WORKORDERS_DIR|BUGS_DIR|TESTING_DIR|SESSIONS_DIR|API_APP|ADMIN_APP|PORTAL_APP|DEV_APP|WEB_APP|SDK_PKG|DB_NAME|CLI_NAME|API_BASE_URL|WEB_ORIGIN|STACK_SECTION"
     unres="$(grep -rhoE "\{\{(${vre})\}\}" "$dest/core" "$dest/harness" --exclude-dir=project --exclude-dir=templates 2>/dev/null | sort -u | tr '\n' ' ' || true)"
-    [ -d "$dest/packs" ] && ok "packs/ present" || bad "no packs/ directory (re-run install)"
+    if [ -d "$dest/playbooks" ]; then ok "playbooks/ present"; else bad "no playbooks/ directory (re-run install)"; fi
+    [ -d "$dest/packs" ] && meh "packs/ is the old name for playbooks/; re-run install to move it" || true
     [ -z "$unres" ] && ok "no unresolved template variables" || bad "unresolved variables: $unres"
   else
     bad "no pipeline at $proot/ — run: acp install $target"
@@ -218,6 +221,12 @@ PYEOF
     elif [ -n "$pc" ] && [ -f "$pc" ]; then meh "pre-commit hook is not the pipeline's; chain 'acp check --staged' into it to run the rules at commit time"
     elif [ "$profile" = minimal ]; then ok "no pre-commit hook (minimal profile)"
     else meh "no pre-commit hook; a closeout written by hand or a commit that skips the driver is caught by nothing — re-run install"; fi
+    local pp; pp="$(cd "$target" && git rev-parse --git-path hooks/pre-push 2>/dev/null || true)"
+    case "$pp" in ''|/*) ;; *) pp="$target/$pp";; esac
+    if [ -n "$pp" ] && [ -x "$pp" ] && grep -q 'acp:pre-push:protect' "$pp" 2>/dev/null; then ok "pre-push hook wired (a force push or deletion of a shared branch is refused, under any agent)"
+    elif [ -n "$pp" ] && [ -f "$pp" ]; then meh "pre-push hook is not the pipeline's; chain $proot/core/hooks/pre-push.sh into it, stdin included, to keep shared branches safe"
+    elif [ "$profile" = minimal ]; then ok "no pre-push hook (minimal profile)"
+    else meh "no pre-push hook; a force push that drops someone else's commits from a shared branch is caught by nothing — re-run install"; fi
     [ -f "$target/.github/workflows/acp-check.yml" ] && ok "CI runs the rules on pull requests" || meh "no CI workflow for the rules; 'acp ci github' adds one so nothing depends on the agent or the machine"
   else
     meh "not a git repository: the work-order gates hold, but nothing catches a closeout written by hand or a commit that skips the driver"
@@ -248,7 +257,7 @@ PYEOF
   if [ -f "$dest/core/hooks/kb.py" ]; then
     if [ -d "$target/$kbdir" ]; then
       local kl krc=0; kl="$(python3 "$dest/core/hooks/kb.py" status --root "$target" --kb "$target/$kbdir" 2>/dev/null | tail -1)" || krc=$?
-      case "$krc" in 0) ok "knowledge base: $kl";; 1) meh "knowledge base: $kl — profiles describe code that changed; update them, then  acp kb bind";; 2) bad "knowledge base: $kl — profiles cite files or lines that no longer exist";; *) meh "knowledge base: $kl";; esac
+      case "$krc" in 0) ok "knowledge base: $kl";; 1) meh "knowledge base: $kl — profiles describe code that changed; update them, then  acp kb bind";; 2) bad "knowledge base: $kl — profiles cite files or lines that no longer exist";; 4) meh "knowledge base: $kl — profiles short of the configured level; the intake work order for it says what to write";; *) meh "knowledge base: $kl";; esac
     else meh "no knowledge base: nothing describes this repository yet — the intake work order for it says how"; fi
   fi
   # Reporting "healthy" while the drivers cannot actually complete a lifecycle is
@@ -361,6 +370,13 @@ case "$cmd" in
           opened=$((opened+1))
           printf '  WO-%s  %s\n' "$num" "$title"
         done
+        # The knowledge base is scaffolded here, by the tool, so the step that asks for
+        # it can pass on day one at the lite level. Raising the level is agent work.
+        if [ -f "$ROOT/core/hooks/kb.py" ] && python3 "$ROOT/core/hooks/kb.py" scaffold --help >/dev/null 2>&1; then
+          kbd2="$(sed -n 's/^export KNOWLEDGE_DIR="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; kbd2="${kbd2:-Workspace/Docs/KnowledgeBase}"
+          lvl2="$(sed -n 's/^export KNOWLEDGE_LEVEL="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; lvl2="${lvl2:-lite}"
+          ( cd "$root" && python3 "$ROOT/core/hooks/kb.py" scaffold --root "$root" --kb "$root/$kbd2" --level "$lvl2" --pipeline-dir "$rel" 2>&1 | tail -1 | sed 's/^/  knowledge base: /' ) || true
+        fi
         echo "intake: $opened step(s) opened, $kept already present. Each has a shipped suite under $tdir/suites/;"
         echo "        verify a step with  wo verify <n> --run $tdir/suites/intake-0N-<step>.sh   and close it. Then:  acp intake status";;
       *) echo "usage: acp intake [status|inventory]" >&2; exit 1;;
@@ -373,7 +389,10 @@ case "$cmd" in
     sub="${1:-status}"; shift || true
     case "$sub" in
       status|bind|impact) exec python3 "$py" "$sub" --root "$root" --kb "$root/$kbd" "$@";;
-      *) echo "usage: acp kb status|bind|impact [--files ...]" >&2; exit 1;;
+      scaffold)
+        lvl="lite"; [ -f "$root/pipeline.config.sh" ] && { v="$(sed -n 's/^export KNOWLEDGE_LEVEL="\([^"]*\)".*/\1/p' "$root/pipeline.config.sh" | head -1)"; [ -n "$v" ] && lvl="$v"; }
+        exec python3 "$py" scaffold --root "$root" --kb "$root/$kbd" --level "$lvl" --pipeline-dir "${ROOT#$root/}" "$@";;
+      *) echo "usage: acp kb status|bind|impact|scaffold" >&2; exit 1;;
     esac;;
   baseline)
     # The first measurement of a project the tool is about to record evidence
@@ -449,10 +468,25 @@ case "$cmd" in
         echo "wrote ${dest#$root/}: the rules run on every pull request, whoever made the commits";;
       *) echo "usage: acp ci github" >&2; exit 1;;
     esac;;
+  command|commands|skill|skills)
+    # Slash commands and skills are Claude Code features; their content is text
+    # any agent can read and follow. This is how every other agent reaches it.
+    root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    case "$cmd" in
+      commands) for f in "$ROOT"/core/commands/*.md; do [ -f "$f" ] || continue; printf '  %-26s %s\n' "$(basename "$f" .md)" "$(sed -n 's/^description: *//p' "$f" | head -1 | cut -c1-90)"; done;;
+      skills)   for d in "$ROOT"/core/skills/*/ "$ROOT"/core/skill-sets/*/*/; do [ -f "$d/SKILL.md" ] || continue; printf '  %-34s %s\n' "$(basename "$d")" "$(sed -n 's/^description: *//p' "$d/SKILL.md" | head -1 | cut -c1-80)"; done;;
+      command)  n="${1:-}"; [ -n "$n" ] || { echo "usage: acp command <name>   (acp commands lists them)" >&2; exit 1; }
+                f="$ROOT/core/commands/$n.md"; [ -f "$f" ] || { echo "acp: no command named '$n'" >&2; exit 1; }
+                echo "# /$n — read this as your instructions; where it says to load a skill, run:  acp skill <name>"; echo
+                sed -e "s|{{PIPELINE_ROOT}}|${ROOT#$root/}|g" "$f";;
+      skill)    n="${1:-}"; [ -n "$n" ] || { echo "usage: acp skill <name>   (acp skills lists them)" >&2; exit 1; }
+                for c in "$ROOT/core/skills/$n/SKILL.md" "$ROOT"/core/skill-sets/*/"$n"/SKILL.md "$root/.claude/skills/$n/SKILL.md"; do [ -f "$c" ] && { sed -e "s|{{PIPELINE_ROOT}}|${ROOT#$root/}|g" "$c"; exit 0; }; done
+                echo "acp: no skill named '$n'" >&2; exit 1;;
+    esac;;
   agent)
     n="${1:-}"; [ -n "$n" ] || { echo "usage: acp agent <name>   (acp agents lists them)" >&2; exit 1; }
     root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
-    for c in "$root/.claude/agents/$n.md" "$ROOT/core/agents/base/$n.md" "$ROOT/core/agents/roles/$n.md" "$ROOT/core/agents/domain/$n.md" "$ROOT/agents/$n.md"; do
+    for c in "$root/.claude/agents/$n.md" "$ROOT/core/agents/base/$n.md" "$ROOT/core/agents/roles/$n.md" "$ROOT/core/agents/sets/$n.md" "$ROOT/agents/$n.md"; do
       [ -f "$c" ] && exec cat "$c"
     done
     echo "acp: no specialist named '$n'" >&2; exit 1;;
@@ -460,12 +494,13 @@ case "$cmd" in
     if [ "${1:-}" = "--area" ] && [ -n "${2:-}" ]; then
       exec "$BIN/wo" route "$2"
     fi
-    for d in "$ROOT/core/agents/base" "$ROOT/core/agents/roles" "$ROOT/core/agents/domain" "$ROOT/agents"; do
+    for d in "$ROOT/core/agents/base" "$ROOT/core/agents/roles" "$ROOT/core/agents/sets" "$ROOT/agents"; do
       [ -d "$d" ] || continue
       for f in "$d"/*.md; do [ -f "$f" ] || continue; printf '  %-34s %s\n' "$(basename "$f" .md)" "$(sed -n 's/^description: *//p' "$f" | head -1 | cut -c1-90)"; done
     done;;
   bug)           exec "$BIN/bug" "$@";;
-  pack)          exec "$BIN/pack" "$@";;
+  playbook)      exec "$BIN/playbook" "$@";;
+  pack)          exec "$BIN/pack" "$@";;   # old name; bin/pack says so and forwards
   sanitize)      exec "$BIN/sanitize" "$@";;
   detect-stack)  exec "$BIN/detect-stack" "$@";;
   eval)          exec "$BIN/eval" "$@";;
@@ -476,7 +511,7 @@ case "$cmd" in
     # An installed copy ships a subset of these directories, and sanitize reserves
     # exit 3 for its own usage errors: neither is a critical finding.
     echo "== sanitize"
-    for d in core bin docs harness packs; do
+    for d in core bin docs harness playbooks; do
       [ -d "$ROOT/$d" ] || continue
       r=0; "$BIN/sanitize" "$ROOT/$d" --quiet >/dev/null 2>&1 || r=$?
       case "$r" in
@@ -488,8 +523,8 @@ case "$cmd" in
     if [ -f "$ROOT/pipeline.config.example.sh" ]; then echo "== evaluations (pipeline repository: full suite)"
     else echo "== evaluations (installed copy: the ones needing source fixtures are skipped)"; fi
     "$BIN/eval" run || rc=1
-    # Packaging the plugin is something only the pipeline repository can do; an
-    # installed copy has no packaging inputs, and failing it there would be noise.
+    # Assembling the plugin is something only the pipeline repository can do; an
+    # installed copy has no inputs for it, and failing it there would be noise.
     if [ -f "$ROOT/pipeline.config.example.sh" ]; then
       echo "== plugin"
       # bound_seconds prints its complaint first and the effective value last
@@ -526,7 +561,7 @@ case "$cmd" in
   version|-v|--version) echo "AICodePipeline $VERSION";;
   help|-h|--help)
     case "${1:-}" in
-      wo|bug|pack) exec "$BIN/$1";;
+      wo|bug|playbook|pack) exec "$BIN/$1";;
       *) usage;;
     esac;;
   *) echo "acp: unknown command '$cmd'" >&2; usage >&2; exit 1;;

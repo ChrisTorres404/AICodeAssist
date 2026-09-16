@@ -13,9 +13,9 @@ placeholders that `bin/install.sh` resolves per project.
 - **Never hardcode a project name, path, domain, app directory, or database
   name into `core/` or `harness/`.** Use a `{{VARIABLE}}` and declare it in
   `pipeline.config.example.sh` and in the `VARS` array in `bin/install.sh`.
-- **Never put a project's own work into this repository.** Packs are built
+- **Never put a project's own work into this repository.** Playbooks are built
   by users from their own verified work with `wo promote`; this repository
-  ships the machinery and no corpus. Anything under `packs/` here is a
+  ships the machinery and no corpus. Anything under `playbooks/` here is a
   scaffold, never content.
 
 Before committing any change to `core/` or `harness/`:
@@ -90,11 +90,11 @@ still validates.
 
 ---
 
-## Search the packs before specifying anything
+## Search the playbooks before specifying anything
 
-`packs/` holds accumulated engineering experience. Before writing a new spec —
+`playbooks/` holds closed, verified work orders kept for reuse. Before writing a new spec —
 in this repo or any project the pipeline is installed into — run
-`bin/pack search <term>`. If a work order already covers the problem, start from
+`bin/playbook search <term>`. If a work order already covers the problem, start from
 it. Most of the hard thinking, including the mistakes, is already recorded.
 
 ## Keep enforcement mechanical
@@ -178,8 +178,8 @@ the build rather than someone else's machine.
 |---|---|---|
 | `core/` | yes | methodology, instructions, rules, skills, hooks, templates, agents, commands, workflows |
 | `harness/` | yes | behavioral test framework |
-| `bin/` | no | `new-project`, `install.sh`, `build-plugin`, `wo`, `bug`, `pack`, `sanitize`, `detect-stack` |
-| `packs/` | no | empty scaffold; users fill their own with `wo promote` |
+| `bin/` | no | `new-project`, `install.sh`, `build-plugin`, `wo`, `bug`, `playbook`, `sanitize`, `detect-stack` |
+| `playbooks/` | no | empty scaffold; users fill their own with `wo promote` |
 | `docs/` | no | harness guides carried from the origin |
 
 New content is written templated from the start; there is no de-coupling

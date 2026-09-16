@@ -135,7 +135,7 @@ jobs:
       - name: bin/sanitize
         run: |
           rc=0
-          for d in core bin docs harness packs; do
+          for d in core bin docs harness playbooks; do
             [ -d "$d" ] || { echo "  $d absent — skipped"; continue; }
             r=0
             bin/sanitize "$d" --quiet >/dev/null 2>&1 || r=$?

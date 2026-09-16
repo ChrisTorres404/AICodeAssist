@@ -23,4 +23,4 @@ open="$(cd "$ROOT" && "$PIPELINE/bin/wo" list --active 2>/dev/null | tail -n +2 
 echo "In-flight work orders (SCTPVC = Spec/Checklist/Tasks/Prompt/Verification/Closeout):"
 echo "$open" | sed 's/^/  /'
 echo
-echo "Search prior work before specifying anything new: $PIPELINE/bin/pack search \"<term>\""
+echo "Search prior work before specifying anything new: $PIPELINE/bin/playbook search \"<term>\""

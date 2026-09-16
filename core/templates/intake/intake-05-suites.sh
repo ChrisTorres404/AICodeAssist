@@ -16,7 +16,15 @@ ok()  { pass=$((pass + 1)); printf '  PASS %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL %s — %s\n' "$1" "$2"; }
 
 tdir="${TESTING_DIR:-Workspace/Testing}"
+pipeline_root="${PIPELINE_ROOT:-.aicodepipeline}"
 manifest="$root/$tdir/suites.manifest"
+
+# A brand new project has nothing here yet. That is not a failure of the project;
+# this step becomes real when there is something to run, and says so until then.
+if "$root/$pipeline_root/bin/detect-stack" "$root" --json 2>/dev/null | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("empty") else 1)' 2>/dev/null; then
+  ok "nothing to run yet: the tree has no source files; this step counts again once there is"
+  echo "== $pass passed, $fail failed"; exit 0
+fi
 suites_dir="$root/$tdir/suites"
 fix="wrap the runner this project already has:  wo suite <number> --wrap '<your test command>'   or set SUITE_COMMAND in pipeline.config.sh"
 

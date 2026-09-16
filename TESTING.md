@@ -46,7 +46,7 @@ validation. Takes a minute or two. Expected output:
   bin clean
   docs clean
   harness clean
-  packs clean
+  playbooks clean
 == evaluations
   fresh-install-day-one            PASS (5s)
   hook-blocks-database-drop        PASS (0s)
@@ -80,7 +80,7 @@ A `== portability` section runs after the plugin build whenever
 pass:
 
 ```
-portability-check — 49 shell scripts under <repo>
+portability-check — 110 shell scripts under <repo>
 
   clean — nothing found that runs on only one of macOS and Linux
 ```
@@ -112,7 +112,7 @@ Exit 0 clean, 1 warnings only, 2 errors.
 ### 2. Sanitize every shipped directory
 
 ```bash
-for d in core bin docs harness packs; do bin/sanitize "$d"; done
+for d in core bin docs harness playbooks; do bin/sanitize "$d"; done
 ```
 
 Scans for secrets, personal identifiers, internal infrastructure, host paths,
@@ -150,7 +150,7 @@ a driver for real, and asserts on what happened.
 
 | Evaluation | Proves |
 |---|---|
-| `fresh-install-day-one` | a brand-new project installs with no unresolved variables, passes `acp doctor`, and can run `pack search` and the first work-order commands |
+| `fresh-install-day-one` | a brand-new project installs with no unresolved variables, passes `acp doctor`, and can run `playbook search` and the first work-order commands |
 | `hook-blocks-database-drop` | the destructive-SQL rule still blocks `DROP DATABASE` |
 | `hook-commit-quality-blocks-secret` | a staged AWS-style key blocks the commit; a clean commit passes |
 | `hook-config-protection` | editing an existing `tsconfig` is blocked, creating one is allowed |
@@ -185,7 +185,7 @@ deliberately and do not fail the run.
 bin/build-plugin
 ```
 
-**Proves:** the plugin packaging still assembles from the same sources as the
+**Proves:** the plugin build still assembles from the same sources as the
 installer.
 
 ```
@@ -233,7 +233,7 @@ inside that directory only, saves the JSON transcript, and runs a check script.
 
 | Scenario | Asks the session to | Passes when |
 |---|---|---|
-| `feature` | add a `GET /api/v1/tasks/stats` endpoint through the full lifecycle | a work order was opened, the SPEC has no template placeholders and names the feature, the endpoint is in `src/server.js` with no `console.log`, a suite exists, the verification says `EXECUTED — PASS`, the closeout has real lessons, and the work order was promoted into a pack |
+| `feature` | add a `GET /api/v1/tasks/stats` endpoint through the full lifecycle | a work order was opened, the SPEC has no template placeholders and names the feature, the endpoint is in `src/server.js` with no `console.log`, a suite exists, the verification says `EXECUTED — PASS`, the closeout has real lessons, and the work order was promoted into a playbook |
 | `close-refusal` | close WO-0001 with verification explicitly skipped | either no closeout was written and the session said why, or a closeout exists **and** the verification really is `EXECUTED — PASS` |
 | `analyze` | run `/analyze-repo .` | a work order with `area=analysis` exists, its documents carry at least three `<!-- SOURCE: -->` comments, and the doc-claims hook resolves every one of them |
 | `hooks` | add request logging and a small helper, no work order | the logging exists, `src/util.js` was created, and no `console.log` survived the quality gate |
@@ -265,7 +265,7 @@ wo new "Smoke test" --area backend                               # 5. expect: WO
 wo suite 1                                                       # 6. expect: a suite in Workspace/Testing/suites/
 wo close 1                                                       # 7. expect: REFUSED, no verification
 bug new "Smoke bug" --category api                               # 8. expect: BUG-0100
-pack search "anything"                                           # 9. expect: "no packs yet", exit 0
+playbook search "anything"                                       # 9. expect: "no playbooks yet", exit 0
 acp lint                                                         # 10. expect: 0 errors
 ```
 
@@ -294,6 +294,6 @@ Include, in this order:
    and the project's `pipeline.config.sh` with any values you consider private
    replaced.
 5. **For a lint or sanitize failure**, the report itself
-   (`bin/sanitize <dir> --report report.md`) rather than a summary of it.
+   (`bin/sanitize <dir> [<dir>...] --report report.md`) rather than a summary of it.
 
 Do not attach a scratch project without running `bin/sanitize` on it first.

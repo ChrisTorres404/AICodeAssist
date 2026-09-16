@@ -104,3 +104,37 @@ parse_manifest_line() {
   MF_LABEL="${MF_LABEL:-$MF_FILE}"
   return 0
 }
+
+# ============================================================================
+# Unlisted suite files
+# ============================================================================
+# The suite files on disk that no manifest row names. They never run in a
+# regression, and an unlisted suite is the commonest way for a check to be
+# written once and then quietly stop being evidence for anything. Every runner
+# asks the same question, so it is answered once here.
+#
+#   unlisted_suite_files [<manifest>]   # one relative path per line
+#
+# Files whose name begins with _ and anything named like a helper are skipped:
+# they are libraries a suite sources, not suites.
+# Note: this uses parse_manifest_line, so MF_* hold the last line parsed when
+# it returns.
+unlisted_suite_files() {
+  local manifest="${1:-$SUITES_MANIFEST}"
+  [ -d "$SUITES_DIR" ] || return 0
+  local path rel listed line
+  for path in "$SUITES_DIR"/*.sh "$SUITES_DIR"/*/*.sh; do
+    [ -f "$path" ] || continue
+    rel="${path#"$SUITES_DIR"/}"
+    case "$rel" in _*|*/_*|*helpers*) continue;; esac
+    listed=false
+    if [ -f "$manifest" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        parse_manifest_line "$line" || continue
+        [ "$MF_FILE" = "$rel" ] && { listed=true; break; }
+      done < "$manifest"
+    fi
+    [ "$listed" = false ] && echo "$rel"
+  done
+  return 0
+}

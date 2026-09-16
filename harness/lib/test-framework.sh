@@ -69,29 +69,15 @@ now_ms() {
   esac
 }
 
-# Database connection (optional — SQL helpers are inert without DB_NAME)
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-5432}"
-DB_USER="${DB_USER:-$USER}"
-DB_NAME="${DB_NAME:-}"
-export PGPASSWORD="${PGPASSWORD:-${DB_PASS:-}}"
-
-# API connection
-API_BASE="${API_BASE:-{{API_BASE_URL}}}"
-HEALTH_PATH="${HEALTH_PATH:-/health}"
-# The health endpoint is usually at the host root (/health), not under the API
-# prefix. Try both and use the first that answers 200.
-health_url() {
-  local host; host="$(printf '%s' "$API_BASE" | sed -E 's|^(https?://[^/]+).*|\1|')"
-  local u
-  for u in "${API_BASE%/}${HEALTH_PATH}" "${host}${HEALTH_PATH}"; do
-    [ "$(curl -s -o /dev/null -w '%{http_code}' -A "${TEST_USER_AGENT:-harness}" "$u" 2>/dev/null)" = "200" ] && { printf '%s' "$u"; return 0; }
-  done
-  printf '%s' "${API_BASE%/}${HEALTH_PATH}"; return 1
-}
-
-METRICS_PATH="${METRICS_PATH:-/metrics}"
-TEST_USER_AGENT="${TEST_USER_AGENT:-Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36}"
+# Everything shared with the other two libraries — section_header, the HTTP
+# verbs, run_sql, the credential and account helpers, assert_http_status,
+# assert_json_equals, assert_sql_equals — comes from test-common.sh, which
+# sources test-env.sh in turn for the connection details, health_url,
+# db_configured and the known-state helpers. Nothing below redefines any of
+# them, so this framework and test-helpers.sh cannot disagree about where the
+# service is, what counts as a configured database, or what an assertion means.
+# shellcheck source=./test-common.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/test-common.sh"
 
 # ============================================================================
 # NAVIGATION SYSTEM
@@ -103,9 +89,12 @@ push_menu() {
 }
 
 pop_menu() {
-  if [ ${#MENU_HISTORY[@]} -gt 0 ]; then
-    CURRENT_MENU="${MENU_HISTORY[-1]}"
-    unset 'MENU_HISTORY[-1]'
+  # Indexed from the length rather than with [-1]: negative subscripts need
+  # bash 4.3 and macOS ships 3.2.
+  local last=$(( ${#MENU_HISTORY[@]} - 1 ))
+  if [ "$last" -ge 0 ]; then
+    CURRENT_MENU="${MENU_HISTORY[$last]}"
+    unset "MENU_HISTORY[$last]"
   else
     CURRENT_MENU="main"
   fi
@@ -259,9 +248,8 @@ skip_test() {
 # SQL HELPERS
 # ============================================================================
 
-db_configured() {
-  [ -n "${DB_NAME:-}" ] && command -v psql > /dev/null 2>&1
-}
+# db_configured comes from test-env.sh; run_sql from test-common.sh. query_db
+# is this framework's own: single-value output for run_test to grep.
 
 query_db() {
   local query="$1"
@@ -275,6 +263,14 @@ query_db_verbose() {
   psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>/dev/null
 }
 
+# The id-and-name form of a database assertion: it records a numbered test in
+# this framework's report, which is what the summary and the failure details
+# are built from. test-common.sh's assert_sql_equals is the equality form of
+# the same idea — same query, same comparison, no test id — and is available to
+# every library, including this one.
+#
+#   assert_sql 3.1 "the row was written" "SELECT count(*) FROM t;" 1
+#   assert_sql_equals "SELECT count(*) FROM t;" 1 "the row was written"
 assert_sql() {
   local test_id="$1"
   local test_name="$2"
@@ -294,21 +290,13 @@ count_rows() {
 # HTTP HELPERS
 # ============================================================================
 
-http_get() {
-  local url="$1"
-  curl -s -w "\nHTTP_CODE:%{http_code}" -A "$TEST_USER_AGENT" \
-    ${ORIGIN:+-H "Origin: $ORIGIN"} "$url" 2>/dev/null
-}
-
-http_post() {
-  local url="$1"
-  local data="$2"
-  curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "$url" \
-    -H "Content-Type: application/json" \
-    -A "$TEST_USER_AGENT" \
-    ${ORIGIN:+-H "Origin: $ORIGIN"} \
-    -d "$data" 2>/dev/null
-}
+# http_get and http_post come from test-common.sh. They leave the result in
+# HTTP_CODE, HTTP_BODY and HTTP_DURATION rather than echoing the body with the
+# code appended, so read those variables — a captured call, resp=$(http_get
+# "$url"), runs in a subshell where everything they set is discarded.
+#
+# extract_http_code and extract_http_body below remain for a response a suite
+# built with its own curl -w.
 
 extract_http_code() {
   echo "$1" | grep "HTTP_CODE:" | cut -d: -f2
@@ -331,15 +319,16 @@ assert_http() {
 
   echo -e "${YELLOW}[$test_id]${NC} $test_name"
 
-  local response
+  # Not captured in a subshell: http_get and http_post answer in HTTP_CODE and
+  # HTTP_BODY, and a subshell would throw both away.
   if [ "$method" = "GET" ]; then
-    response=$(http_get "$url")
+    http_get "$url"
   else
-    response=$(http_post "$url" "$data")
+    http_post "$url" "$data"
   fi
 
-  local http_code=$(extract_http_code "$response")
-  local body=$(extract_http_body "$response")
+  local http_code="${HTTP_CODE:-}"
+  local body="${HTTP_BODY:-}"
 
   local test_end; test_end=$(now_ms)
   local duration_ms=$(( test_end - test_start ))
@@ -557,10 +546,12 @@ prompt_user() {
   local prompt_text="$1"
   local default="${2:-}"
 
+  # The prompt goes to stderr so the answer is the only thing on stdout:
+  #   answer="$(prompt_user "Suite number")"
   if [ -n "$default" ]; then
-    echo -ne "${CYAN}${BOLD}> ${NC}$prompt_text ${DIM}[$default]${NC}: "
+    echo -ne "${CYAN}${BOLD}> ${NC}$prompt_text ${DIM}[$default]${NC}: " >&2
   else
-    echo -ne "${CYAN}${BOLD}> ${NC}$prompt_text: "
+    echo -ne "${CYAN}${BOLD}> ${NC}$prompt_text: " >&2
   fi
 
   read user_input
@@ -637,11 +628,14 @@ check_database_status() {
 
 export -f draw_box draw_box_bottom show_progress_bar
 export -f begin_test_suite run_test skip_test
-export -f query_db query_db_verbose assert_sql count_rows
-export -f http_get http_post extract_http_code extract_http_body assert_http
+export -f query_db query_db_verbose assert_sql assert_sql_equals count_rows
+export -f http_request http_get http_post extract_http_code extract_http_body assert_http
 export -f generate_summary_report
 export -f show_welcome_message show_help prompt_user confirm_action wait_for_key
-export -f check_server_status check_database_status db_configured
+export -f check_server_status check_database_status db_configured run_psql run_sql
+# The shared internals the functions above call, so an exported function still
+# works in a child shell that inherited it.
+export -f _harness_is_func _harness_log _harness_pass _harness_fail
 export -f push_menu pop_menu clear_screen
 export -f collect_database_stats collect_api_stats
 

@@ -11,10 +11,10 @@ Workspace/
 /dist/
 
 __pycache__/
-# packs are user content; only the scaffold is tracked
-packs/*/
-!packs/README.md
-!packs/INDEX.md
+# playbooks are user content; only the scaffold is tracked
+playbooks/*/
+!playbooks/README.md
+!playbooks/INDEX.md
 
 # reference material under extraction — never committed
 Examples_for_claude/

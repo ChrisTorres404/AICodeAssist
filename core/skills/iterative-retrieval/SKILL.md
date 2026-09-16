@@ -205,12 +205,12 @@ When retrieving context for this task:
 
 ## Related
 
-- `wo promote` and the pack catalog - for patterns that improve over time
+- `wo promote` and the playbook catalog - for patterns that improve over time
 - Agent definitions bundled with this pipeline (manual install path: `agents/`)
 
 ## In this pipeline
 
 - Work is a work order: open it with `wo new`, size it honestly, fill the SPEC before code.
 - Verification means behavioural tests that **ran**: `wo verify <n> --run <suite>` writes the status from the exit code. `NOT EXECUTED — PLAN ONLY` is honest; a typed `PASS` is not.
-- Search the packs before building: `pack search "<problem>"`.
+- Search the playbooks before building: `playbook search "<problem>"`.
 - Route by area: `wo new --area`, `bug new --category`; the routing tables are in `core/rules/common/`.

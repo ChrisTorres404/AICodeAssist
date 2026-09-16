@@ -11,13 +11,13 @@
 ## How Work Happens Here
 
 ```bash
-export PATH="{{PROJECT_ROOT}}/{{PIPELINE_ROOT}}/bin:$PATH"
+export PATH="$PWD/{{PIPELINE_ROOT}}/bin:$PATH"   # from the repository root
 
 wo new "<title>"        # open a work order — creates the required documents
 wo list                 # what is in flight (SCTPVC = Spec/Checklist/Tasks/Prompt/Verification/Closeout)
 wo close <number>       # blocked until a VERIFICATION document exists
 bug new "<title>"       # same lifecycle for defects
-pack search "<term>"     # has this been solved before? search the packs first
+playbook search "<term>" # has this been solved before? search the playbooks first
 ```
 
 Fill in the SPEC **before writing code**.
@@ -90,7 +90,7 @@ anything consumes it.
 ```bash
 wo new "<title>" --size trivial|small|standard|large   # creates the folder and required docs
 wo close <number>                                    # REFUSES without VERIFICATION
-wo promote <number>                                  # carry it into your pack
+wo promote <number>                                  # carry it into your playbooks
 ```
 
 ### Work Order Rules:
@@ -261,6 +261,24 @@ When implementing features:
 - **Identifiers:** state the strategy once (for example an internal integer key plus an external UUID exposed in URLs) and follow it everywhere
 - **Schema changes:** only through migrations that are committed and applied in every environment; seed and reference data ship as migrations too
 - **Timezone and money:** one policy each, in one shared utility
+
+---
+
+## Under any agent
+
+Everything the pipeline enforces holds under any coding agent: the drivers are plain shell, the
+git hooks run at commit and push whoever typed the command, and CI runs the same rules. What
+Claude Code adds is earlier warning in the session and native slash commands and subagents.
+Under any other agent the same content is reachable as text, and you follow it as instructions:
+
+```bash
+acp commands            # the slash commands; acp command <name> prints one
+acp skills              # the skills;         acp skill <name> prints one
+acp agents --area api   # the specialists routed for an area; acp agent <name> prints one
+```
+
+A work order's prompt already carries its routed specialists. When a command says to delegate
+to a subagent, read that agent's definition and work in that role.
 
 ---
 

@@ -15,7 +15,7 @@
 #   bug status <number>
 #   bug verify <number> [--run <suite.sh>]   create VERIFICATION; with --run, execute and record
 #   bug close <number>
-#   bug promote <number> [--pack <name>] [--allow-unsanitized]
+#   bug promote <number> [--playbook <name>] [--allow-unsanitized]
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -382,17 +382,23 @@ latest_status() { # verification file -> PASS | FAIL | PLAN | none
 }
 
 cmd_promote() {
-  local n="" pack="" allow=0
-  while [ $# -gt 0 ]; do case "$1" in --pack) pack="$2"; shift 2;; --allow-unsanitized) allow=1; shift;; -*) die "unknown flag $1";; *) n="$1"; shift;; esac; done
-  [ -n "$n" ] || die "usage: bug promote <number> [--pack <name>] [--allow-unsanitized]"
+  local n="" playbook="" allow=0
+  while [ $# -gt 0 ]; do case "$1" in --playbook|--pack) playbook="$2"; shift 2;; --allow-unsanitized) allow=1; shift;; -*) die "unknown flag $1";; *) n="$1"; shift;; esac; done
+  [ -n "$n" ] || die "usage: bug promote <number> [--playbook <name>] [--allow-unsanitized]"
   local d; d="$(bug_folder "$n")"; [ -n "$d" ] || die "no BUG-$n"
   [ "$(latest_status "$d/BUG-$n-VERIFICATION.md")" = PASS ] || die "refusing to promote BUG-$n: the latest verification is not EXECUTED — PASS ($(latest_status "$d/BUG-$n-VERIFICATION.md")). Run it:  bug verify $n --run <suite.sh>"
   [ -x "$PIPELINE_ROOT/bin/sanitize" ] || die "bin/sanitize is missing — refusing to promote unscanned work."
   local rc=0; "$PIPELINE_ROOT/bin/sanitize" "$d" --quiet >/dev/null 2>&1 || rc=$?
-  if [ "$rc" -eq 2 ] && [ "$allow" -eq 0 ]; then die "refusing to promote BUG-$n: fails sanitization. Fix, or pass --allow-unsanitized for a private pack."; fi
+  if [ "$rc" -eq 2 ] && [ "$allow" -eq 0 ]; then die "refusing to promote BUG-$n: fails sanitization. Fix, or pass --allow-unsanitized for a private playbook."; fi
   local slug; slug="$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g')"
-  slug="${PROJECT_SLUG:-$slug}"; pack="${pack:-$slug}"
-  local pdir="${PACKS_DIR:-$PIPELINE_ROOT/packs}/$pack"; mkdir -p "$pdir/bugs"
+  slug="${PROJECT_SLUG:-$slug}"; playbook="${playbook:-$slug}"
+  # PACKS_DIR was the name before 1.4.0 and is still honoured when set; an
+  # install that has not been migrated yet still keeps its content under packs/.
+  local pbase="${PLAYBOOKS_DIR:-${PACKS_DIR:-}}"
+  if [ -z "$pbase" ]; then
+    if [ ! -d "$PIPELINE_ROOT/playbooks" ] && [ -d "$PIPELINE_ROOT/packs" ]; then pbase="$PIPELINE_ROOT/packs"; else pbase="$PIPELINE_ROOT/playbooks"; fi
+  fi
+  local pdir="$pbase/$playbook"; mkdir -p "$pdir/bugs"
   local b; b="$(basename "$d")"; rm -rf "$pdir/bugs/$b"; cp -R "$d" "$pdir/bugs/$b"
   local entry_dir="$pdir/catalog" entry="$pdir/catalog/BUG-$n.md" issue close root fix
   mkdir -p "$entry_dir"
@@ -401,13 +407,13 @@ cmd_promote() {
   section() { awk -v h="$2" 'BEGIN{p=0} /^## /{p=($0 ~ h)} p&&!/^## /{print}' "$1" | sed -e '/^[[:space:]]*$/d' -e '/^---*$/d' | head -n "${3:-6}"; }
   root="$( { [ -n "$close" ] && section "$close" "Root Cause" 6; } || { [ -n "$issue" ] && section "$issue" "Root Cause" 6; } || true)"
   fix="$( [ -n "$close" ] && section "$close" "(Fix|Resolution|Solution)" 6 || true)"
-  [ -f "$cat" ] || printf '# Pack catalog: %s\n\n' "$pack" > "$cat"
+  [ -f "$cat" ] || printf '# Playbook catalog: %s\n\n' "$playbook" > "$cat"
   { printf '## BUG-%s — %s\n\n- **Folder:** `bugs/%s`\n- **Promoted:** %s from project `%s`\n' "$n" "${b#BUG-$n-}" "$b" "$(date +%F)" "$slug"
     [ -n "$root" ] && { printf -- '- **Root cause:**\n'; printf '%s\n' "$root" | sed 's/^/    /'; }
     [ -n "$fix" ]  && { printf -- '- **Fix:**\n'; printf '%s\n' "$fix" | sed 's/^/    /'; }
     printf -- '- **Pitfalls:**\n    _(what would have found this faster? add it)_\n\n'; } > "$entry"
-  "$PIPELINE_ROOT/bin/pack" catalog "$pack" >/dev/null 2>&1 || true
-  echo "BUG-$n promoted to pack '$pack'. Entry: $entry — edit the Pitfalls line now."
+  PLAYBOOKS_DIR="$pbase" "$PIPELINE_ROOT/bin/playbook" catalog "$playbook" >/dev/null 2>&1 || true
+  echo "BUG-$n promoted to playbook '$playbook'. Entry: $entry — edit the Pitfalls line now."
 }
 
 cmd_close() {

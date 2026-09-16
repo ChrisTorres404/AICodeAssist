@@ -3,8 +3,8 @@
 # new-project — empty directory to a working, pipeline-equipped project
 #
 #   bin/new-project <path> [--name "Display Name"] [--domain example.com]
-#                          [--pack <name>]... [--agent-pack <name>]... [--skill-pack <name>]... [--profile minimal|standard|full]
-#                          [--no-git] [--allow-unsanitized]
+#                          [--playbook <name>]... [--agent-set <name>]... [--skill-set <name>]... [--profile minimal|standard|full]
+#                          [--no-git] [--allow-unsanitized] [--kb-level lite|standard|full]
 #
 # Creates the directory, writes pipeline.config.sh from your answers, installs
 # the pipeline (agents, skills, hooks, commands, harness), scaffolds the
@@ -16,15 +16,16 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-TARGET="" NAME="" DOMAIN="" DO_GIT=1 ALLOW_UNSANITIZED=0 AGENT_PACKS_WANTED="" SKILL_PACKS_WANTED="" PROFILE="standard"; PACKS_WANTED=()
+TARGET="" NAME="" DOMAIN="" DO_GIT=1 KB_LEVEL="lite" ALLOW_UNSANITIZED=0 AGENT_SETS_WANTED="" SKILL_SETS_WANTED="" PROFILE="standard"; PLAYBOOKS_WANTED=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --name)   NAME="$2"; shift 2;;
     --domain) DOMAIN="$2"; shift 2;;
-    --pack)   PACKS_WANTED+=("$2"); shift 2;;
-    --agent-pack) AGENT_PACKS_WANTED="$AGENT_PACKS_WANTED $2"; shift 2;;
-    --skill-pack) SKILL_PACKS_WANTED="$SKILL_PACKS_WANTED $2"; shift 2;;
+    --playbook|--pack) PLAYBOOKS_WANTED+=("$2"); shift 2;;
+    --agent-set|--agent-pack) AGENT_SETS_WANTED="$AGENT_SETS_WANTED $2"; shift 2;;
+    --skill-set|--skill-pack) SKILL_SETS_WANTED="$SKILL_SETS_WANTED $2"; shift 2;;
     --no-git) DO_GIT=0; shift;;
+    --kb-level) KB_LEVEL="$2"; shift 2;;
     --profile) PROFILE="$2"; shift 2;;
     --allow-unsanitized) ALLOW_UNSANITIZED=1; shift;;
     -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0;;
@@ -48,7 +49,7 @@ render_claude_md() { # dest — renders core/templates/project/CLAUDE.md with th
   local dest="$1"
   cp "$SRC/core/templates/project/CLAUDE.md" "$dest"
   ( set -a; . "$TARGET/pipeline.config.sh"; set +a
-    for v in PROJECT_NAME PROJECT_SLUG PROJECT_DOMAIN GITHUB_REPO PROJECT_ROOT PIPELINE_ROOT WORKSPACE_DIR DOCS_DIR WORKORDERS_DIR BUGS_DIR TESTING_DIR SESSIONS_DIR API_APP ADMIN_APP PORTAL_APP DEV_APP WEB_APP SDK_PKG DB_NAME CLI_NAME API_BASE_URL WEB_ORIGIN PROJECT_DOMAIN_RE DEV_SUBDOMAINS PROD_IP; do
+    for v in PROJECT_NAME PROJECT_SLUG PROJECT_DOMAIN GITHUB_REPO PROJECT_ROOT PIPELINE_ROOT WORKSPACE_DIR DOCS_DIR WORKORDERS_DIR BUGS_DIR TESTING_DIR SESSIONS_DIR KNOWLEDGE_DIR API_APP ADMIN_APP PORTAL_APP DEV_APP WEB_APP SDK_PKG DB_NAME CLI_NAME API_BASE_URL WEB_ORIGIN PROJECT_DOMAIN_RE DEV_SUBDOMAINS PROD_IP; do
       VAR="$v" VAL="${!v-}" perl -pi -e 's/\{\{\Q$ENV{VAR}\E\}\}/$ENV{VAL}/g' "$dest"
     done )
   STACK_JSON="$("$SRC/bin/detect-stack" "$TARGET" --json 2>/dev/null || echo '{}')" STACKS_DIR="$SRC/core/templates/project/stacks" python3 - "$dest" "$STACK_SECTION" <<'PYEOF'
@@ -91,8 +92,9 @@ sed -e "s|^export PROJECT_NAME=.*|export PROJECT_NAME=\"$NAME\"|" \
     -e "s|^export PROJECT_DOMAIN_RE=.*|export PROJECT_DOMAIN_RE=\"${DOMAIN_RE//\\/\\\\}\"|" \
     -e 's|^export PROJECT_ROOT=.*|export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" \&\& pwd -P)"   # the directory this file lives in; portable across clones|' \
     -e "s|^export DB_NAME=.*|export DB_NAME=\"${SLUG//-/_}_dev\"|" \
-    -e "s|^export AGENT_PACKS=.*|export AGENT_PACKS=\"${AGENT_PACKS_WANTED# }\"|" \
-    -e "s|^export SKILL_PACKS=.*|export SKILL_PACKS=\"${SKILL_PACKS_WANTED# }\"|" \
+    -e "s|^export KNOWLEDGE_LEVEL=.*|export KNOWLEDGE_LEVEL=\"${KB_LEVEL:-lite}\"|" \
+    -e "s|^export AGENT_SETS=.*|export AGENT_SETS=\"${AGENT_SETS_WANTED# }\"|" \
+    -e "s|^export SKILL_SETS=.*|export SKILL_SETS=\"${SKILL_SETS_WANTED# }\"|" \
     "$SRC/pipeline.config.example.sh" > "$TARGET/pipeline.config.sh"
 echo "  wrote pipeline.config.sh"
 
@@ -104,32 +106,32 @@ if [ "$DO_GIT" -eq 1 ] && command -v git >/dev/null 2>&1 && [ ! -d "$TARGET/.git
 fi
 "$SRC/bin/install.sh" "$TARGET" --profile "$PROFILE" | sed 's/^/  /'
 
-# --- 3. Knowledge packs ----------------------------------------------------
+# --- 3. Playbooks ----------------------------------------------------------
 PIPELINE_ROOT_VAL="$(. "$TARGET/pipeline.config.sh"; echo "$PIPELINE_ROOT")"
 DEST="$TARGET/$PIPELINE_ROOT_VAL"
-if [ ${#PACKS_WANTED[@]} -gt 0 ]; then
-  mkdir -p "$DEST/packs"
-  for p in "${PACKS_WANTED[@]}"; do
-    if [ -d "$SRC/packs/$p" ]; then
-      rc=0; "$SRC/bin/sanitize" "$SRC/packs/$p" --quiet >/dev/null 2>&1 || rc=$?
+if [ ${#PLAYBOOKS_WANTED[@]} -gt 0 ]; then
+  mkdir -p "$DEST/playbooks"
+  for p in "${PLAYBOOKS_WANTED[@]}"; do
+    if [ -d "$SRC/playbooks/$p" ]; then
+      rc=0; "$SRC/bin/sanitize" "$SRC/playbooks/$p" --quiet >/dev/null 2>&1 || rc=$?
       if [ "$rc" -eq 2 ]; then
         if [ "$ALLOW_UNSANITIZED" -eq 0 ]; then
-          echo "  REFUSED: pack '$p' fails sanitization (secrets, PII, or internal references)." >&2
-          echo "           Run: $SRC/bin/sanitize $SRC/packs/$p --report /tmp/$p-report.md" >&2
+          echo "  REFUSED: playbook '$p' fails sanitization (secrets, PII, or internal references)." >&2
+          echo "           Run: $SRC/bin/sanitize $SRC/playbooks/$p --report /tmp/$p-report.md" >&2
           echo "           Pass --allow-unsanitized only for a private, local install." >&2
           continue
         fi
       fi
-      cp -R "$SRC/packs/$p" "$DEST/packs/"
-      echo "  pack installed: $p ($(du -sh "$DEST/packs/$p" | cut -f1))"
+      cp -R "$SRC/playbooks/$p" "$DEST/playbooks/"
+      echo "  playbook installed: $p ($(du -sh "$DEST/playbooks/$p" | cut -f1))"
     else
-      echo "  WARNING: no pack named '$p' — available: $(ls "$SRC/packs" 2>/dev/null | tr '\n' ' ')" >&2
+      echo "  WARNING: no playbook named '$p' — available: $(ls "$SRC/playbooks" 2>/dev/null | tr '\n' ' ')" >&2
     fi
   done
-  cp -p "$SRC/bin/pack" "$DEST/bin/pack"; chmod +x "$DEST/bin/pack"
-  ( cd "$DEST" && ./bin/pack index >/dev/null 2>&1 ) || true
+  cp -p "$SRC/bin/playbook" "$DEST/bin/playbook"; chmod +x "$DEST/bin/playbook"
+  ( cd "$DEST" && ./bin/playbook index >/dev/null 2>&1 ) || true
 else
-  echo "  no packs yet — 'wo promote <n>' after your first verified work order creates the first one"
+  echo "  no playbooks yet — 'wo promote <n>' after your first verified work order creates the first one"
 fi
 
 # --- 4. Project instructions: AGENTS.md for every agent, CLAUDE.md importing it ---

@@ -4,6 +4,7 @@
 **Status:** NOT STARTED | IN PROGRESS | IMPLEMENTATION COMPLETE
 **SDK Package:** {{SDK_PKG}}
 **SDK Version:** [version]
+**Last Updated:** [YYYY-MM-DD]
 
 ---
 

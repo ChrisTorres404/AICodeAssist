@@ -7,7 +7,7 @@ description: Build MCP servers with Node/TypeScript SDK — tools, resources, pr
 
 The Model Context Protocol (MCP) lets AI assistants call tools, read resources, and use prompts from your server. Use this skill when building or maintaining MCP servers. The SDK API evolves; check the official documentation (query-docs for "MCP") or the official MCP documentation for current method names and signatures.
 
-For the broader routing decision of when a capability should be a rule, a skill, MCP, or a plain CLI/API workflow, see [docs/capability-surface-selection.md](../../docs/capability-surface-selection.md).
+Before building a server, settle the broader routing decision: a capability belongs in MCP only when it needs a live connection to an external system. If it is guidance, it belongs in a rule or a skill; if it is a one-shot command, a plain CLI or API call is simpler and cheaper to maintain.
 
 ## When to Use
 
@@ -71,5 +71,5 @@ Use **Zod** (or the SDK’s preferred schema format) for input validation.
 
 - Work is a work order: open it with `wo new`, size it honestly, fill the SPEC before code.
 - Verification means behavioural tests that **ran**: `wo verify <n> --run <suite>` writes the status from the exit code. `NOT EXECUTED — PLAN ONLY` is honest; a typed `PASS` is not.
-- Search the packs before building: `pack search "<problem>"`.
+- Search the playbooks before building: `playbook search "<problem>"`.
 - Route by area: `wo new --area`, `bug new --category`; the routing tables are in `core/rules/common/`.

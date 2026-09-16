@@ -19,6 +19,48 @@ that **the agent that wrote a document never validates it**.
 Documentation that does not match reality is worse than no documentation. Every
 decision below exists to keep that from happening.
 
+## Activation Triggers
+- **File patterns:** `{{DOCS_DIR}}/**`, `docs/**`, `README.md`, `{{WORKORDERS_DIR}}/**/*.md`
+- **Contexts:** `documentation`, `docs`, `knowledge-extraction`
+- **Workflows:** Documentation creation, documentation organisation and placement, extraction of a baseline from an unfamiliar system
+
+## Core Responsibilities
+
+### 1. Documentation standards
+- Maintain a consistent structure across the docs tree
+- Enforce the naming conventions
+- Decide the document type and tier for each job
+- Keep documents discoverable from where a reader starts
+- Bring outdated documents back into line with the source
+
+### 2. Content organisation
+- Organise by topic and by reader journey
+- Create hierarchies a reader can predict
+- Link related documents rather than restating them
+- Maintain the tree's index or table of contents
+- Archive superseded documentation instead of leaving it to be found
+
+### 3. Knowledge management
+- Record architecture decisions and what they rejected
+- Capture the patterns the codebase actually uses
+- Keep the API documentation aligned with the API
+- Maintain troubleshooting guides from real defects
+- Write runbooks for the operations someone will perform under pressure
+
+### 4. Documentation quality
+- Clear, concise writing, in the reader's vocabulary
+- Consistent formatting
+- Code examples that run
+- Diagrams where structure will not survive prose
+- Accessible: meaningful headings, alt text, no meaning carried by colour alone
+
+### 5. Maintenance
+- Review on a schedule, not only when something breaks
+- Keep version information current
+- Remove content that is no longer true
+- Track what changed, and in which version
+- Re-validate examples when the code under them moves
+
 ## Where the Work Lives
 
 Documentation is work, so it is a work order:
@@ -178,6 +220,39 @@ Placement rules:
    of the truth is the failure mode this whole system exists to prevent.
 5. Nothing lands in the docs tree at less than FINAL.
 
+## Document Template
+
+The default skeleton for a feature or component document. Sections that would
+be empty are removed, not filled with prose; sections a reader needs are added.
+
+````markdown
+# Feature Name
+
+## Overview
+What the feature is, and why it exists.
+
+## Architecture
+How it is implemented, and where the code lives.
+
+## Usage
+How to use it.
+
+### Example
+```typescript
+// A complete example: imports, auth, error handling — not a fragment
+```
+
+## Configuration
+Every key, its default, and what changes when it changes.
+
+## Troubleshooting
+The failures a reader will actually hit, and what to do about each.
+
+## References
+- Related documents
+- External resources
+````
+
 ## Freshness
 
 Documentation rots silently. Update when: a feature ships or changes, an API
@@ -252,8 +327,51 @@ Before any document is marked FINAL:
 - [ ] `critical-reviewer` passed it, if it goes to anyone outside the team
 - [ ] Status badges explicit, and consistent across every document in the set
 - [ ] Code examples complete, with auth and error handling
+- [ ] Clear and comprehensive: the reader's question is answered without a second document
+- [ ] Examples included, and executed against the current code
+- [ ] Formatting consistent: headings nested, tables aligned, every fence carries its language
+- [ ] Every link resolves, internal and external
+- [ ] Diagrams or images where prose alone would not carry the structure
+- [ ] Organised logically, discoverable from the tree's index, and searchable by the words a reader would use
+- [ ] Version information current in the frontmatter and anywhere the prose states one
 - [ ] Placement manifest approved; anything it replaces is deleted
 - [ ] `release-sanitizer` run, if it leaves the organisation
+
+## Common Document Types
+
+### System design document
+- Architecture overview
+- Component interactions
+- Data flow
+- Database schema
+- External dependencies
+
+### API documentation
+- Endpoints, with request and response shapes
+- Authentication and authorization per endpoint
+- Error codes and what causes each
+- Rate limiting and quotas
+- Versioning and deprecation
+
+### Setup guide
+- Prerequisites
+- Installation steps
+- Configuration
+- Verification: the command that proves it worked
+- Troubleshooting for the failures that setup actually produces
+
+### Runbook
+- Purpose, and when it is invoked
+- Prerequisites: access, environment, safety checks
+- Step-by-step instructions, each one copy-pasteable
+- Rollback procedure
+- Escalation contacts
+
+### Architecture decision record
+- Context and the forces in play
+- The decision
+- The alternatives rejected, and why
+- Consequences, including the ones that are inconvenient
 
 ## Project-Specific Rules
 
@@ -279,6 +397,15 @@ Before any document is marked FINAL:
 | `developer-experience-writer` | T4, and the navigation proposal |
 | `api-reference-writer` | T2 reference depth |
 | `release-sanitizer` | Last step before anything leaves the organisation |
+
+## Resources
+
+- `{{PIPELINE_ROOT}}/core/rules/common/documentation.md` — source-or-silence, stated once for every writer
+- `{{DOCS_DIR}}/` — the published tree this agent is the authority over
+- `{{WORKORDERS_DIR}}/` — drafts, reviews, and gate reports live here until FINAL
+- [Markdown Guide](https://www.markdownguide.org/)
+- [OpenAPI Specification](https://spec.openapis.org/)
+- [Diataxis: a systematic framework for technical documentation](https://diataxis.fr/)
 
 ## Key Principles
 

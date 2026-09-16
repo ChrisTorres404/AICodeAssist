@@ -19,7 +19,8 @@ next-session--<context>--YYYY-MM-DD--HHMM.md
 ## Template
 
 Use `{{PIPELINE_ROOT}}/core/templates/sessions/SESSION-HANDOFF-TEMPLATE.md`
-exactly. Every heading, in order. Write `N/A` where a section does not apply
+(annotated) or `NEXT-SESSION-TEMPLATE.md` beside it (blank; each section is defined
+in `core/instructions/02-next-session-rules.md`) exactly. Every heading, in order. Write `N/A` where a section does not apply
 rather than deleting it — a fresh session reads the shape as much as the text.
 
 ## What makes a handoff useful

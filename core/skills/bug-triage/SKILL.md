@@ -8,7 +8,7 @@ description: Open, investigate, or close a bug. Use when the user reports someth
 ## Has this happened before?
 
 ```bash
-{{PIPELINE_ROOT}}/bin/pack bug "<symptom>"
+{{PIPELINE_ROOT}}/bin/playbook bug "<symptom>"
 ```
 
 Recurring bugs are common and the earlier folder usually contains the root
