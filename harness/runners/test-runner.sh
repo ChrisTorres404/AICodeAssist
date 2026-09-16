@@ -2,42 +2,35 @@
 # ============================================================================
 # {{PROJECT_NAME}} Interactive Test Runner
 # ============================================================================
-# A menu over the same inventory the regression runner uses: the suites listed
-# in harness/config/suites.manifest, found in the suites directory. It holds no
-# tests of its own — everything it offers is a suite file on disk.
+# The by-hand runner: a menu over the same inventory the canonical regression
+# runner uses (../runners/run-all-critical-tests.sh), for picking one suite,
+# one tier, or hunting a flake by repeating a suite. It holds no tests of its
+# own — everything it offers is a suite file on disk, listed in the manifest.
 #
 #   ./test-runner.sh              interactive menu
 #   ./test-runner.sh --list       print the inventory and exit
 #
-# Environment: ACTIVE_ENV, SUITES_DIR, SUITES_MANIFEST, RESULTS_DIR.
+# Every log it keeps goes under TEST_RESULTS_DIR — the same directory every
+# other runner writes to. See ../lib/paths.sh.
+#
+# Environment: ACTIVE_ENV, SUITES_DIR, SUITES_MANIFEST, TEST_RESULTS_DIR.
 # ============================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${TEST_CONFIG:-$SCRIPT_DIR/../config/test-config.env}"
-# resolved after SUITES_DIR below: the project-owned manifest beside the suites wins
 
-if [ -z "${SUITES_DIR:-}" ]; then
-  for candidate in \
-      "$SCRIPT_DIR/../../../{{TESTING_DIR}}/suites" \
-      "$SCRIPT_DIR/../../{{TESTING_DIR}}/suites" \
-      "$SCRIPT_DIR/../suites"; do
-    [ -d "$candidate" ] && { SUITES_DIR="$candidate"; break; }
-  done
-  SUITES_DIR="${SUITES_DIR:-$SCRIPT_DIR/../suites}"
-if [ -n "${SUITES_MANIFEST:-}" ]; then MANIFEST="$SUITES_MANIFEST"
-elif [ -f "$SUITES_DIR/../suites.manifest" ]; then MANIFEST="$SUITES_DIR/../suites.manifest"
-else MANIFEST="$SCRIPT_DIR/../config/suites.manifest"; fi
-fi
+# shellcheck source=../lib/paths.sh
+. "$SCRIPT_DIR/../lib/paths.sh"
+MANIFEST="$SUITES_MANIFEST"
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
 fi
 
-RESULTS_DIR="${RESULTS_DIR:-$(dirname "$SUITES_DIR")/results}"
-mkdir -p "$RESULTS_DIR"
+mkdir -p "$TEST_RESULTS_DIR"
 
 COVERAGE_SCRIPT="$SCRIPT_DIR/../scripts/calculate-coverage.js"
 
@@ -69,22 +62,22 @@ health_url() {
 # ====================================================================
 
 SUITE_TIERS=()
+SUITE_TYPES=()
 SUITE_FILES=()
 SUITE_LABELS=()
 
 load_manifest() {
   if [ ! -f "$MANIFEST" ]; then
-    echo "No suite manifest at $MANIFEST — add tier|file|label lines." >&2
+    echo "No suite manifest at $MANIFEST — add tier|type|file|label lines." >&2
     return 0
   fi
-  local tier file label
-  while IFS='|' read -r tier file label; do
-    case "$tier" in ''|\#*) continue;; esac
-    tier="$(printf '%s' "$tier" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
-    [ -n "$file" ] || continue
-    SUITE_TIERS+=("$tier")
-    SUITE_FILES+=("$file")
-    SUITE_LABELS+=("${label:-$file}")
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    parse_manifest_line "$line" || continue
+    SUITE_TIERS+=("$MF_TIER")
+    SUITE_TYPES+=("$MF_TYPE")
+    SUITE_FILES+=("$MF_FILE")
+    SUITE_LABELS+=("$MF_LABEL")
   done < "$MANIFEST"
 }
 
@@ -146,7 +139,7 @@ list_suites() {
     return
   fi
 
-  printf "%-5s %-16s %-12s %s\n" "#" "TIER" "STATUS" "SUITE"
+  printf "%-5s %-16s %-10s %-10s %s\n" "#" "TIER" "TYPE" "STATUS" "SUITE"
   echo "────────────────────────────────────────────────────────────────"
 
   local i status
@@ -157,7 +150,7 @@ list_suites() {
     else
       status="MISSING"
     fi
-    printf "%-5s %-16s %-12s %s\n" "$((i + 1))" "${SUITE_TIERS[$i]}" "$status" "${SUITE_LABELS[$i]}"
+    printf "%-5s %-16s %-10s %-10s %s\n" "$((i + 1))" "${SUITE_TIERS[$i]}" "${SUITE_TYPES[$i]:-untyped}" "$status" "${SUITE_LABELS[$i]}"
   done
 
   local extra
@@ -186,7 +179,7 @@ run_suite_file() {
 
   local stamp result_file
   stamp="$(date +%Y%m%d_%H%M%S)"
-  result_file="$RESULTS_DIR/$(basename "$file" .sh)_${stamp}.log"
+  result_file="$TEST_RESULTS_DIR/$(basename "$file" .sh)_${stamp}.log"
 
   echo -e "${CYAN}════════════════════════════════════════════════════════════${NC}"
   echo -e "${CYAN}Running: $label${NC}  ${DIM}($file)${NC}"
@@ -296,7 +289,7 @@ coverage_report() {
     echo -e "${RED}node is required for the coverage report${NC}"
     return 1
   fi
-  node "$COVERAGE_SCRIPT" "$doc"
+  TEST_RESULTS_DIR="$TEST_RESULTS_DIR" node "$COVERAGE_SCRIPT" "$doc"
 }
 
 # ====================================================================

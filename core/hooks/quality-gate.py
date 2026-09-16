@@ -33,6 +33,29 @@ RULES = [
     (re.compile(r"\bFIXME\b"),                                               "FIXME left in source"),
 ]
 
+# The installed pipeline is vendored into the project it serves, with this script at
+# <pipeline>/core/hooks/. Its own rule tables quote the literals these rules look
+# for, and its shipped scripts log to the console for real, so a scan that reads the
+# pipeline reports the pipeline instead of the project — under strict, on every
+# edit, forever. Same for the agent and skill copies under .claude/.
+PIPELINE_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+CLAUDE_DIR = re.compile(r"(^|/)\.claude/")
+
+
+def vendored(path, base):
+    """True when this path is the pipeline's own installed source rather than the
+    project's code. Kept in step with the same rule in commit-quality.py and with
+    the --exclude check.py derives; a change here belongs in all three.
+
+    The pipeline root is skipped only when it sits inside the project. A checkout of
+    the pipeline itself is the project, and skipping it there would switch the rule
+    off in the one repository that must keep it on."""
+    if CLAUDE_DIR.search(path): return True
+    base = os.path.realpath(base)
+    if base == PIPELINE_DIR: return False
+    full = os.path.realpath(os.path.join(base, path))
+    return full == PIPELINE_DIR or full.startswith(PIPELINE_DIR + os.sep)
+
 
 def edited_text(ti):
     """The text this tool call writes: Write content, Edit new_string, or every MultiEdit new_string."""
@@ -53,6 +76,8 @@ def main():
         return 0
     if re.search(r"(^|/)(test|tests|__tests__|spec)/|\.(test|spec)\.", path):
         return 0          # test files may legitimately log and stub
+    if vendored(path, os.getcwd()):
+        return 0          # the pipeline's own vendored source is not the project's code
 
     text = edited_text(ti)
     if not text:

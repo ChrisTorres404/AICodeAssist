@@ -24,3 +24,8 @@ fill_bug() { # <number> [project root]
   local n="$1" root="${2:-.}" f
   for f in "$root"/Workspace/Docs/Bugs/BUG-"$n"-*/BUG-"$n"-VERIFICATION.md; do fill_verification "$f"; done
 }
+
+fill_review() { # <number> [project root] — stand in for the reviewer, for evaluations testing something else
+  local n="$1" root="${2:-.}" f
+  for f in "$root"/Workspace/Docs/WorkOrders/WO-"$n"-*/WO-"$n"-REVIEW.md; do fill_verification "$f"; done
+}

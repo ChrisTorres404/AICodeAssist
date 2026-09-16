@@ -22,6 +22,11 @@
 
 ## Requirements Traceability
 
+When the suite prints a line per check, the driver keeps those lines in the
+Execution Record and the mapping below is read straight off them; when it
+prints only a verdict, the mapping is traced from the suite's source and this
+section must say so.
+
 ### Requirement 1: [Requirement Description]
 
 **Source:** WO-XXXX-SPEC.md, Section X
@@ -93,7 +98,7 @@
 | Document | Location |
 |----------|----------|
 | Test Harness | `{{WORKORDERS_DIR}}/WO-XXXX-<name>/wo-XXXX-test-harness.md` |
-| Execution Results | `{{TESTING_DIR}}/test-results/wo-XXXX-execution-YYYYMMDD.md` |
+| Execution Results | `{{TESTING_DIR}}/results/wo-XXXX-execution-YYYYMMDD.md` |
 | Test Suite Script | `{{TESTING_DIR}}/suites/wo-XXXX-feature-name.sh` |
 
 ---

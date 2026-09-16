@@ -136,7 +136,11 @@ The honest evidence so far, all of it reproducible from this repository:
   lifecycle, pass. That includes four simultaneous creators getting distinct work-order
   numbers, a verification interrupted mid-run leaving no stale pass behind, and a failed
   upgrade leaving the project intact.
-- The pipeline tests itself with the same discipline: `bin/acp test` runs thirty
+- A real adoption into a mature monorepo, 95 work orders and 44 bugs migrated and 27
+  suites wired, produced 29 findings. Every one that was a defect is fixed and has a
+  regression evaluation; the ones that were design gaps became `acp baseline`, `wo adopt`,
+  `wo suite --wrap`, and exit 77.
+- The pipeline tests itself with the same discipline: `bin/acp test` runs fifty
   behavioural evaluations, each of which installs into a scratch project and asserts on
   what actually happened.
 
@@ -157,6 +161,30 @@ These are limits of the design, written down so nobody discovers them the hard w
 - **Git hooks do not travel through a clone.** Every fresh clone runs `acp install`
   once. That is how git works, not something the pipeline can change.
 
+## Adopting a project that already exists
+
+Most projects that want this are not new. They have a record of work already done, a test
+harness of their own, and a codebase nobody has measured in a while. The tool has a path for
+each, and one order that avoids most of the trouble: commit first, measure second, install
+third, wrap rather than rewrite, then verify, close, and commit in that order.
+
+- **`acp baseline`** runs the project's own tests once, records the result bound to the tree
+  it ran against, and reports the record against the measurement. Structure checks say nothing
+  about whether the tests pass; this is the step that asks, and `acp doctor` asks for it.
+- **`wo adopt <file> --number N`** brings an existing work order in as history: the document
+  unchanged, the number it already cites, a state that is neither open nor closed, and no
+  verification. Adopted work is recorded, not verified, until a suite genuinely runs. `bug adopt`
+  does the same and keeps the category in the metadata, because an adopted number may land in
+  a series it does not belong to.
+- **`wo suite <n> --wrap '<command>'`** scaffolds a suite that delegates to the runner the
+  project already has instead of the shipped HTTP template. `SUITE_COMMAND` in the configuration
+  makes that the default shape.
+- **Exit 77 means "I could not run."** A suite whose environment never came up has asserted
+  nothing, and is recorded as `NOT EXECUTED — PRECONDITION FAILED`, never as a failure.
+
+The full runbook, with the mistakes it was written from, is in
+[docs/adopting-an-existing-project.md](docs/adopting-an-existing-project.md).
+
 ## Works with your tools
 
 The drivers (`wo`, `bug`, `pack`, `acp`) are plain bash and run under any coding agent
@@ -164,9 +192,12 @@ or none. The git `commit-msg` hook runs regardless of who typed the command. The
 templates and the methodology are files any agent can read.
 
 The session hooks, the slash commands and the specialist subagents are Claude Code
-features. Without Claude Code you keep the drivers, the git hook, the templates and the
-methodology, and you lose the in-session early warnings. Everything the tool refuses to
-do, it still refuses.
+features. Everything else reaches every agent: the instructions are written to `AGENTS.md`,
+which Codex, Cursor and most agents read, and `CLAUDE.md` imports it; the specialists routed
+for a work order are written into the work order's own prompt; and the rules run at
+`wo close`, in a git pre-commit hook, and in CI, none of which care which agent typed. Without
+Claude Code you lose the in-session early warnings and nothing else. Everything the tool
+refuses to do, it still refuses.
 
 ---
 
@@ -217,22 +248,33 @@ acp wo sync 0407       # pushes the current spec and status to the issue
 acp wo import 77       # creates WO-0077 from an existing issue
 ```
 
-Needs the `gh` CLI, authenticated. In a monorepo, whole-tree fingerprinting means an
-unrelated commit can make your evidence stale; run the suite again and it is current.
+Needs the `gh` CLI, authenticated.
+
+**What the fingerprint binds to.** Every file's content, tracked or not, so committing does
+not change it; and the suite that ran, bound on its own, so writing the next suite does not
+stale this one. What does change it: any edit, formatting, or a teammate's change inside the
+tree between the pass and the close. `wo new --paths` narrows the tree to the part the work
+order touches; run the suite again and the evidence is current.
 
 ## What is enforced
 
 | Rule | Mechanism | Profile |
 |---|---|---|
 | No closeout or promotion without `EXECUTED — PASS` | `wo close`, `bug close`, `wo promote` refuse on missing, plan-only, failed, or unfinished | always |
-| A pass is bound to the source it ran against | close refuses if the tree changed after the pass, or while the suite ran | always |
+| A pass is bound to the source it ran against, and to the suite that ran | close refuses if the tree or the suite changed after the pass, or the tree moved while the suite ran | always |
+| A suite that could not run is not a failure | exit 77 records `NOT EXECUTED — PRECONDITION FAILED`; close refuses on it as such | always |
 | A verification document that is still mostly template | `wo close`, `bug close` refuse (`ALLOW_PLACEHOLDERS=1` to override) | always |
+| A standard or large work order closed without a review by someone who did not write it | `wo close` refuses without a filled-in `WO-####-REVIEW.md` (`ACP_SKIP_REVIEW=1` to override) | always, any tool |
+| Credentials, a weakened lint/format/type config, or a closeout without an executed pass, in what a work order changed | `acp check`, run by `wo close`, by the git `pre-commit` hook, and by CI | always, any tool |
 | A commit cites a work order or bug that does not exist | git `commit-msg` hook, wired at install; sees `-m`, `-F`, stdin and editor messages alike | blocks (`ACP_WO_REFERENCE=warn` to override) |
 | Credentials in staged changes | `commit-quality.py` on `git commit` | blocks; debug logging warns |
 | Lint, format, or strictness config weakened to pass a check | `config-protection.py` | blocks (`ACP_ALLOW_CONFIG_EDIT=1` to override) |
 | A closeout in the working tree rests on executed evidence | `evidence-gate.py` Stop hook | standard warns, strict blocks |
 | `console.log`, `TODO: implement`, not-implemented stubs, debug output in nine languages | `quality-gate.py` | standard warns, strict blocks |
 | Commits reference a work order | `wo-reference.py` | advisory |
+| A credential-shaped test fixture | `commit-quality.py` and `acp check` honour `// acp:allow-secret` on that line, in the diff where a reviewer sees it | blocks otherwise |
+| The pipeline's own vendored source | `commit-quality.py`, `quality-gate.py` and `acp check` skip the installed pipeline and `.claude/` copies | never reported |
+| A commit message that must quote a work order that does not exist | `wo-reference.py` honours an `Acp-Allow-Reference: WO-9999` trailer in both the tool hook and the git hook | blocks otherwise |
 | Force-push to shared branches, `--no-verify`, destructive shell | markdown hook rules | block / warn |
 | Edited files formatted with the project's own formatter | `post-edit-format.py` | standard |
 | Type errors after an edit, for that file only | `post-edit-typecheck.py` | strict |
@@ -246,6 +288,17 @@ export ACP_HOOK_PROFILE=strict          # minimal | standard | strict
 export ACP_DISABLED_HOOKS=acp:pre:wo-reference
 ```
 
+Under Claude Code the session hooks run in the agent's own environment, not in the shell of
+the command they inspect, so these have to be set where the agent starts: in the `env` block
+of `.claude/settings.json`, or exported before launching it. As a prefix on a single command
+they are silently ignored. And a hook that reads the git index reads it before your command
+runs, so staging changes must be a separate command from the `git commit` they affect.
+
+Every refusal that can fire on correct code has a visible way past it, in the diff rather
+than in an environment variable: a credential-shaped test fixture carries
+`// acp:allow-secret`, and a commit message that must quote a work order that does not exist
+carries an `Acp-Allow-Reference: WO-9999` trailer.
+
 Add your own rule as a markdown file in `.claude/hook-rules/`, no code:
 
 ```markdown
@@ -257,6 +310,43 @@ action: warn
 ---
 That looks like the production database. Are you sure?
 ```
+
+### Where enforcement lives, and why it does not depend on Claude Code
+
+Most of the table above can run in three places, and all three call one implementation:
+
+| Tier | Runs | Needs | Catches an agent that skips the driver |
+|---|---|---|---|
+| Work order | `wo verify`, `wo close`, `bug close` | nothing, not even git | no |
+| Local backstop | git `pre-commit` and `commit-msg` hooks, written at install | git | yes |
+| Shared backstop | CI on the pull request (`acp ci github` adds the workflow) | a remote | yes, humans included |
+
+The session hooks in `.claude/settings.json` run only inside Claude Code. They are the early
+warning, not the enforcement: the same rules are said again at `wo close`, at commit time, and
+on the pull request, and those three do not care which agent typed. Switching tools mid-project
+loses the early warning and nothing else, because the state is in files, not in a session.
+
+`acp check` is the rule set on its own, over the staged set, changes since a ref, an explicit
+list of paths, or the files a work order has changed since it opened. That last one works
+without git, from a manifest `wo new` takes of the tree. Blocking everywhere: credential-like
+values, a lint, format or strictness configuration that was modified, and a closeout whose
+latest verification is not an executed pass. Advisory, and blocking under the strict profile:
+debug logging, stubs, oversized UI files, documentation claims that trace to nothing.
+
+Without git, the work-order tier is all there is. That is still the tier that does the work,
+but nothing can catch a closeout written by hand. A local repository with no remote costs
+nothing and turns the backstop on; install and doctor both say so and give the command.
+
+**Instructions reach every agent.** Install writes `AGENTS.md`, which Codex, Cursor and most
+agents read, and a short `CLAUDE.md` that imports it. Your own copies of either are never
+touched; doctor warns when the two have diverged. **Specialists reach every agent** the same
+way: `wo new` writes the routed roles, their guidance and the path to each definition into the
+work order's own prompt, so whatever tool does the work reads them. Under Claude Code the
+prompt names the subagent to delegate to. `acp agent <name>` prints any of them from a shell.
+
+**Evidence can be scoped.** In a monorepo, `wo new --paths packages/api` binds the fingerprint,
+the manifest and the close-time checks to that part of the tree, so an unrelated commit
+elsewhere does not invalidate the work order's evidence.
 
 ### The commit-msg hook
 
@@ -328,8 +418,9 @@ pack search "rate limit"
 pack show WO-0407
 ```
 
-`wo promote` moves a verified work order into your project's pack and writes a catalog
-entry. The repository ships the machinery and no corpus: `packs/` starts empty, and the
+`wo promote` moves a verified work order into your project's pack, carries the suites that
+produced its evidence with it, and writes a catalog entry. `pack lint` reports the entries
+whose pitfalls are still the placeholder. The repository ships the machinery and no corpus: `packs/` starts empty, and the
 author's own packs stay private. To share a pack, run `bin/sanitize` on it first.
 
 ## Before anything leaves your machine
@@ -338,8 +429,19 @@ author's own packs stay private. To share a pack, run `bin/sanitize` on it first
 bin/sanitize <dir> --report report.md
 ```
 
-Secrets, personal identifiers, internal infrastructure, host paths, dangerous files. A
-single critical finding is a FAIL, and `wo promote` refuses to promote work that fails.
+Secrets, personal identifiers, internal infrastructure, host paths, dangerous
+files. Internal infrastructure means private and public IP addresses, SSH
+connection strings, key-file references, and internal host names — a host under
+a reserved private suffix (`.internal`, `.corp`, `.local`, `.lan`, `.intranet`,
+`.home.arpa`) or a deep name under a top-level domain public documentation does
+not use. Host names are reported as warnings, not critical findings: the shape
+of a name is a judgement call, and the point is to put a person in front of it.
+
+A single critical finding is a FAIL. `new-project` refuses to install a
+pack that fails; `wo promote` refuses to promote a work order that fails. The
+`release-sanitizer` agent reviews the report with judgement.
+
+---
 
 ## Testing the pipeline itself
 

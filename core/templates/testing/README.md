@@ -118,7 +118,7 @@ cp $TEMPLATES/TEST-TEMPLATE-HARNESS.md \
 
 # 4. Record the run
 cp $TEMPLATES/TEST-TEMPLATE-EXECUTION.md \
-   {{TESTING_DIR}}/test-results/wo-0101-execution-YYYYMMDD.md
+   {{TESTING_DIR}}/results/wo-0101-execution-YYYYMMDD.md
 
 # 5. Let the driver stamp the verification from the suite's exit code
 wo verify 0101 --run {{TESTING_DIR}}/suites/wo-0101-<feature>.sh

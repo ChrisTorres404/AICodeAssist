@@ -1,0 +1,24 @@
+# The pipeline's rules on every pull request, regardless of which agent or human
+# made the commits. This is the shared backstop: the driver runs the checks when a
+# work order closes, a local git hook runs them at commit time, and this runs them
+# where nobody can skip them.
+name: acp-check
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: rules over the change
+        run: |
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            {{PIPELINE_ROOT}}/bin/acp check --since "origin/${{ github.base_ref }}"
+          else
+            {{PIPELINE_ROOT}}/bin/acp check --since HEAD~1
+          fi

@@ -9,7 +9,13 @@
 #   acp init <path> [--name N] [--domain D] [--pack P]   new project from nothing
 #   acp install <path>                                   add to an existing project
 #   acp doctor [path]                                    is the install healthy?
+#   acp baseline [--command '<cmd>'] [--dry-run]         run the project's own tests once and record the first measurement
 #   acp wo|bug|pack|sanitize|detect-stack <args>         forward to the driver
+#   acp check [--staged|--since REF|--paths P...]        the rules over a set of files; blocks on secrets,
+#                                                        weakened config, closeouts without evidence
+#   acp agent <name>                                     print a specialist's definition (any tool can read it)
+#   acp agents [--area A]                                list specialists, or the ones routed for an area
+#   acp ci github                                        add a workflow that runs the rules on every pull request
 #   acp lint [--strict]                                  validate agents, skills, hooks, rules
 #   acp eval list|run [name]|new <name>                  the pipeline's own behavioural evaluations
 #   acp test [--live]                                    every check in one command (lint, sanitize, evals, plugin; --live adds real sessions)
@@ -18,9 +24,9 @@
 #   acp help [command]
 # ---------------------------------------------------------------------------
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BIN="$ROOT/bin"
-VERSION="1.1.4"
+VERSION="1.2.0"
 
 usage() { sed -n '3,/^# -\{20,\}$/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 
@@ -116,17 +122,79 @@ doctor() {
     elif [ "$profile" = "minimal" ]; then ok "no hooks (minimal profile)"
     else bad "no acp: hooks in .claude/settings.json"; fi
   else bad ".claude/settings.json missing"; fi
-  [ -d "$target/.claude/agents" ] && ok "agents: $(ls "$target/.claude/agents" | wc -l | tr -d ' ')" || bad "no .claude/agents"
-  [ -d "$target/.claude/skills" ] && ok "skills: $(ls "$target/.claude/skills" | wc -l | tr -d ' ')" || bad "no .claude/skills"
+  # A count that cannot tell 162 working skills from 161 and one broken is not
+  # worth printing. Lint opens every file; the count is reported with its result.
+  local lrc=0 lline; lline="$("$dest/bin/lint" "$dest" 2>/dev/null | tail -1)" || lrc=$?
+  local lerr; lerr="$(printf '%s' "$lline" | sed -n 's/^\([0-9]*\) error(s).*/\1/p')"; lerr="${lerr:-?}"
+  local nag nsk; nag="$(ls "$target/.claude/agents" 2>/dev/null | wc -l | tr -d ' ')"; nsk="$(ls "$target/.claude/skills" 2>/dev/null | wc -l | tr -d ' ')"
+  # What Claude Code loads is the copy under .claude/, so that copy is what has to
+  # parse. The same frontmatter rule the linter applies, over those files.
+  local bad_fm; bad_fm="$(python3 - "$target/.claude/agents" "$target/.claude/skills" <<'PYEOF'
+import os, re, sys
+def yaml_ok(fm):
+    try:
+        import yaml
+        try: yaml.safe_load(fm); return True
+        except Exception: return False
+    except ImportError: pass
+    prev_block = False
+    for line in fm.split("\n"):
+        if not line.strip(): continue
+        if line.startswith((" ", "\t")):
+            if not prev_block and not re.match(r"^\s+- ", line) and not re.match(r"^\s+\S+: ", line): return False
+            continue
+        m = re.match(r"^([A-Za-z_][\w-]*):(\s*(.*))?$", line)
+        if not m: return False
+        val = (m.group(3) or "").strip()
+        if re.match(r"^[>|][-+]?\S", val): return False
+        prev_block = val in (">", ">-", "|", "|-", ">+", "|+", "")
+    return True
+bad = []
+for root in sys.argv[1:]:
+    for d, _, files in os.walk(root):
+        for f in files:
+            if not f.endswith(".md"): continue
+            p = os.path.join(d, f)
+            try: t = open(p, encoding="utf-8", errors="ignore").read()
+            except OSError: continue
+            m = re.match(r"^---\n(.*?)\n---\n", t, re.S)
+            if m and not yaml_ok(m.group(1)): bad.append(os.path.relpath(p, os.path.dirname(root)))
+print(len(bad)); [print("  " + b) for b in bad[:5]]
+PYEOF
+)"
+  local nbad; nbad="$(printf '%s\n' "$bad_fm" | head -1)"; nbad="${nbad:-0}"
+  if [ -d "$target/.claude/agents" ] && [ -d "$target/.claude/skills" ]; then
+    if [ "$nbad" != 0 ]; then bad "agents: $nag, skills: $nsk — $nbad definition(s) under .claude/ do not parse and will never fire:$(printf '%s\n' "$bad_fm" | tail -n +2 | tr '\n' ' ')"
+    elif [ "$lerr" = 0 ]; then ok "agents: $nag, skills: $nsk — every definition parses (lint: $lline)"
+    else bad "agents: $nag, skills: $nsk — lint reports $lerr error(s); a definition that does not parse is installed and never fires:  $dest/bin/lint $dest"; fi
+  else
+    [ -d "$target/.claude/agents" ] || bad "no .claude/agents"; [ -d "$target/.claude/skills" ] || bad "no .claude/skills"
+  fi
   [ -d "$target/.claude/rules" ] && ok "rules: $(ls "$target/.claude/rules" | tr '\n' ' ')" || meh "no .claude/rules (plugin mode: copy sets from rules/)"
-  if [ -f "$target/CLAUDE.md" ]; then
-    grep -q '{{' "$target/CLAUDE.md" && bad "CLAUDE.md has unresolved {{variables}}" || ok "CLAUDE.md present"
-    grep -q '_(the command)_\|_(fill in)_\|_(empty project' "$target/CLAUDE.md" && meh "CLAUDE.md Project Specifics still has placeholders — run: $proot/bin/detect-stack . --write"
-  else meh "no CLAUDE.md"; fi
+  local ins=""; for c in AGENTS.md CLAUDE.md; do [ -f "$target/$c" ] && { ins="$c"; break; }; done
+  if [ -n "$ins" ]; then
+    grep -q '{{' "$target/$ins" && bad "$ins has unresolved {{variables}}" || ok "$ins present"
+    # Instructions are authored content and are never rewritten by install, so a
+    # workspace that moved leaves them pointing at folders that no longer exist.
+    local wod2; wod2="$(sed -n 's/^export WORKORDERS_DIR="\([^"]*\)".*/\1/p' "$cfg" 2>/dev/null)"; wod2="${wod2:-Workspace/Docs/WorkOrders}"
+    grep -qF "$wod2" "$target/$ins" 2>/dev/null || meh "$ins never mentions the configured work-order directory ($wod2); if the layout changed since it was written, its paths are stale — update it"
+    grep -q '_(the command)_\|_(fill in)_\|_(empty project' "$target/$ins" && meh "$ins Project Specifics still has placeholders — run: $proot/bin/detect-stack . --write"
+  else meh "no instructions file (AGENTS.md); agents get no methodology — re-run install"; fi
   local wod; wod="$(sed -n 's/^export WORKORDERS_DIR="\([^"]*\)".*/\1/p' "$cfg" 2>/dev/null)"; wod="${wod:-Workspace/Docs/WorkOrders}"
   [ -d "$target/$wod" ] && ok "work orders: $(ls -d "$target/$wod"/WO-* 2>/dev/null | wc -l | tr -d ' ')" || meh "no work-order directory yet ($wod)"
   if git -C "$target" rev-parse --show-toplevel >/dev/null 2>&1; then
-    ok "git repository"
+    if git -C "$target" rev-parse HEAD >/dev/null 2>&1; then
+      ok "git repository ($(git -C "$target" rev-parse --short HEAD), $(git -C "$target" status --porcelain 2>/dev/null | wc -l | tr -d ' ') uncommitted path(s))"
+      # Evidence is bound to a source state. Without a remote there is nothing to
+      # say whether this directory is the project of record.
+      if git -C "$target" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+        local ab; ab="$(git -C "$target" rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null || echo '? ?')"
+        ok "remote: behind ${ab%% *}, ahead ${ab##* } of $(git -C "$target" rev-parse --abbrev-ref '@{upstream}')"
+      elif [ -n "$(git -C "$target" remote 2>/dev/null)" ]; then meh "a remote is configured but this branch tracks nothing; the pushed tree may not be this tree"
+      else meh "no remote: nothing says whether this directory is the project of record"; fi
+    else
+      meh "git repository with no commits yet: evidence binds to a source state, and there is none to return to — commit first"
+    fi
     # The tool hook cannot see a message that arrives by file or editor; git can.
     # Ask git where it looks, rather than inferring: a linked worktree and
     # core.hooksPath both put the hook somewhere the obvious guess is wrong.
@@ -142,7 +210,29 @@ doctor() {
     else
       ok "commit-msg hook wired and executable (traceability holds for messages given by file or editor)"
     fi
-  else meh "not a git repository (evidence gate and wo-reference need one)"; fi
+    local pc; pc="$(cd "$target" && git rev-parse --git-path hooks/pre-commit 2>/dev/null || true)"
+    case "$pc" in ''|/*) ;; *) pc="$target/$pc";; esac
+    if [ -n "$pc" ] && [ -x "$pc" ] && grep -q 'acp:pre-commit:check' "$pc" 2>/dev/null; then ok "pre-commit hook wired (the rules run on every commit, under any agent)"
+    elif [ -n "$pc" ] && [ -f "$pc" ]; then meh "pre-commit hook is not the pipeline's; chain 'acp check --staged' into it to run the rules at commit time"
+    elif [ "$profile" = minimal ]; then ok "no pre-commit hook (minimal profile)"
+    else meh "no pre-commit hook; a closeout written by hand or a commit that skips the driver is caught by nothing — re-run install"; fi
+    [ -f "$target/.github/workflows/acp-check.yml" ] && ok "CI runs the rules on pull requests" || meh "no CI workflow for the rules; 'acp ci github' adds one so nothing depends on the agent or the machine"
+  else
+    meh "not a git repository: the work-order gates hold, but nothing catches a closeout written by hand or a commit that skips the driver"
+    meh "    a local repository costs nothing and turns that on:  (cd \"$target\" && git init) && $proot/bin/acp install \"$target\""
+  fi
+  if [ -f "$target/CLAUDE.md" ]; then
+    grep -q '@AGENTS.md' "$target/CLAUDE.md" 2>/dev/null && ok "CLAUDE.md imports AGENTS.md" || meh "CLAUDE.md does not import AGENTS.md; Claude Code and other agents are reading different instructions"
+  fi
+  # Structure says nothing about whether the project's own tests pass. The
+  # baseline is the first measurement, and everything recorded after it is
+  # relative to it.
+  local tdir bl; tdir="$(sed -n 's/^export TESTING_DIR="\([^"]*\)".*/\1/p' "$cfg" 2>/dev/null)"; tdir="${tdir:-Workspace/Testing}"; bl="$target/$tdir/results/BASELINE.md"
+  if [ -f "$bl" ]; then
+    local bfp cfp; bfp="$(grep -m1 -oE 'tree [0-9a-f]{16}' "$bl" | cut -d' ' -f2 || true)"; cfp="$(cd "$target" && "$dest/bin/wo" fingerprint 2>/dev/null || true)"
+    if [ -n "$bfp" ] && [ "$bfp" = "$cfp" ]; then ok "baseline recorded against this exact tree: $(sed -n 's/^- \*\*Result:\*\* //p' "$bl" | head -1 | cut -c1-60)"
+    else ok "baseline recorded ($(sed -n 's/^- \*\*Result:\*\* //p' "$bl" | head -1 | cut -c1-60)); the tree has changed since — re-run:  acp baseline"; fi
+  else meh "no baseline: the project's own tests have never been run under this tool, so nothing recorded here is relative to a known state — run:  acp baseline"; fi
   # Reporting "healthy" while the drivers cannot actually complete a lifecycle is
   # the worst failure a doctor can have: prove one end to end, here, now.
   if [ -x "$dest/bin/wo" ]; then
@@ -177,6 +267,105 @@ case "$cmd" in
   install)       exec "$BIN/install.sh" "$@";;
   doctor)        doctor "${1:-}";;
   wo)            exec "$BIN/wo" "$@";;
+  check)
+    # One implementation of the rules, callable from anywhere: wo close, a git
+    # pre-commit hook, CI, or by hand. Works with or without git.
+    root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    ex=()
+    if [ -f "$root/pipeline.config.sh" ]; then
+      for k in WORKORDERS_DIR BUGS_DIR SESSIONS_DIR; do v="$(sed -n "s/^export $k=\"\([^\"]*\)\".*/\1/p" "$root/pipeline.config.sh" | head -1)"; [ -n "$v" ] && ex+=("$v"); done
+    fi
+    ex+=("${ROOT#$root/}")
+    exec python3 "$ROOT/core/hooks/check.py" --root "$root" --exclude "${ex[@]}" "$@";;
+  baseline)
+    # The first measurement of a project the tool is about to record evidence
+    # about. Structure checks pass on a codebase whose tests have been dead for a
+    # month; this is the step that asks.
+    root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    cfg="$root/pipeline.config.sh"; tdir="Workspace/Testing"; bcmd=""; wod="Workspace/Docs/WorkOrders"
+    if [ -f "$cfg" ]; then
+      v="$(sed -n 's/^export TESTING_DIR="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; [ -n "$v" ] && tdir="$v"
+      v="$(sed -n 's/^export WORKORDERS_DIR="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; [ -n "$v" ] && wod="$v"
+      v="$(sed -n 's/^export BASELINE_COMMAND="\([^"]*\)".*/\1/p' "$cfg" | head -1)"; [ -n "$v" ] && bcmd="$v"
+    fi
+    dry=0; while [ $# -gt 0 ]; do case "$1" in --command) bcmd="$2"; shift 2;; --dry-run) dry=1; shift;; *) echo "usage: acp baseline [--command '<test command>'] [--dry-run]" >&2; exit 1;; esac; done
+    echo "== baseline for $root"
+    # 1. a source state that can be returned to
+    if ! git -C "$root" rev-parse --show-toplevel >/dev/null 2>&1; then
+      echo "  no git repository. A baseline is a measurement of a source state, and without one"
+      echo "  there is nothing to return to. Create it first:  (cd \"$root\" && git init && git add -A && git commit -m baseline)"; exit 1
+    fi
+    if ! git -C "$root" rev-parse HEAD >/dev/null 2>&1; then
+      echo "  the repository has no commits. Commit the tree as it stands, then run this again:"
+      echo "      (cd \"$root\" && git add -A && git commit -m baseline)"; exit 1
+    fi
+    sha="$(git -C "$root" rev-parse --short HEAD)"; dirty="$(git -C "$root" status --porcelain | wc -l | tr -d ' ')"
+    echo "  source: $sha with $dirty uncommitted path(s)"
+    if git -C "$root" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+      ab="$(git -C "$root" rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null || echo '? ?')"; up="$(git -C "$root" rev-parse --abbrev-ref '@{upstream}')"
+      echo "  remote: behind ${ab%% *}, ahead ${ab##* } of $up"
+      [ "${ab%% *}" != 0 ] && echo "          the pushed tree is not this tree; decide which one is the project of record before trusting this baseline"
+    else echo "  remote: none tracked — nothing says whether this directory is the project of record"; fi
+    # 2. what the project already runs
+    if [ -z "$bcmd" ] && [ -x "$ROOT/bin/detect-stack" ]; then
+      bcmd="$("$ROOT/bin/detect-stack" "$root" --json 2>/dev/null | python3 -c 'import json,sys; print((json.load(sys.stdin).get("commands") or {}).get("test",""))' 2>/dev/null || true)"
+    fi
+    [ -n "$bcmd" ] || { echo "  no test command found. Give one:  acp baseline --command 'npm test'   (or set BASELINE_COMMAND in pipeline.config.sh)"; exit 1; }
+    echo "  command: $bcmd"
+    fp="$(cd "$root" && "$ROOT/bin/wo" fingerprint 2>/dev/null || echo nofp)"
+    [ "$dry" -eq 1 ] && { echo "  (dry run: nothing executed; would record against tree $fp)"; exit 0; }
+    # 3. run it, and record the result as the first measurement
+    mkdir -p "$root/$tdir/results"; blog="$root/$tdir/results/BASELINE.log"; bl="$root/$tdir/results/BASELINE.md"
+    echo "  running…"; brc=0; ( cd "$root" && bash -c "$bcmd" ) > "$blog" 2>&1 || brc=$?
+    counts="$("$ROOT/bin/wo" counts "$blog" 2>/dev/null || true)"
+    case "$brc" in 0) res="PASS";; 77) res="COULD NOT RUN (exit 77)";; *) res="FAIL (exit $brc)";; esac
+    [ -n "$counts" ] && res="$res, ${counts% *} passed, ${counts#* } failed"
+    # 4. the record versus the measurement
+    total=0; adopted=0; verified=0; nover=0
+    for d in "$root/$wod"/WO-*; do
+      [ -d "$d" ] || continue; total=$((total+1))
+      grep -q '^adopted=' "$d/.wo-meta" 2>/dev/null && adopted=$((adopted+1))
+      if ls "$d" | grep -qi VERIFICATION; then grep -q 'EXECUTED — PASS' "$d"/*VERIFICATION.md 2>/dev/null && verified=$((verified+1)); else nover=$((nover+1)); fi
+    done
+    {
+      printf '# Baseline\n\nThe first measurement of this project under the pipeline. Everything recorded after it is relative to this.\n\n'
+      printf -- '- **Taken:** %s\n- **Source:** %s, %s uncommitted path(s), tree %s\n- **Command:** `%s`\n- **Result:** %s\n- **Log:** `%s`\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sha" "$dirty" "$fp" "$bcmd" "$res" "$(basename "$blog")"
+      printf '## The record against the measurement\n\n'
+      printf -- '- work orders on file: %s (%s adopted from an earlier record)\n- with an executed pass under this tool: %s\n- with no verification at all: %s\n\n' "$total" "$adopted" "$verified" "$nover"
+      printf 'A recorded completion is a claim. Only the ones with an executed pass above are measured; the rest are recorded, not verified.\n\n'
+      printf '```\n'; tail -40 "$blog"; printf '```\n'
+    } > "$bl"
+    echo "  result: $res"
+    echo "  record: $total work orders, $adopted adopted, $verified with an executed pass, $nover with no verification"
+    echo "  written: ${bl#$root/}"
+    [ "$brc" -eq 0 ] || { echo "  a failing baseline is information, not a block: it is the state the project is actually in"; exit 1; };;
+  ci)
+    case "${1:-}" in
+      github)
+        root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+        dest="$root/.github/workflows/acp-check.yml"
+        [ -f "$dest" ] && { echo "acp: $dest exists — left alone"; exit 0; }
+        mkdir -p "$(dirname "$dest")"
+        rel="${ROOT#$root/}"
+        sed "s|{{PIPELINE_ROOT}}|$rel|g" "$ROOT/core/templates/ci/acp-check.yml" > "$dest"
+        echo "wrote ${dest#$root/}: the rules run on every pull request, whoever made the commits";;
+      *) echo "usage: acp ci github" >&2; exit 1;;
+    esac;;
+  agent)
+    n="${1:-}"; [ -n "$n" ] || { echo "usage: acp agent <name>   (acp agents lists them)" >&2; exit 1; }
+    root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+    for c in "$root/.claude/agents/$n.md" "$ROOT/core/agents/base/$n.md" "$ROOT/core/agents/roles/$n.md" "$ROOT/core/agents/domain/$n.md" "$ROOT/agents/$n.md"; do
+      [ -f "$c" ] && exec cat "$c"
+    done
+    echo "acp: no specialist named '$n'" >&2; exit 1;;
+  agents)
+    if [ "${1:-}" = "--area" ] && [ -n "${2:-}" ]; then
+      exec "$BIN/wo" route "$2"
+    fi
+    for d in "$ROOT/core/agents/base" "$ROOT/core/agents/roles" "$ROOT/core/agents/domain" "$ROOT/agents"; do
+      [ -d "$d" ] || continue
+      for f in "$d"/*.md; do [ -f "$f" ] || continue; printf '  %-34s %s\n' "$(basename "$f" .md)" "$(sed -n 's/^description: *//p' "$f" | head -1 | cut -c1-90)"; done
+    done;;
   bug)           exec "$BIN/bug" "$@";;
   pack)          exec "$BIN/pack" "$@";;
   sanitize)      exec "$BIN/sanitize" "$@";;

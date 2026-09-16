@@ -62,7 +62,7 @@ because every decision downstream is then made on a lie.
 ├── suites/                             # the suites themselves
 │   ├── wo-XXXX-feature-name.sh
 │   └── comprehensive/                  # longer domain suites
-└── test-results/                       # execution archive
+└── results/                            # execution archive
     └── behavioral-test-report_*.md     # timestamped reports
 ```
 
@@ -73,7 +73,7 @@ harness under `{{PIPELINE_ROOT}}/harness/`:
 |---|---|
 | `harness/config/test-config.env` | One place that decides which environment every suite talks to |
 | `harness/lib/test-helpers.sh` | Assertions and status helpers to source, not reimplement |
-| `harness/runners/` | Runners for one suite, all suites, or the critical set |
+| `harness/runners/run-all-critical-tests.sh` | The canonical runner: the manifest, tier by tier |
 
 Templates for the written record are in
 `{{PIPELINE_ROOT}}/core/templates/testing/`: a harness template, an execution
@@ -241,8 +241,8 @@ writes nothing is the failure this catches.
 ### Phase 2 — execute
 
 ```bash
-{{TESTING_DIR}}/suites/wo-0102-login-critical-path.sh       # one suite
-{{PIPELINE_ROOT}}/harness/runners/run-all-tests.sh          # everything
+{{TESTING_DIR}}/suites/wo-0102-login-critical-path.sh                # one suite
+{{PIPELINE_ROOT}}/harness/runners/run-all-critical-tests.sh --full  # every tier
 ```
 
 ### Phase 3 — capture evidence
@@ -252,7 +252,7 @@ set the status from what actually happened, and paste the real output.
 
 ### Phase 4 — record
 
-Write the report into `{{TESTING_DIR}}/test-results/` as
+Write the report into `{{TESTING_DIR}}/results/` as
 `behavioral-test-report_YYYYMMDD_HHMMSS.md`, following
 `{{PIPELINE_ROOT}}/core/templates/testing/TEST-TEMPLATE-EXECUTION.md`.
 

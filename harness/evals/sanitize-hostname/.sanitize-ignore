@@ -1,0 +1,5 @@
+# The fixtures for this evaluation are internal host names on purpose — they are
+# what it feeds the sanitizer to prove the rule fires. Scanning them would report
+# the test's own inputs as a leak.
+eval.sh
+README.md

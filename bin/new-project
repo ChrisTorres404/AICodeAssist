@@ -8,7 +8,7 @@
 #
 # Creates the directory, writes pipeline.config.sh from your answers, installs
 # the pipeline (agents, skills, hooks, commands, harness), scaffolds the
-# workspace, generates a project CLAUDE.md, initialises git, and opens the
+# workspace, generates the project instructions, initialises git, and opens the
 # first work order.
 #
 # Writes only inside <path>. The pipeline repo is never modified.
@@ -89,7 +89,7 @@ sed -e "s|^export PROJECT_NAME=.*|export PROJECT_NAME=\"$NAME\"|" \
     -e "s|^export PROJECT_SLUG=.*|export PROJECT_SLUG=\"$SLUG\"|" \
     -e "s|^export PROJECT_DOMAIN=.*|export PROJECT_DOMAIN=\"$DOMAIN\"|" \
     -e "s|^export PROJECT_DOMAIN_RE=.*|export PROJECT_DOMAIN_RE=\"${DOMAIN_RE//\\/\\\\}\"|" \
-    -e 's|^export PROJECT_ROOT=.*|export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" \&\& pwd)"   # the directory this file lives in; portable across clones|' \
+    -e 's|^export PROJECT_ROOT=.*|export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" \&\& pwd -P)"   # the directory this file lives in; portable across clones|' \
     -e "s|^export DB_NAME=.*|export DB_NAME=\"${SLUG//-/_}_dev\"|" \
     -e "s|^export AGENT_PACKS=.*|export AGENT_PACKS=\"${AGENT_PACKS_WANTED# }\"|" \
     -e "s|^export SKILL_PACKS=.*|export SKILL_PACKS=\"${SKILL_PACKS_WANTED# }\"|" \
@@ -132,7 +132,7 @@ else
   echo "  no packs yet — 'wo promote <n>' after your first verified work order creates the first one"
 fi
 
-# --- 4. Project CLAUDE.md --------------------------------------------------
+# --- 4. Project instructions: AGENTS.md for every agent, CLAUDE.md importing it ---
 STACK_SECTION="$("$SRC/bin/detect-stack" "$TARGET" --json 2>/dev/null | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
@@ -148,12 +148,26 @@ else:
     if c.get("build"): print("- **Build:** `" + c["build"] + "`")
     print("- **Rule sets installed:** " + ", ".join(d["rule_sets"]))
 ' 2>/dev/null || echo "- **Stack:** _(fill in)_")"
-render_claude_md "$TARGET/CLAUDE.md"
-echo "  wrote CLAUDE.md"
+render_claude_md "$TARGET/AGENTS.md"
+echo "  wrote AGENTS.md (the instructions every agent reads)"
+cat > "$TARGET/CLAUDE.md" <<'CLEOF'
+# Project instructions for Claude Code
+
+@AGENTS.md
+
+The instructions above are the same ones every other agent reads. What is specific to Claude Code:
+
+- The pipeline's session hooks are registered in `.claude/settings.json` and run automatically:
+  they are the early warning for the rules that `wo close`, the git hooks and CI enforce later.
+- Work orders name specialist roles. Delegate each role to the subagent of that name; the
+  definitions are in `.claude/agents/`.
+CLEOF
+echo "  wrote CLAUDE.md (imports AGENTS.md, plus what is specific to Claude Code)"
 
 # --- 5. Repo hygiene + first commit ---------------------------------------
 cat > "$TARGET/.gitignore" <<'GIEOF'
 node_modules/
+__pycache__/
 dist/
 build/
 .env
@@ -174,5 +188,5 @@ echo "  export PATH=\"$TARGET/$PIPELINE_ROOT_VAL/bin:\$PATH\""
 echo "  cd $TARGET"
 echo "  wo new \"<your first work order>\""
 echo
-echo "Fill in the 'Project specifics' section of CLAUDE.md before your first"
-echo "session — agents read it to locate your code."
+echo "Fill in the 'Project specifics' section of AGENTS.md before your first"
+echo "session — every agent reads it to locate your code."

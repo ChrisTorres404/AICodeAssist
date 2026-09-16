@@ -322,7 +322,7 @@ closeout is also rejected in review if:
 ```
 {{TESTING_DIR}}/
 ├── suites/                             # test suites
-└── test-results/                       # execution reports
+└── results/                            # execution reports
 ```
 
 Methodology and templates come from the pipeline:

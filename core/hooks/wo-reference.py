@@ -15,12 +15,22 @@ Two different rules, deliberately:
   A commit that names no work order may be perfectly correct — tooling, docs,
   a chore — so that stays advisory. A commit that names a work order or bug
   which does not exist is a plain factual error: it reads as traceable and
-  leads nowhere. That one is refused, in both forms, under every profile.
-  ACP_WO_REFERENCE=warn downgrades it for people who need the escape hatch.
+  leads nowhere. That one is refused, in both forms, under every profile. A
+  commit writing about an identifier rather than claiming it declares that in an
+  Acp-Allow-Reference trailer; ACP_WO_REFERENCE=warn downgrades the refusal
+  wholesale for people who need the escape hatch.
 """
 import json, os, re, subprocess, sys
 
 REF = re.compile(r"\b(WO-\d{3,}|BUG-\d{3,})\b")
+
+# A commit can be about an identifier instead of claiming it: a traceability test
+# that quotes a deliberately absent work order, a document explaining the format.
+# The author declares that in a trailer, so the claim is visible in the recorded
+# message rather than in a shell variable nobody sees afterwards. Read as a line
+# anywhere in the text: in tool-hook mode what the hook sees is a command line, not
+# a message git has already parsed into trailers.
+ALLOW_TRAILER = re.compile(r"(?mi)^[^\S\n]*Acp-Allow-Reference:[^\S\n]*(.+)$")
 
 
 def git_root():
@@ -54,10 +64,21 @@ def existing_ids(root, subdir, prefix):
     return out
 
 
+def allowed_refs(text):
+    """The identifiers the author declared they are writing about rather than
+    citing. One trailer may name several, separated by commas or spaces, and the
+    trailer may appear more than once."""
+    out = set()
+    for m in ALLOW_TRAILER.finditer(text):
+        out |= set(REF.findall(m.group(1).upper()))
+    return out
+
+
 def phantom_refs(text):
     """Which of the identifiers this text cites have no folder. Empty when the
-    text cites nothing, when there is no repository, or when all of them exist."""
-    refs = set(REF.findall(text))
+    text cites nothing, when there is no repository, when all of them exist, or
+    when the ones that do not are declared in an Acp-Allow-Reference trailer."""
+    refs = set(REF.findall(text)) - allowed_refs(text)
     if not refs: return []
     root = git_root()
     if not root: return []
@@ -70,7 +91,9 @@ def report_phantoms(missing):
     print(f"Traceability — this commit cites {', '.join(missing)}, which does not exist.\n"
           f"  A reference to a work order nobody opened is worse than no reference: it\n"
           f"  reads as traceable and leads nowhere. Open it ('wo new'), cite the one that\n"
-          f"  really covers this change, or drop the reference.", file=sys.stderr)
+          f"  really covers this change, or drop the reference. If the commit is writing\n"
+          f"  about the identifier rather than citing it, say so in a trailer:\n"
+          f"    Acp-Allow-Reference: {', '.join(missing)}", file=sys.stderr)
 
 
 def warn_only():

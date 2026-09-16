@@ -4,6 +4,7 @@ cd "$EVAL_TMP"; "$PIPELINE_ROOT/bin/new-project" p --name P >/dev/null 2>&1; cd 
 [ -x .git/hooks/commit-msg ] || { echo "new-project left no commit-msg hook; the check cannot be complete without it"; exit 1; }
 git config user.email e@x; git config user.name e
 
+git rev-parse HEAD >/dev/null 2>&1 || { echo "the scaffold's first commit never landed"; exit 1; }
 base="$(git rev-parse HEAD)"
 recorded() { [ "$(git rev-parse HEAD)" != "$base" ]; }
 reset_to_base() { git reset -q --hard "$base"; }

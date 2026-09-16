@@ -1,14 +1,18 @@
 #!/bin/bash
 # ============================================================================
-# MASTER TEST RUNNER — behavioral regression
+# CANONICAL TEST RUNNER — behavioral regression
 # ============================================================================
-# Runs the suites listed in harness/config/suites.manifest, tier by tier, and
-# prints one report. The runner carries no suite list of its own: everything it
-# knows comes from the manifest and the suites directory.
+# This is the runner to reach for. It runs the suites listed in the manifest,
+# tier by tier, and prints one report. It carries no suite list of its own:
+# everything it knows comes from the manifest and the suites directory.
+#
+# Its flags are the canonical vocabulary; the other manifest-driven script
+# (../scripts/run-behavioral-tests.sh, which writes a markdown evidence report
+# instead of terminal output) accepts the same ones.
 #
 # Usage: ./run-all-critical-tests.sh [OPTIONS]
 #
-# Modes:
+# Modes (which tiers run):
 #   --quick       essential tier only
 #   --standard    essential + core + extended (default)
 #   --full        every tier
@@ -17,13 +21,17 @@
 #   --verbose     Show full output from each suite
 #   --no-prep     Skip environment preparation
 #   --stop-fail   Stop on the first suite failure
-#   --list        List the suites that would run, and exit
+#   --list        List the suites that would run — and the suite files present
+#                 but unlisted, which no regression ever runs — then exit
 #   --tier X      Run only tier X (e.g. --tier security)
+#   --type X      Run only suites of type X (e.g. --type unit). Composes with
+#                 --tier and with the modes.
 #
 # Environment:
 #   ACTIVE_ENV        LOCAL_DEV (default) | LOCAL_TEST | DOCKER
 #   SUITES_DIR        where the suite scripts live
 #   SUITES_MANIFEST   path to the manifest
+#   TEST_RESULTS_DIR  where anything written goes (see ../lib/paths.sh)
 #   See config/test-config.env for the rest.
 # ============================================================================
 
@@ -31,22 +39,12 @@ set +e  # a failing suite must not abort the run
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${TEST_CONFIG:-$SCRIPT_DIR/../config/test-config.env}"
-# resolved after SUITES_DIR below: the project-owned manifest beside the suites wins
 
-# Suites live in the project's testing directory; the harness sits beside it
-# under the pipeline root. Override with SUITES_DIR when your layout differs.
-if [ -z "${SUITES_DIR:-}" ]; then
-    for candidate in \
-        "$SCRIPT_DIR/../../../{{TESTING_DIR}}/suites" \
-        "$SCRIPT_DIR/../../{{TESTING_DIR}}/suites" \
-        "$SCRIPT_DIR/../suites"; do
-        [ -d "$candidate" ] && { SUITES_DIR="$candidate"; break; }
-    done
-    SUITES_DIR="${SUITES_DIR:-$SCRIPT_DIR/../suites}"
-if [ -n "${SUITES_MANIFEST:-}" ]; then MANIFEST="$SUITES_MANIFEST"
-elif [ -f "$SUITES_DIR/../suites.manifest" ]; then MANIFEST="$SUITES_DIR/../suites.manifest"
-else MANIFEST="$SCRIPT_DIR/../config/suites.manifest"; fi
-fi
+# Suites, manifest and results directory all come from one place, so no two
+# scripts can disagree about where evidence is written.
+# shellcheck source=../lib/paths.sh
+. "$SCRIPT_DIR/../lib/paths.sh"
+MANIFEST="$SUITES_MANIFEST"
 
 # Source configuration
 if [ -f "$CONFIG_FILE" ]; then
@@ -97,7 +95,8 @@ SKIP_PREP=false
 STOP_ON_FAIL=false
 LIST_ONLY=false
 FILTER_TIER=""
-NEXT_IS_TIER=false
+FILTER_TYPE=""
+NEXT_IS=""
 
 for arg in "$@"; do
     case $arg in
@@ -108,12 +107,14 @@ for arg in "$@"; do
         --no-prep)    SKIP_PREP=true ;;
         --stop-fail)  STOP_ON_FAIL=true ;;
         --list)       LIST_ONLY=true ;;
-        --tier)       NEXT_IS_TIER=true ;;
+        --tier)       NEXT_IS="tier" ;;
+        --type)       NEXT_IS="type" ;;
         *)
-            if [ "$NEXT_IS_TIER" = true ]; then
-                FILTER_TIER="$arg"
-                NEXT_IS_TIER=false
-            fi
+            case "$NEXT_IS" in
+                tier) FILTER_TIER="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')";;
+                type) FILTER_TYPE="$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')";;
+            esac
+            NEXT_IS=""
             ;;
     esac
 done
@@ -125,8 +126,10 @@ declare -a SKIPPED_SUITES
 START_TIME=$(date +%s)
 
 # ============================================================================
-# SUITE INVENTORY — from harness/config/suites.manifest (tier|file|label)
+# SUITE INVENTORY — from the manifest (tier|type|file|label)
 # ============================================================================
+# Each entry is "file:type:label". Reading it back with three `read` variables
+# leaves any colon in the label where it belongs, in the label.
 ESSENTIAL_TESTS=()
 CORE_TESTS=()
 EXTENDED_TESTS=()
@@ -137,22 +140,21 @@ INFRASTRUCTURE_TESTS=()
 RECENT_TESTS=()
 
 load_manifest() {
-    [ -f "$MANIFEST" ] || { echo "No suite manifest at $MANIFEST — add tier|file|label lines."; return 0; }
-    local tier file label
-    while IFS='|' read -r tier file label; do
-        case "$tier" in ''|\#*) continue;; esac
-        tier="$(printf '%s' "$tier" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
-        [ -n "$file" ] || continue
-        case "$tier" in
-            ESSENTIAL)      ESSENTIAL_TESTS+=("$file:$label");;
-            CORE)           CORE_TESTS+=("$file:$label");;
-            EXTENDED)       EXTENDED_TESTS+=("$file:$label");;
-            SECURITY)       SECURITY_TESTS+=("$file:$label");;
-            INTEGRATION)    INTEGRATION_TESTS+=("$file:$label");;
-            PERFORMANCE)    PERFORMANCE_TESTS+=("$file:$label");;
-            INFRASTRUCTURE) INFRASTRUCTURE_TESTS+=("$file:$label");;
-            RECENT)         RECENT_TESTS+=("$file:$label");;
-            *) echo "unknown tier '$tier' in manifest (line: $file)";;
+    [ -f "$MANIFEST" ] || { echo "No suite manifest at $MANIFEST — add tier|type|file|label lines."; return 0; }
+    local line entry
+    while IFS= read -r line || [ -n "$line" ]; do
+        parse_manifest_line "$line" || continue
+        entry="$MF_FILE:$MF_TYPE:$MF_LABEL"
+        case "$MF_TIER" in
+            essential)      ESSENTIAL_TESTS+=("$entry");;
+            core)           CORE_TESTS+=("$entry");;
+            extended)       EXTENDED_TESTS+=("$entry");;
+            security)       SECURITY_TESTS+=("$entry");;
+            integration)    INTEGRATION_TESTS+=("$entry");;
+            performance)    PERFORMANCE_TESTS+=("$entry");;
+            infrastructure) INFRASTRUCTURE_TESTS+=("$entry");;
+            recent)         RECENT_TESTS+=("$entry");;
+            *) echo "unknown tier '$MF_TIER' in manifest (line: $MF_FILE)";;
         esac
     done < "$MANIFEST"
 }
@@ -256,10 +258,20 @@ run_tier() {
         [ "$tier_lower" = "$filter_lower" ] || return 0
     fi
 
+    # --type narrows within the tier; an untyped manifest row is never selected
+    # by it, because nothing says what kind of test it is. A tier that nothing
+    # matches prints no header rather than an empty one.
+    local test file type name selected=()
+    for test in "${tests[@]}"; do
+        IFS=':' read -r file type name <<< "$test"
+        [ -n "$FILTER_TYPE" ] && [ "$type" != "$FILTER_TYPE" ] && continue
+        selected+=("$file:$name")
+    done
+    [ ${#selected[@]} -eq 0 ] && return 0
+
     print_header "TIER: $(echo "$tier_name" | tr '[:lower:]' '[:upper:]')"
 
-    local test file name
-    for test in "${tests[@]}"; do
+    for test in "${selected[@]}"; do
         IFS=':' read -r file name <<< "$test"
         run_suite "$file" "$name" || return 1
     done
@@ -274,13 +286,40 @@ list_suites() {
     [ ${#tests[@]} -eq 0 ] && return
 
     echo -e "\n${CYAN}$tier${NC} (${#tests[@]} suites):"
-    local test file name
+    local test file type name
     for test in "${tests[@]}"; do
-        IFS=':' read -r file name <<< "$test"
+        IFS=':' read -r file type name <<< "$test"
+        [ -n "$FILTER_TYPE" ] && [ "$type" != "$FILTER_TYPE" ] && continue
         if [ -f "$SUITES_DIR/$file" ]; then
-            echo -e "  ${GREEN}OK${NC}   $file  ${DIM}-> $name${NC}"
+            echo -e "  ${GREEN}OK${NC}   $file  ${DIM}[${type:-untyped}] -> $name${NC}"
         else
-            echo -e "  ${YELLOW}MISS${NC} $file  ${DIM}-> $name${NC}"
+            echo -e "  ${YELLOW}MISS${NC} $file  ${DIM}[${type:-untyped}] -> $name${NC}"
+        fi
+    done
+}
+
+# Suite files on disk that no manifest row names. They never run in a
+# regression, and an unlisted suite is the commonest way for a check to be
+# written once and then quietly stop being evidence for anything.
+list_unlisted_suites() {
+    [ -d "$SUITES_DIR" ] || return 0
+    local path rel listed entry file found=0
+    for path in "$SUITES_DIR"/*.sh "$SUITES_DIR"/*/*.sh; do
+        [ -f "$path" ] || continue
+        rel="${path#"$SUITES_DIR"/}"
+        case "$rel" in _*|*/_*|*helpers*) continue;; esac
+        listed=false
+        for entry in "${ESSENTIAL_TESTS[@]}" "${CORE_TESTS[@]}" "${EXTENDED_TESTS[@]}" \
+                     "${SECURITY_TESTS[@]}" "${INTEGRATION_TESTS[@]}" "${PERFORMANCE_TESTS[@]}" \
+                     "${INFRASTRUCTURE_TESTS[@]}" "${RECENT_TESTS[@]}"; do
+            [ -n "$entry" ] || continue
+            IFS=':' read -r file _ _ <<< "$entry"
+            [ "$file" = "$rel" ] && { listed=true; break; }
+        done
+        if [ "$listed" = false ]; then
+            [ "$found" -eq 0 ] && echo -e "\n${YELLOW}Present but not in the manifest (never runs in a regression):${NC}"
+            found=1
+            echo -e "  ${YELLOW}--${NC}   $rel"
         fi
     done
 }
@@ -354,10 +393,13 @@ if [ "$LIST_ONLY" = true ]; then
     list_suites "INFRASTRUCTURE (--full)"      "${INFRASTRUCTURE_TESTS[@]}"
     list_suites "RECENT (--full)"              "${RECENT_TESTS[@]}"
 
+    list_unlisted_suites
+
     TOTAL_QUICK=${#ESSENTIAL_TESTS[@]}
     TOTAL_STANDARD=$((TOTAL_QUICK + ${#CORE_TESTS[@]} + ${#EXTENDED_TESTS[@]}))
     TOTAL_FULL=$((TOTAL_STANDARD + ${#SECURITY_TESTS[@]} + ${#INTEGRATION_TESTS[@]} + ${#PERFORMANCE_TESTS[@]} + ${#INFRASTRUCTURE_TESTS[@]} + ${#RECENT_TESTS[@]}))
     echo -e "\n${BOLD}Totals:${NC} --quick=$TOTAL_QUICK  --standard=$TOTAL_STANDARD  --full=$TOTAL_FULL"
+    [ -n "$FILTER_TYPE" ] && echo -e "${DIM}(listing narrowed to --type $FILTER_TYPE)${NC}"
     exit 0
 fi
 
@@ -366,7 +408,7 @@ echo ""
 echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║${NC}  ${BOLD}{{PROJECT_NAME}} — BEHAVIORAL REGRESSION SUITE${NC}"
 echo -e "${CYAN}║${NC}  $(date '+%Y-%m-%d %H:%M:%S %Z')"
-echo -e "${CYAN}║${NC}  Mode: ${BOLD}$(echo "$MODE" | tr '[:lower:]' '[:upper:]')${NC}  Env: ${BOLD}${ACTIVE_ENV:-LOCAL_DEV}${NC}"
+echo -e "${CYAN}║${NC}  Mode: ${BOLD}$(echo "$MODE" | tr '[:lower:]' '[:upper:]')${NC}  Env: ${BOLD}${ACTIVE_ENV:-LOCAL_DEV}${NC}${FILTER_TYPE:+  Type: ${BOLD}$FILTER_TYPE${NC}}"
 echo -e "${CYAN}║${NC}  API: ${DIM}${API_BASE}${NC}"
 if db_configured; then
     echo -e "${CYAN}║${NC}  DB: ${DIM}${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}${NC}"

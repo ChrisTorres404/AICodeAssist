@@ -155,6 +155,21 @@ unresolved="$(grep -rhoE "\{\{(${VAR_RE})\}\}" "$DEST/core" "$DEST/harness" "$DE
 [ -n "$unresolved" ] && { echo; echo "  WARNING — unresolved variables remain:"; echo "$unresolved" | sed 's/^/    /'; echo; }
 
 # --- 2. Workspace folders -------------------------------------------------
+# The resolved layout is recorded so that a later install with a different one
+# can say so. Nothing is deleted: the old folders may hold work, and a stale
+# rendered manifest left in an abandoned path is exactly what someone later
+# mistakes for live configuration, so they are named instead.
+STATE="$DEST/.install-state"
+if [ -f "$STATE" ]; then
+  for k in WORKORDERS_DIR BUGS_DIR TESTING_DIR SESSIONS_DIR; do
+    prev="$(sed -n "s/^$k=//p" "$STATE" | head -1)"; cur="$(eval "printf '%s' \"\$$k\"")"
+    if [ -n "$prev" ] && [ "$prev" != "$cur" ]; then
+      say "workspace moved: $k was $prev, now $cur"
+      [ -d "$TARGET/$prev" ] && say "                 the previous folder $prev/ still exists and is no longer read; move or remove it yourself"
+    fi
+  done
+fi
+printf 'WORKORDERS_DIR=%s\nBUGS_DIR=%s\nTESTING_DIR=%s\nSESSIONS_DIR=%s\ninstalled=%s\n' "$WORKORDERS_DIR" "$BUGS_DIR" "$TESTING_DIR" "$SESSIONS_DIR" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATE"
 mkdir -p "$TARGET/$WORKORDERS_DIR" "$TARGET/$BUGS_DIR" \
          "$TARGET/$TESTING_DIR/suites" "$TARGET/$TESTING_DIR/results" \
          "$TARGET/$SESSIONS_DIR/active" "$TARGET/$SESSIONS_DIR/archive"
@@ -318,11 +333,13 @@ if (cd "$TARGET" && git rev-parse --git-dir >/dev/null 2>&1); then
   case "$CMSG" in /*) ;; *) CMSG="$TARGET/$CMSG";; esac
   SHARED=0
   if [ "$(cd "$TARGET" && git rev-parse --git-dir 2>/dev/null)" != "$(cd "$TARGET" && git rev-parse --git-common-dir 2>/dev/null)" ]; then SHARED=1; fi
+  PREC="$(dirname "$CMSG")/pre-commit"
   if [ "$PROFILE" = minimal ]; then
-    # minimal means no hooks, and that has to include this one. Only ours is removed.
+    # minimal means no hooks, and that has to include these. Only ours are removed.
     if [ -f "$CMSG" ] && grep -q 'acp:commit-msg:wo-reference' "$CMSG" 2>/dev/null; then
       rm -f "$CMSG"; say "commit-msg: pipeline hook removed (minimal profile installs no hooks)"
     else say "commit-msg: none installed (minimal profile)"; fi
+    if [ -f "$PREC" ] && grep -q 'acp:pre-commit:check' "$PREC" 2>/dev/null; then rm -f "$PREC"; say "pre-commit: pipeline hook removed (minimal profile)"; fi
   elif [ -f "$CMSG" ] && ! grep -q 'acp:commit-msg:wo-reference' "$CMSG" 2>/dev/null; then
     say "commit-msg: left your existing hook alone; to add the traceability check, call"
     say "            \"\$(git rev-parse --show-toplevel)/$REL_DEST/core/hooks/wo-reference.py\" \"\$@\" from it"
@@ -339,12 +356,36 @@ CMSGEOF
     say "commit-msg: traceability hook wired into ${CMSG#"$TARGET"/}"
     if [ "$SHARED" -eq 1 ]; then say "            (this is a linked worktree; git shares that hook with every worktree of this repository)"; fi
   fi
+  # The rules at commit time, under any agent. This is the local backstop for a
+  # closeout written by hand or a work order never opened: the driver cannot see
+  # those, git can.
+  if [ "$PROFILE" != minimal ]; then
+    if [ -f "$PREC" ] && ! grep -q 'acp:pre-commit:check' "$PREC" 2>/dev/null; then
+      say "pre-commit: left your existing hook alone; to add the pipeline's checks, call"
+      say "            \"\$(git rev-parse --show-toplevel)/$REL_DEST/bin/acp\" check --staged from it"
+    else
+      cat > "$PREC" <<PRECEOF
+#!/usr/bin/env sh
+# acp:pre-commit:check — installed by AICodePipeline, safe to delete
+acp="\$(git rev-parse --show-toplevel 2>/dev/null)/$REL_DEST/bin/acp"
+[ -x "\$acp" ] || exit 0
+exec "\$acp" check --staged
+PRECEOF
+      chmod +x "$PREC"
+      say "pre-commit: the rules run on every commit (${PREC#"$TARGET"/})"
+    fi
+  fi
 else
-  say "commit-msg: no git repository yet; re-run install after 'git init' to wire the traceability hook"
+  say "git: none here. The work-order gates still hold, but nothing can catch a closeout written by"
+  say "     hand or a commit that skips the driver. A local repository costs nothing and turns that on:"
+  say "         (cd \"$TARGET\" && git init) && $DEST/bin/acp install \"$TARGET\""
 fi
 
-# --- 5. Project CLAUDE.md, only if the project has none ------------------
-if [ ! -f "$TARGET/CLAUDE.md" ]; then
+# --- 5. Project instructions, only where the project has none --------------
+# AGENTS.md is the file most agents read (Codex, Cursor, and others); CLAUDE.md is
+# what Claude Code reads, and it can import. So the methodology lives once, in
+# AGENTS.md, and CLAUDE.md points at it. Neither is ever overwritten.
+if [ ! -f "$TARGET/AGENTS.md" ]; then
   STACK_SECTION="$(printf '%s' "$STACK_JSON" | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
@@ -357,9 +398,9 @@ else:
     if c.get("build"): print("- **Build:** `" + c["build"] + "`")
     print("- **Rule sets installed:** " + ", ".join(d["rule_sets"]))
 ' 2>/dev/null || echo "- **Stack:** _(fill in)_")"
-  cp "$SRC/core/templates/project/CLAUDE.md" "$TARGET/CLAUDE.md"
-  for v in "${VARS[@]}"; do VAR="$v" VAL="${!v-}" perl -pi -e 's/\{\{\Q$ENV{VAR}\E\}\}/$ENV{VAL}/g' "$TARGET/CLAUDE.md"; done
-  STACK_JSON="$STACK_JSON" STACKS_DIR="$SRC/core/templates/project/stacks" python3 - "$TARGET/CLAUDE.md" "$STACK_SECTION" <<'PYEOF'
+  cp "$SRC/core/templates/project/CLAUDE.md" "$TARGET/AGENTS.md"
+  for v in "${VARS[@]}"; do VAR="$v" VAL="${!v-}" perl -pi -e 's/\{\{\Q$ENV{VAR}\E\}\}/$ENV{VAL}/g' "$TARGET/AGENTS.md"; done
+  STACK_JSON="$STACK_JSON" STACKS_DIR="$SRC/core/templates/project/stacks" python3 - "$TARGET/AGENTS.md" "$STACK_SECTION" <<'PYEOF'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text().replace("{{STACK_SECTION}}", sys.argv[2])
 import json, os
@@ -380,14 +421,40 @@ for k in stacks:
 if frag: s = s.replace("\n---\n\n## Where Things Live", "\n---\n" + frag + "\n---\n\n## Where Things Live", 1)
 p.write_text(s)
 PYEOF
-  say "wrote CLAUDE.md from the project template (none existed)"
+  say "wrote AGENTS.md from the project template (none existed)"
 else
-  say "CLAUDE.md exists — left alone"
+  say "AGENTS.md exists — left alone"
+fi
+if [ ! -f "$TARGET/CLAUDE.md" ]; then
+  cat > "$TARGET/CLAUDE.md" <<'CLEOF'
+# Project instructions for Claude Code
+
+@AGENTS.md
+
+The instructions above are the same ones every other agent reads. What is specific to Claude Code:
+
+- The pipeline's session hooks are registered in `.claude/settings.json` and run automatically:
+  they are the early warning for the rules that `wo close`, the git hooks and CI enforce later.
+- Work orders name specialist roles. Delegate each role to the subagent of that name; the
+  definitions are in `.claude/agents/`.
+CLEOF
+  say "wrote CLAUDE.md (imports AGENTS.md, plus what is specific to Claude Code)"
+elif ! grep -q '@AGENTS.md' "$TARGET/CLAUDE.md" 2>/dev/null; then
+  say "CLAUDE.md is yours and was left alone; add the line  @AGENTS.md  to it so Claude Code reads the same instructions"
 fi
 
 echo
 # The install has committed; the authored files are back in place.
 rm -rf "$RECOVERY"
+
+# A count of files installed says nothing about whether they load. Lint says.
+if [ -x "$DEST/bin/lint" ]; then
+  lrc=0; lout="$("$DEST/bin/lint" "$DEST" 2>/dev/null | tail -1)" || lrc=$?
+  case "$lout" in
+    "0 error(s)"*) say "lint: $lout";;
+    *) say "lint: $lout — see:  $DEST/bin/lint $DEST"; say "      a skill or agent whose frontmatter does not parse is installed and never fires";;
+  esac
+fi
 
 echo "Done. Next:"
 echo "  export PATH=\"$DEST/bin:\$PATH\""

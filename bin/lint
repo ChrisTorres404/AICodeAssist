@@ -10,10 +10,19 @@ minimum depth), skills (SKILL.md with name and description), hook rules
 paths frontmatter well-formed), personal or host paths anywhere, invisible or
 bidirectional unicode that can hide instructions, and unresolved template
 variables outside templates. Exit 0 clean, 1 warnings only, 2 errors.
+
+Per-line exemption: a line carrying the comment
+
+    # acp:lint-ignore personal-path
+
+is skipped by the named rule (several names may be listed, space separated).
+It exists for the lines that have to contain the very thing a rule looks for —
+a test asserting that a home directory did NOT leak has to name one to search
+for it. Use it there and nowhere else; it silences one rule on one line.
 """
 import json, os, re, sys, pathlib
 if any(a in ("-h", "--help") for a in sys.argv[1:]):
-    print("usage: lint [--strict]\n  Validates agents, skills, hook rules, hooks JSON, rules, personal paths, invisible unicode, and cross-skill links. --strict makes warnings fail."); sys.exit(0)
+    print("usage: lint [--strict]\n  Validates agents, skills, hook rules, hooks JSON, rules, personal paths, invisible unicode, and cross-skill links. --strict makes warnings fail.\n  A line ending '# acp:lint-ignore personal-path' is exempt from that rule, for lines that must contain what the rule searches for."); sys.exit(0)
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else pathlib.Path(__file__).resolve().parents[1])
 STRICT = "--strict" in sys.argv
@@ -23,6 +32,8 @@ warn = lambda f, m: W.append(f"{f}: {m}")
 VALID_MODELS = {"sonnet", "opus", "haiku", "inherit"}
 BAD_UNICODE = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u202a-\u202e\u2066-\u2069\u180e\u115f\u1160\u2061-\u2064\u3164]|[\U000e0000-\U000e007f]")
 PERSONAL = re.compile(r"(/Users/(?!Shared/)[A-Za-z][A-Za-z0-9_-]*/|/home/(?!user/)[a-z][a-z0-9_-]*/|C:\\\\Users\\\\[A-Za-z])")
+# `# acp:lint-ignore <rule> [<rule>...]` — see the module docstring.
+LINT_IGNORE = re.compile(r"#\s*acp:lint-ignore\s+([A-Za-z0-9_\- ]+)")
 
 def yaml_ok(fm_text):
     """True when the frontmatter parses. Uses PyYAML when available; otherwise a strict
@@ -127,8 +138,13 @@ def check_text(p):
     try: t = p.read_text()
     except UnicodeDecodeError: return
     if BAD_UNICODE.search(t): err(rel, "invisible or bidirectional unicode present")
-    m = PERSONAL.search(t)
-    if m and "sanitize" not in p.name and "lint" not in p.name: err(rel, f"personal path {m.group(0)!r}")
+    if "sanitize" not in p.name and "lint" not in p.name:
+        for line in t.split("\n"):
+            m = PERSONAL.search(line)
+            if not m: continue
+            ig = LINT_IGNORE.search(line)
+            if ig and "personal-path" in ig.group(1).split(): continue
+            err(rel, f"personal path {m.group(0)!r}"); break
     if str(rel).startswith(("core/agents", "core/skills", "core/rules", "docs")) and "{{STACK_SECTION}}" in t: err(rel, "unresolved {{STACK_SECTION}} outside templates")
 
 for p in sorted((ROOT / "core/agents").rglob("*.md")):

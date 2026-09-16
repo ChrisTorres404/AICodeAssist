@@ -37,6 +37,7 @@ def latest_status(path):
     if "RUNNING" in line: return "RUNNING"
     if re.search(r"EXECUTED\s*[—–-]+\s*PASS", line): return "PASS"
     if re.search(r"EXECUTED\s*[—–-]+\s*FAIL", line): return "FAIL"
+    if "PRECONDITION" in line: return "PRECOND"
     if "NOT EXECUTED" in line: return "PLAN"
     return "none"
 
@@ -75,6 +76,8 @@ def main():
             problems.append(f"{rel}: the latest verification run is EXECUTED — FAIL")
         elif st == "RUNNING":
             problems.append(f"{rel}: the last verification never finished; an interrupted run is not a result")
+        elif st == "PRECOND":
+            problems.append(f"{rel}: the last verification could not run (a precondition failed); nothing was asserted")
         elif st == "PLAN":
             problems.append(f"{rel}: VERIFICATION is NOT EXECUTED — PLAN ONLY")
         else:

@@ -18,7 +18,7 @@ export PROJECT_DOMAIN="example.com"        # Primary domain
 export GITHUB_REPO="owner/repo"            # For `gh` commands in instructions
 
 # --- Locations (absolute for PROJECT_ROOT, repo-relative for the rest) -----
-export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this file lives at the repo root; keep it dynamic so clones work
+export PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"   # this file lives at the repo root; keep it dynamic so clones work
 export PIPELINE_ROOT=".aicodepipeline"     # Where the pipeline is installed
 export WORKSPACE_DIR="Workspace"           # Umbrella dir for generated artifacts
 export DOCS_DIR="Workspace/Docs"

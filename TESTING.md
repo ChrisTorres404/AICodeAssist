@@ -155,11 +155,14 @@ a driver for real, and asserts on what happened.
 | `hook-commit-quality-blocks-secret` | a staged AWS-style key blocks the commit; a clean commit passes |
 | `hook-config-protection` | editing an existing `tsconfig` is blocked, creating one is allowed |
 | `hook-doc-claims` | `SOURCE` comments pointing at missing files are reported, traced claims are silent, only strict blocks |
+| `hook-secret-fixture-pragma` | an `acp:allow-secret` line lets a security fixture commit; an unmarked credential still blocks, in the hook and in `check` |
+| `hooks-skip-vendored-pipeline` | the hooks report the project's code, not the pipeline vendored inside it, and still report a checkout of the pipeline itself |
 | `install-profiles` | minimal, standard, and full install what they promise |
 | `install-self-guard` | `install.sh` run from the installed copy refuses instead of deleting the install |
 | `lint-and-sanitize-clean` | the tree passes its own lint and sanitizer |
 | `stack-fixtures` | seventeen stacks each get the right rule sets, stack profile, Stack line, and run/test commands |
 | `wo-close-needs-verification` | close and promote refuse on missing, plan-only, or failed verification |
+| `wo-reference-allow-trailer` | an `Acp-Allow-Reference` trailer lets a commit write about a work-order identifier without claiming it, in both forms of the hook |
 
 Expected output is one line per evaluation and a summary; exit 0 when
 `0 failed`:

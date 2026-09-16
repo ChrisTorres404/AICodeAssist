@@ -2,9 +2,14 @@
 /**
  * Behavioral Test Coverage Calculator
  *
- * Reads a verification document and reports how much of it is actually backed
- * by execution: how many tests were run, how many passed, and how many are
- * still NOT EXECUTED. A plan is not coverage.
+ * Not a runner: it runs nothing. It reads a verification document one of the
+ * runners already produced and reports how much of it is actually backed by
+ * execution — how many tests were run, how many passed, and how many are still
+ * NOT EXECUTED. A plan is not coverage.
+ *
+ * The summary it writes lands in the same results directory every runner uses
+ * (TEST_RESULTS_DIR, resolved by harness/lib/paths.sh), so nothing it produces
+ * is written into the tree the evidence is fingerprinted against.
  */
 
 const fs = require('fs');
@@ -85,7 +90,7 @@ if (args.length === 0) {
   console.error('  node calculate-coverage.js {{WORKORDERS_DIR}}/WO-0101-example/WO-0101-VERIFICATION.md');
   console.error('');
   console.error('Set COVERAGE_SUMMARY_FILE to control where the summary is written');
-  console.error('(default: test-results/coverage-summary.txt).');
+  console.error('(default: $TEST_RESULTS_DIR/coverage-summary.txt, else results/).');
   process.exit(1);
 }
 
@@ -157,7 +162,10 @@ Total: ${coverage.total} | Passed: ${coverage.passed} | Failed: ${coverage.faile
 Status: ${coverage.failed === 0 && coverage.executed > 0 ? '✅ ALL PASS' : coverage.failed > 0 ? '❌ FAILURES' : '⏳ PENDING'}
 `;
 
-const summaryPath = process.env.COVERAGE_SUMMARY_FILE || path.join('test-results', 'coverage-summary.txt');
+// One results directory for everything the harness writes; harness/lib/paths.sh
+// exports TEST_RESULTS_DIR, and the runners pass it through.
+const summaryPath = process.env.COVERAGE_SUMMARY_FILE
+  || path.join(process.env.TEST_RESULTS_DIR || 'results', 'coverage-summary.txt');
 fs.mkdirSync(path.dirname(summaryPath), { recursive: true });
 fs.writeFileSync(summaryPath, summaryContent);
 console.log(`📝 Summary written to: ${summaryPath}`);

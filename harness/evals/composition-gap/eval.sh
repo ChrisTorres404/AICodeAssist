@@ -73,5 +73,5 @@ rc=0; $W close "$i" >/dev/null 2>&1 || rc=$?; [ "$rc" -ne 0 ] || { echo "the int
 # fix the composition; it must now pass
 export SUITE_START_CMD="PORT=$port COMPOSE=1 node server.js"
 $W verify "$i" --run "$f" >/dev/null 2>&1 || { echo "the integration suite still fails after the composition is fixed"; exit 1; }
-fill_wo "$i"; $W close "$i" >/dev/null || { echo "close refused after a passing composition"; exit 1; }
+fill_wo "$i"; fill_review "$i"; $W close "$i" >/dev/null || { echo "close refused after a passing composition"; exit 1; }
 exit 0

@@ -16,8 +16,12 @@ ls -a | grep -q 'acp-doctor-probe' && { echo "doctor left its probe suite behind
 [ "$(ls Workspace/Docs/WorkOrders 2>/dev/null | wc -l | tr -d ' ')" -eq 0 ] || { echo "doctor left its probe behind when run from outside the project"; exit 1; }
 ./.aicodepipeline/bin/pack search "anything" >/dev/null || { echo "pack search errored on a fresh install"; exit 1; }
 ./.aicodepipeline/bin/pack list >/dev/null || { echo "pack list errored"; exit 1; }
-grep -q "{{" CLAUDE.md && { echo "CLAUDE.md has unrendered variables"; grep -n "{{" CLAUDE.md | head -3; exit 1; }
-grep -rq "{{PIPELINE_ROOT}}\|{{PROJECT_ROOT}}\|{{API_BASE_URL}}" .aicodepipeline/core .aicodepipeline/harness --exclude-dir=project && { echo "pipeline variables left unrendered"; exit 1; }
+grep -q "{{" AGENTS.md && { echo "AGENTS.md has unrendered variables"; grep -n "{{" AGENTS.md | head -3; exit 1; }
+grep -q "@AGENTS.md" CLAUDE.md || { echo "CLAUDE.md does not import AGENTS.md"; exit 1; }
+# The installer renders these three placeholders inside this very line, so an
+# installed copy of this file carries the rendered project path — which is a
+# home directory for most people. The rule is exempted here, on this line only.
+grep -rq "{{PIPELINE_ROOT}}\|{{PROJECT_ROOT}}\|{{API_BASE_URL}}" .aicodepipeline/core .aicodepipeline/harness --exclude-dir=project && { echo "pipeline variables left unrendered"; exit 1; }  # acp:lint-ignore personal-path
 n="$(./.aicodepipeline/bin/wo new "First order" --size small --area backend | grep -o 'WO-[0-9]*' | head -1)"
 [ -n "$n" ] || { echo "wo new produced no number"; exit 1; }
 ./.aicodepipeline/bin/wo status "${n#WO-}" >/dev/null

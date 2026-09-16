@@ -22,7 +22,7 @@ case "$out" in *"nothing is listening"*|*"service is not up"*|*"did not become h
 mkdir -p src && printf '{"name":"p","scripts":{"test":"vitest"},"dependencies":{"react":"19.0.0"}}' > package.json && echo '{}' > tsconfig.json && echo '{}' > package-lock.json
 ./.aicodepipeline/bin/detect-stack . --write >/dev/null || { echo "detect-stack --write failed"; exit 1; }
 [ -d .claude/rules/typescript ] && [ -d .claude/rules/react ] || { echo "rule sets not installed by --write: $(ls .claude/rules)"; exit 1; }
-grep -q "Run tests:\*\* \`npm run test\`" CLAUDE.md || { echo "CLAUDE.md not refreshed"; grep -n "Run tests" CLAUDE.md; exit 1; }
+grep -q "Run tests:\*\* \`npm run test\`" AGENTS.md || { echo "AGENTS.md not refreshed"; grep -n "Run tests" AGENTS.md; exit 1; }
 # 5. the test framework exits non-zero from end_test_suite when a test failed
 cat > fw.sh <<'EOS'
 #!/usr/bin/env bash

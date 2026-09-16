@@ -35,8 +35,12 @@ if ! curl -s -o /dev/null --max-time 2 "$HOST/"; then
   trap 'stop_service' EXIT INT TERM
   for _ in $(seq 1 20); do curl -s -o /dev/null --max-time 1 "$HOST/" && break; sleep 0.5; done
 fi
+# Exit 77 is reserved for "I could not run": the environment this suite needs is
+# not there, so nothing below can mean anything. The driver records that as
+# NOT EXECUTED — PRECONDITION FAILED, never as a failure of the code.
+precondition() { echo "  precondition: $*" >&2; exit 77; }
 HEALTH="$(health_url || true)"          # resolved now that the service answers
-[ "$(code "$HEALTH")" = 200 ] || { echo "  FAIL no healthy endpoint (tried $HEALTH)"; [ -n "$STARTED" ] && tail -5 "/tmp/suite-service.$$.log"; exit 1; }
+[ "$(code "$HEALTH")" = 200 ] || { [ -n "$STARTED" ] && tail -5 "/tmp/suite-service.$$.log"; precondition "no healthy endpoint (tried $HEALTH)"; }
 
 # --- checks: one behaviour per line; create what you need and clean it up after ---
 check "$(code "$HEALTH")" 200 "health answers 200"

@@ -27,14 +27,14 @@ export PATH="$PWD/.aicodepipeline/bin:$PATH"
   installed 95 agents, 32 commands, 162 skills, 1 workflows
   installed rules: common
   hooks installed; 77 allow and 21 deny rules added
-  wrote CLAUDE.md from the project template (none existed); git initialised
+  wrote AGENTS.md (the instructions every agent reads); wrote CLAUDE.md (imports it); git initialised
 ```
 
 `--profile minimal` gives rules, agents, commands, and the six lifecycle skills
 with no hooks; `standard` is the default; `full` adds the domain agent packs and
 every optional skill pack.
 
-## 2. Read the CLAUDE.md it generated
+## 2. Read the AGENTS.md it generated
 
 It is yours — `install.sh` never overwrites it. Read the **Project specifics**
 section at the bottom first; that is what an agent reads to locate your code.
@@ -52,7 +52,7 @@ acp doctor
   PASS  no unresolved template variables
   PASS  hooks wired in .claude/settings.json
   PASS  agents: 95    skills: 162    rules: common
-  WARN  CLAUDE.md Project Specifics still has placeholders — run: detect-stack . --write
+  WARN  AGENTS.md Project Specifics still has placeholders — run: detect-stack . --write
 
 healthy — 1 warning(s)
 ```
@@ -77,12 +77,12 @@ detect-stack . --write
 ```
 
 ```
-updated ./CLAUDE.md: **Stack:** javascript (npm)        # Node track
-updated ./CLAUDE.md: **Stack:** python, fastapi (pip)   # Python track
+updated ./AGENTS.md: **Stack:** javascript (npm)        # Node track
+updated ./AGENTS.md: **Stack:** python, fastapi (pip)   # Python track
 installed rule sets: typescript                        # or: python
 ```
 
-It rewrites the Stack / Run / Test / Build lines of CLAUDE.md in place and
+It rewrites the Stack / Run / Test / Build lines of AGENTS.md in place and
 installs the rule sets the code now needs — on the Python track, `Run locally:
 uvicorn app.main:app --reload` and `Run tests: pytest`. Add a `tsconfig.json`
 and the Stack line reads `typescript` instead. Run it again whenever the stack
@@ -278,8 +278,9 @@ $EDITOR <your-project>/pipeline.config.sh     # PROJECT_NAME, PROJECT_SLUG, the 
 ```
 
 The stack is detected from the code already there, so the rule sets and the
-CLAUDE.md stack section arrive filled in. An existing `CLAUDE.md` is left alone
-— merge in what you want from `<pipeline>/core/templates/project/CLAUDE.md`.
+AGENTS.md stack section arrive filled in. An existing `AGENTS.md` or `CLAUDE.md` is
+left alone; add the line `@AGENTS.md` to your own `CLAUDE.md` so Claude Code reads the
+same instructions as every other agent.
 Re-run `install.sh` from the pipeline clone to update; authored work and
 `core/agents/overlays/` survive.
 
@@ -294,6 +295,6 @@ You get the commands, agents, skills, and hooks with nothing written into the
 project; `acp doctor` reports plugin mode. The drivers still want a
 `pipeline.config.sh` to know where to put things.
 
-**Next:** `CLAUDE.md` in your project (edit it; agents read it first) ·
+**Next:** `AGENTS.md` in your project (edit it; every agent reads it first) ·
 `docs/harness.md` (the harness in full) · `TESTING.md` (how to verify the
 pipeline itself) · `acp help`, or `wo`, `bug`, `pack` with no arguments.

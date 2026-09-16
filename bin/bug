@@ -19,7 +19,7 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-PIPELINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PIPELINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SELF_ROOT="$PIPELINE_ROOT"
 TEMPLATES="$PIPELINE_ROOT/core/templates/bugs"; [ -d "$TEMPLATES" ] || TEMPLATES="$PIPELINE_ROOT/templates/bugs"   # plugin layout
 TESTING_TEMPLATES="$(dirname "$TEMPLATES")/testing"
@@ -37,10 +37,13 @@ if [ -n "$CONFIG" ]; then
   # shellcheck disable=SC1090
   . "$CONFIG"
   PIPELINE_ROOT="$SELF_ROOT"   # the config's PIPELINE_ROOT is the project's install path; ours is where this script lives
-  PROJECT_ROOT="${PROJECT_ROOT:-$(dirname "$CONFIG")}"
+  PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$CONFIG")" && pwd -P)}"
+  # The config resolves its own location logically; under a symlinked path that is a
+  # different string from the physical one, and every exclusion below is a prefix match.
+  PROJECT_ROOT="$(cd "$PROJECT_ROOT" 2>/dev/null && pwd -P || printf '%s' "$PROJECT_ROOT")"
   BUG_DIR="$PROJECT_ROOT/${BUGS_DIR:?BUGS_DIR not set in pipeline.config.sh}"
 else
-  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
   BUG_DIR="$PROJECT_ROOT/${BUGS_DIR:-Workspace/Docs/Bugs}"
 fi
 
@@ -157,9 +160,10 @@ cmd_new() {
     mkdir -p "$dir"
   }
   with_id_lock reserve_number
+  write_manifest "$dir/.bug-manifest"
   render "$TEMPLATES/BUG-TEMPLATE-ISSUE.md" "$dir/BUG-$num-$slug.md" "$num" "$title"
   [ "$want_prompt" -eq 1 ] && render "$TEMPLATES/BUG-TEMPLATE-PROMPT.md" "$dir/BUG-$num-Prompt.md" "$num" "$title"
-  printf 'title=%s\ncreated=%s\nowner=%s\n' "$title" "$(date +%F)" "$(git config user.name 2>/dev/null || whoami)" > "$dir/.bug-meta"
+  printf 'title=%s\ncategory=%s\ncreated=%s\nowner=%s\n' "$title" "${category:-}" "$(date +%F)" "$(git config user.name 2>/dev/null || whoami)" > "$dir/.bug-meta"
   if [ -n "$category" ]; then
     printf 'category=%s\ninvestigate=%s\nfix=%s\nvalidate=%s\n' "$category" "$investigate" "$fix" "$validate" >> "$dir/.bug-meta"
     # the routing goes at the top of the issue document so whoever opens it sees it first
@@ -188,13 +192,54 @@ PYEOF
   echo "Closeout is blocked until BUG-$num-VERIFICATION.md exists."
 }
 
+bug_state() { # dir -> fixed | open | in-progress | blocked | migrated ...
+  # A closeout means fixed; otherwise the recorded status; otherwise open. The
+  # number series is a convenience, and the category in the metadata is the truth.
+  if ls "$1" 2>/dev/null | grep -qi -- "CLOSEOUT"; then echo fixed; return; fi
+  local st; st="$( [ -f "$1/.bug-meta" ] && sed -n 's/^status=//p' "$1/.bug-meta" | head -1 || true)"; echo "${st:-open}"
+}
+cmd_adopt() { # <file> --number N --category C [--title T] [--status migrated] [--dry-run]
+  # An existing bug record keeps its number because everything else cites it. That
+  # number may land inside a category's series it does not belong to, so the
+  # category lives in the metadata and the series is not read as meaning.
+  local file="" num="" cat="" title="" status="migrated" dry=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --number) num="$2"; shift 2;; --category) cat="$2"; shift 2;; --title) title="$2"; shift 2;;
+      --status) status="$2"; shift 2;; --dry-run) dry=1; shift;; -*) die "unknown flag $1";; *) file="$1"; shift;;
+    esac
+  done
+  [ -n "$file" ] && [ -f "$file" ] || die 'usage: bug adopt <file.md> --number N --category C [--title T] [--status migrated|open|fixed] [--dry-run]'
+  [ -n "$num" ] || die "bug adopt: --number is required; adopted bugs keep the number their record cites"
+  [ -n "$cat" ] || die "bug adopt: --category is required, because the number cannot say what the bug is about"
+  num="$(printf '%04d' "$((10#$num))")"
+  [ -z "$title" ] && title="$(grep -m1 -E '^# ' "$file" | sed 's/^# *//' | cut -c1-80)"; [ -z "$title" ] && title="$(basename "$file" .md)"
+  local taken; taken="$(find "$BUG_DIR" -maxdepth 1 -type d -name "BUG-$num-*" -print -quit 2>/dev/null)"
+  [ -z "$taken" ] || die "BUG-$num already exists: $taken"
+  local routing; routing="$(route "$cat" 2>/dev/null || true)"; local series="${routing%%|*}"
+  local note=""
+  if [ -n "$series" ]; then
+    local base=$((10#$series)) top=$(( (10#$series / 100) * 100 + 99 )) nn=$((10#$num))
+    { [ "$nn" -ge "$base" ] && [ "$nn" -le "$top" ]; } || note="its number sits outside the $cat series ($series); the category in the metadata is what counts"
+  fi
+  local slug; slug="$(slugify "$title")"; local dir="$BUG_DIR/BUG-$num-$slug"
+  if [ "$dry" -eq 1 ]; then printf 'would adopt  %s\n         as  %s/BUG-%s-%s.md\n   category  %s   status %s%s\n' "$file" "${dir#$PROJECT_ROOT/}" "$num" "$slug" "$cat" "$status" "${note:+   ($note)}"; return 0; fi
+  mkdir -p "$BUG_DIR"
+  reserve_number() { [ -e "$dir" ] && die "$dir already exists"; mkdir -p "$dir"; }
+  with_id_lock reserve_number
+  cp "$file" "$dir/BUG-$num-$slug.md"
+  printf 'title=%s\ncategory=%s\ncreated=%s\nadopted=%s\nadopted_from=%s\nowner=%s\nstatus=%s\n' "$title" "$cat" "$(date +%F)" "$(date +%F)" "$file" "$(git config user.name 2>/dev/null || whoami)" "$status" > "$dir/.bug-meta"
+  echo "BUG-$num adopted ($status, $cat): ${dir#$PROJECT_ROOT/}"
+  [ -n "$note" ] && echo "  note: $note"
+  echo "No verification was written; adopted bugs are recorded, not verified."
+}
 cmd_list() {
   printf "%-9s %-8s %-14s %s\n" "BUG" "STATE" "CATEGORY" "TITLE"
   for d in "$BUG_DIR"/BUG-*; do
     [ -d "$d" ] || continue
     local b n state
     b="$(basename "$d")"; n="${b#BUG-}"; n="${n%%-*}"
-    if ls "$d" | grep -qi -- "CLOSEOUT"; then state="fixed"; else state="open"; fi
+    state="$(bug_state "$d")"
     local cat; cat="$( [ -f "$d/.bug-meta" ] && sed -n 's/^category=//p' "$d/.bug-meta" || true)"
     printf "%-9s %-8s %-14s %s\n" "BUG-$n" "$state" "${cat:--}" "${b#BUG-$n-}"
   done
@@ -211,6 +256,20 @@ cmd_status() {
 }
 
 render_v() { sed -e "s/BUG-XXXX/BUG-$3/g; s/WO-XXXX/BUG-$3/g" -e "s/\[Title\]/$4/g" -e "s/YYYY-MM-DD/$(date +%F)/g" "$1" > "$2"; }
+vtemplate() { # the bug verification template when the templates ship one; the shared one otherwise
+  if [ -f "$TEMPLATES/BUG-TEMPLATE-VERIFICATION.md" ]; then echo "$TEMPLATES/BUG-TEMPLATE-VERIFICATION.md"; else echo "$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION.md"; fi
+}
+suite_fingerprint() { [ -f "$1" ] && { shasum -a 256 2>/dev/null || sha256sum; } < "$1" | cut -c1-16 || echo none; }
+check_counts() { # log -> "passed failed" from the last summary line a runner printed; nothing if none
+  perl -ne '
+    if    (/([0-9]+)[ \t]+passed(?![A-Za-z]).*?([0-9]+)[ \t]+failed(?![A-Za-z])/i)      { $p=$1; $f=$2 }
+    elsif (/([0-9]+)[ \t]+failed(?![A-Za-z]).*?([0-9]+)[ \t]+passed(?![A-Za-z])/i)      { $f=$1; $p=$2 }
+    elsif (/Tests:[ \t]+(?:([0-9]+)[ \t]+failed,[ \t]+)?([0-9]+)[ \t]+passed/i)        { $f=($1||0); $p=$2 }
+    elsif (/^[ \t]*([0-9]+)[ \t]+passing(?![A-Za-z])/i)                                 { $p=$1; $f=0 unless defined $f }
+    elsif (/^[ \t]*([0-9]+)[ \t]+failing(?![A-Za-z])/i)                                 { $f=$1 }
+    elsif (/^[ \t]*([0-9]+)[ \t]+passed(?![A-Za-z])(?!.*failed)/i)                      { $p=$1; $f=0 }
+    END { print +(defined $p ? $p : 0), " ", (defined $f ? $f : 0), "\n" if defined $p or defined $f }' "$1" 2>/dev/null
+}
 
 cmd_verify() {
   local n="" suite="" force=0
@@ -219,7 +278,7 @@ cmd_verify() {
   local d; d="$(bug_folder "$n")"; [ -n "$d" ] || die "no BUG-$n"
   local out="$d/BUG-$n-VERIFICATION.md"
   if [ ! -f "$out" ] || [ "$force" -eq 1 ]; then
-    render_v "$TESTING_TEMPLATES/TEST-TEMPLATE-VERIFICATION.md" "$out" "$n" "$(basename "$d")"
+    render_v "$(vtemplate)" "$out" "$n" "$(basename "$d")"
     printf '\n---\n\n## Execution Record\n\n**Overall status:** NOT EXECUTED — PLAN ONLY\n\n' >> "$out"
     echo "BUG-$n verification document created: $out"
   fi
@@ -230,10 +289,14 @@ cmd_verify() {
   # PASS standing as the authoritative answer. See bin/wo for the reasoning.
   local fp_before fp_after drift=""
   fp_before="$(tree_fingerprint)"
-  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** RUNNING (run $stamp started, tree $fp_before)/" "$out"
+  perl -pi -e "s|^\*\*Overall status:\*\* .*|**Overall status:** RUNNING (run $stamp started, tree $fp_before)|" "$out"
   set +e; bash "$suite" >"$log" 2>&1; rc=$?; set -e
   fp_after="$(tree_fingerprint)"
-  if [ "$rc" -eq 0 ]; then status="EXECUTED — PASS"; else status="EXECUTED — FAIL"; fi
+  if [ "$rc" -eq 0 ]; then status="EXECUTED — PASS"
+  elif [ "$rc" -eq 77 ]; then status="NOT EXECUTED — PRECONDITION FAILED"
+  else status="EXECUTED — FAIL"; fi
+  local counts="" checks="" shash; counts="$(check_counts "$log")"; [ -n "$counts" ] && checks="${counts% *} passed, ${counts#* } failed"
+  shash="$(suite_fingerprint "$suite")"
   if [ "$fp_before" != "$fp_after" ] && [ "$rc" -eq 0 ]; then
     if [ "${ALLOW_TREE_DRIFT:-0}" = 1 ]; then
       drift="Source changed during the run (tree $fp_before to $fp_after); accepted because ALLOW_TREE_DRIFT=1."
@@ -243,9 +306,12 @@ cmd_verify() {
     fi
   fi
   { printf '\n### Run %s\n\n- **Status:** %s\n- **Command:** `bash %s`\n- **Exit code:** %s\n- **Log:** `%s`\n' "$stamp" "$status" "$suite" "$rc" "$(basename "$log")"
+    [ -n "$checks" ] && printf -- '- **Checks:** %s\n' "$checks"
+    printf -- '- **Suite:** `%s` (%s)\n' "${suite#$PROJECT_ROOT/}" "$shash"
     [ -n "$drift" ] && printf -- '- **Source state:** %s\n' "$drift"
     printf '\n```\n'; tail -60 "$log"; printf '```\n'; } >> "$out"
-  perl -pi -e "s/^\*\*Overall status:\*\* .*/**Overall status:** $status (last run $stamp, tree $fp_after)/" "$out"
+  local ratio=""; [ -n "$counts" ] && ratio=", checks ${counts% *}/$(( ${counts% *} + ${counts#* } ))"
+  perl -pi -e "s|^\*\*Overall status:\*\* .*|**Overall status:** $status (last run $stamp, tree $fp_after, suite ${suite#$PROJECT_ROOT/}\@$shash$ratio)|" "$out"
   echo "$status (exit $rc) — recorded in $(basename "$out")"
   [ "$rc" -eq 0 ] || return 1
 }
@@ -260,16 +326,36 @@ placeholder_budget() { # how many template prompts may still remain at close
   if [ -f "$t" ]; then base="$(unfilled_placeholders "$t")"; echo "$((base / 2))"; else echo 24; fi
 }
 
+CHECK="$PIPELINE_ROOT/core/hooks/check.py"
+fingerprint_excludes() {
+  printf '%s\n' "${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" "${BUGS_DIR:-Workspace/Docs/Bugs}" "${SESSIONS_DIR:-Workspace/Sessions}" "${PIPELINE_ROOT#$PROJECT_ROOT/}" "${TESTING_DIR:-Workspace/Testing}/results"
+}
+write_manifest() { # <file>
+  [ -f "$CHECK" ] || return 0
+  ( cd "$PROJECT_ROOT" && python3 "$CHECK" --root "$PROJECT_ROOT" --write-manifest "$1" --exclude $(fingerprint_excludes | tr '\n' ' ') ) 2>/dev/null || true
+}
 # Shared with bin/wo: the same evidence rule has to mean the same thing in both.
-tree_fingerprint() { # hash of the source state the evidence was produced against; the work-order, bug, session, results, and pipeline folders are excluded
+tree_fingerprint() { # hash of the source state the evidence was produced against; the work-order, bug, session, results, suites, and pipeline folders are excluded
   ( set +e; cd "$PROJECT_ROOT" 2>/dev/null || { echo nofp; exit 0; }
-    local ex=(":!${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!${TESTING_DIR:-Workspace/Testing}/results")
+    local tdir="${TESTING_DIR:-Workspace/Testing}"
+    local ex=(":!${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}" ":!${BUGS_DIR:-Workspace/Docs/Bugs}" ":!${SESSIONS_DIR:-Workspace/Sessions}" ":!${PIPELINE_ROOT#$PROJECT_ROOT/}" ":!$tdir/results" ":!$tdir/suites")
+    # WO_PATHS narrows "the source" to what the work order declared (wo new --paths)
+    local scope=(.); [ -n "${WO_PATHS:-}" ] && IFS=, read -r -a scope <<< "$WO_PATHS"
     if git rev-parse --show-toplevel >/dev/null 2>&1; then
-      { git ls-files -s -- . "${ex[@]}" 2>/dev/null; git diff -- . "${ex[@]}" 2>/dev/null
-        git ls-files -o --exclude-standard -- . "${ex[@]}" 2>/dev/null | while IFS= read -r f; do [ -f "$f" ] && { printf '%s\n' "$f"; cat "$f"; }; done; } 2>/dev/null
+      # Every file contributes the same way whether git tracks it yet or not: its
+      # path and a hash of its content. Hashing index entries for tracked files and
+      # raw bytes for untracked ones meant `git add` changed the fingerprint of a
+      # file whose content had not changed, so committing the work staled the
+      # evidence just produced. One hash-object process reads every path at once.
+      local list; list="$(mktemp)"
+      { git -c core.quotePath=false ls-files -- "${scope[@]}" "${ex[@]}"
+        git -c core.quotePath=false ls-files -o --exclude-standard -- "${scope[@]}" "${ex[@]}"; } 2>/dev/null \
+        | LC_ALL=C sort -u | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done > "$list"
+      paste -d' ' <(git hash-object --stdin-paths < "$list" 2>/dev/null) "$list"
+      rm -f "$list"
     else
-      find . -type f -not -path './.git/*' -not -path "./${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}/*" -not -path "./${BUGS_DIR:-Workspace/Docs/Bugs}/*" -not -path "./${SESSIONS_DIR:-Workspace/Sessions}/*" \
-           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./${TESTING_DIR:-Workspace/Testing}/results/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
+      find "${scope[@]}" -type f -not -path './.git/*' -not -path "./${WORKORDERS_DIR:-Workspace/Docs/WorkOrders}/*" -not -path "./${BUGS_DIR:-Workspace/Docs/Bugs}/*" -not -path "./${SESSIONS_DIR:-Workspace/Sessions}/*" \
+           -not -path "./${PIPELINE_ROOT#$PROJECT_ROOT/}/*" -not -path "./$tdir/results/*" -not -path "./$tdir/suites/*" -not -path '*/node_modules/*' -not -path '*/.venv/*' -not -path '*/dist/*' 2>/dev/null \
         | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; cat "$f" 2>/dev/null; done
     fi | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-16
     true )
@@ -282,6 +368,7 @@ latest_status() { # verification file -> PASS | FAIL | PLAN | none
     *RUNNING*) echo RUNNING;;
     *"EXECUTED — PASS"*|*"EXECUTED - PASS"*) echo PASS;;
     *"EXECUTED — FAIL"*|*"EXECUTED - FAIL"*) echo FAIL;;
+    *PRECONDITION*) echo PRECOND;;
     *"NOT EXECUTED"*) echo PLAN;;
     *) echo none;;
   esac
@@ -326,6 +413,7 @@ cmd_close() {
     PASS) ;;
     FAIL) die "refusing to close BUG-$n: the latest verification run is EXECUTED — FAIL. Fix it and re-run:  bug verify $n --run <suite.sh>";;
     RUNNING) die "refusing to close BUG-$n: the last verification never finished. An interrupted run is not a result. Run it again:  bug verify $n --run <suite.sh>";;
+    PRECOND) die "refusing to close BUG-$n: the last verification could not run (exit 77: a precondition failed); nothing was asserted. Fix the environment and run it again:  bug verify $n --run <suite.sh>";;
     *) die "refusing to close BUG-$n: verification is NOT EXECUTED — PLAN ONLY. Run it:  bug verify $n --run <suite.sh>";;
   esac
   local ph budget; ph="$(unfilled_placeholders "$d/BUG-$n-VERIFICATION.md")"; budget="$(placeholder_budget)"
@@ -337,6 +425,15 @@ cmd_close() {
   local slug out; slug="$(basename "$d")"; slug="${slug#BUG-$n-}"
   out="$d/BUG-$n-$slug-CLOSEOUT.md"
   [ -e "$out" ] && die "$out already exists"
+  if [ -f "$CHECK" ] && [ "${ACP_SKIP_CHECK:-0}" != 1 ]; then
+    local crc=0
+    if [ -f "$d/.bug-manifest" ]; then
+      ( cd "$PROJECT_ROOT" && python3 "$CHECK" --root "$PROJECT_ROOT" --manifest "$d/.bug-manifest" --exclude $(fingerprint_excludes | tr '\n' ' ') ) || crc=$?
+    elif ( cd "$PROJECT_ROOT" && git rev-parse --show-toplevel >/dev/null 2>&1 ); then
+      ( cd "$PROJECT_ROOT" && python3 "$CHECK" --root "$PROJECT_ROOT" --since HEAD ) || crc=$?
+    fi
+    [ "$crc" -ne 2 ] || die "refusing to close BUG-$n: the checks above block. Fix them, or ACP_SKIP_CHECK=1 with a reason in the closeout."
+  fi
   render "$TEMPLATES/BUG-TEMPLATE-CLOSEOUT.md" "$out" "$n" "$slug"
   echo "BUG-$n closeout drafted: $out"
 }
@@ -346,6 +443,7 @@ case "${1:-}" in status|verify|promote|close) [ $# -ge 2 ] && set -- "$1" "$(pad
 case "${1:-}" in
   new) shift; cmd_new "$@";;
   list) shift; cmd_list;;
+  adopt)  shift; cmd_adopt "$@";;
   status) shift; cmd_status "${1:-}";;
   verify) shift; cmd_verify "$@";;
   promote) shift; cmd_promote "$@";;

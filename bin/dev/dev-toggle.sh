@@ -23,7 +23,8 @@
 #
 # Configuration (pipeline.config.sh or env):
 #   PROJECT_DOMAIN, DEV_SUBDOMAINS, PROD_IP
-#   PROXY_CONFIG   reverse-proxy config file   (default: {{PROJECT_ROOT}}/Caddyfile.local)
+#   PROXY_CONFIG   reverse-proxy config file   (default: <project root>/Caddyfile.local,
+#                  where the project root is resolved at run time, not at install time)
 #   PROXY_START / PROXY_STOP / PROXY_CHECK   commands to override the Caddy defaults
 #
 # Usage (macOS; the resolver step is macOS-specific):
@@ -38,7 +39,15 @@ set -euo pipefail
 HOSTS_FILE="/etc/hosts"
 RESOLVER_FILE="/etc/resolver/{{PROJECT_DOMAIN}}"
 RESOLVER_BACKUP="/etc/resolver/{{PROJECT_DOMAIN}}.bak"
-PROXY_CONFIG="${PROXY_CONFIG:-{{PROJECT_ROOT}}/Caddyfile.local}"
+# The project root is worked out when the script runs. Rendering an absolute
+# path in here at install time would bake one developer's home directory into
+# every clone of the repository — wrong for their teammates, and a personal path
+# that the pipeline's own linter then rejects.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# git first; failing that, this script lives at <pipeline>/bin/dev/ and the
+# pipeline is installed inside the project, so three levels up is the project.
+PROJECT_ROOT="${PROJECT_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))}"
+PROXY_CONFIG="${PROXY_CONFIG:-$PROJECT_ROOT/Caddyfile.local}"
 PROXY_START="${PROXY_START:-caddy start --config $PROXY_CONFIG}"
 PROXY_STOP="${PROXY_STOP:-caddy stop}"
 PROXY_CHECK="${PROXY_CHECK:-pgrep -f caddy}"

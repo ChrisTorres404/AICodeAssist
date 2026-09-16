@@ -7,6 +7,7 @@
 # new, search the packs. A problem that has already been solved, tested and
 # closed out is a far better starting point than a blank template.
 #
+#   pack lint [name]                 which catalog entries still have no pitfalls
 #   pack list                   list installed packs
 #   pack new <name>             scaffold an empty pack
 #   pack search <term>          full text across every pack
@@ -21,7 +22,7 @@
 # Scope to one pack with PACK=<name>, e.g. PACK=my-domain pack wo caching
 # ---------------------------------------------------------------------------
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PACKS="$ROOT/packs"
 [ -d "$PACKS" ] || mkdir -p "$PACKS"
 
@@ -110,6 +111,22 @@ Run \`bin/sanitize\` on this pack before sharing it.
 MD
     echo "pack created: $d"
     ;;
+  lint)
+    # The pitfalls are the part of a pack the next project needs, and promote
+    # asks for them rather than refusing. This is where the asking gets checked.
+    name="${2:-}"; rc=0; total=0; empty=0
+    for r in "${ROOTS[@]+"${ROOTS[@]}"}"; do
+      [ -n "$name" ] && [ "$(basename "$r")" != "$name" ] && continue
+      for e in "$r"/catalog/*.md; do
+        [ -f "$e" ] || continue
+        total=$((total+1))
+        if grep -qE '_\(none recorded|\[Lesson [0-9]|\[What would have saved' "$e" 2>/dev/null; then empty=$((empty+1)); echo "  no pitfalls recorded: ${e#$PACKS/}"; rc=1; fi
+      done
+    done
+    [ "$total" -gt 0 ] || { echo "pack lint: no catalog entries yet"; exit 0; }
+    echo "pack lint: $total entries, $empty without pitfalls"
+    [ "$rc" -eq 0 ] && echo "  every entry carries what would have saved someone time" || echo "  edit the Pitfalls lines above; a pack of placeholders is process without precedent"
+    exit "$rc";;
   list|packs)
     [ ${#ROOTS[@]} -gt 0 ] || { echo "no packs yet — pack new <name>, then wo promote"; exit 0; }
     printf "%-24s %8s %10s  %s\n" "PACK" "FILES" "SIZE" "CONTENTS"

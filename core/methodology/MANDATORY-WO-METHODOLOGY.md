@@ -336,7 +336,7 @@ non-optional. A closeout is rejected in review if:
 {{TESTING_DIR}}/
 ├── suites/                             # test suites
 │   └── wo-XXXX-feature-name.sh
-└── test-results/                       # execution reports
+└── results/                            # execution reports
 ```
 
 Methodology, templates, and the shared framework come from the pipeline:

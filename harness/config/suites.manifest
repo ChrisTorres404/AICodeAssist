@@ -1,6 +1,6 @@
-# Behavioral suite manifest — one line per suite:   tier|file|label
+# Behavioral suite manifest — one line per suite:   tier|type|file|label
 #
-# Tiers the runners understand:
+# tier — how central the suite is; it decides when the suite runs:
 #   essential       fastest proof the system is alive and the core path works
 #   core            the everyday regression set
 #   extended        slower or less central functional suites
@@ -10,24 +10,36 @@
 #   infrastructure  migrations, configuration, deployment shape
 #   recent          suites for work still settling; promoted to another tier later
 #
-# Modes:
+# type — what kind of test it is, which is a different question from how
+# central it is. Free-form, so a project can name its own; the conventional
+# values are:
+#   unit, e2e, static, backend, ui, browser, api
+#
+# Modes (tier selection):
 #   --quick     essential
 #   --standard  essential + core + extended
 #   --full      every tier
 #
+# --tier <name> runs one tier; --type <name> narrows to one type, and the two
+# compose:  --tier essential --type unit
+#
 # Files are relative to the project's suites directory. A listed file that does
 # not exist is reported as SKIP, never as a pass.
 #
+# The older three-field form `tier|file|label` still reads — such a line simply
+# has no type, and --type never selects it.
+#
 # Example rows — replace with your own:
 #
-# essential|health-and-readiness.sh|Health & Readiness
-# essential|core-write-path.sh|Create, read back, verify persisted
-# core|users-crud.sh|Users CRUD
-# core|search-filters.sh|Search & Filtering
-# extended|reporting-exports.sh|Reporting Exports
-# security|input-validation.sh|Input Validation
-# security|authorization-matrix.sh|Authorization Matrix
-# integration|outbound-webhooks.sh|Outbound Webhooks
-# performance|list-endpoint-latency.sh|List Endpoint Latency
-# infrastructure|migrations-applied.sh|Migrations Applied
-# recent|wip-feature-flags.sh|Feature Flags (new)
+# essential|api|health-and-readiness.sh|Health & Readiness
+# essential|e2e|core-write-path.sh|Create, read back, verify persisted
+# core|api|users-crud.sh|Users CRUD
+# core|api|search-filters.sh|Search & Filtering
+# core|ui|signup-form.sh|Signup form renders and submits
+# extended|backend|reporting-exports.sh|Reporting Exports
+# security|api|input-validation.sh|Input Validation
+# security|api|authorization-matrix.sh|Authorization Matrix
+# integration|e2e|outbound-webhooks.sh|Outbound Webhooks
+# performance|api|list-endpoint-latency.sh|List Endpoint Latency
+# infrastructure|static|migrations-applied.sh|Migrations Applied
+# recent|browser|wip-feature-flags.sh|Feature Flags (new)

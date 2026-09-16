@@ -2,9 +2,14 @@
 """
 sanitize — scan a directory for material that must not be shared.
 
-Secrets, personal identifiers, internal infrastructure, host-specific paths,
+Secrets, personal identifiers, internal infrastructure (private and public IPs,
+SSH strings, key-file references, and internal host names), host-specific paths,
 and dangerous files. Read-only: it reports, it never edits. A single CRITICAL
 finding is a FAIL. Warnings alone are PASS WITH WARNINGS.
+
+Internal host names are reported at WARNING: a name is a judgement call that no
+regex settles on its own, so the rule is tuned to put a human in front of the
+finding rather than to fail a release.
 
     bin/sanitize <dir> [--report <file.md>] [--allow <regex>]... [--quiet]
 
@@ -26,6 +31,119 @@ TEXT_EXT = {".md", ".txt", ".sh", ".py", ".js", ".ts", ".tsx", ".jsx", ".json",
             ".php", ".cs", ".swift", ".mjs", ".cjs", ".example", ""}
 SKIP_DIRS = {"node_modules", ".git", "__pycache__", ".venv", "venv", "dist",
              "build", ".next", ".turbo", "coverage"}
+
+# --- internal host names ---------------------------------------------------
+# api.github.com and iam-core.hollow-a.da11.delivery.engineering have the same
+# shape, so shape alone cannot separate a published documentation host from an
+# internal one. Two signals do, in practice:
+#
+#   1. a suffix reserved for private networks (.internal, .corp, .local, .lan,
+#      .intranet, .home.arpa) — always internal, whatever the depth;
+#   2. depth under an unusual top-level domain — three or more labels ending in
+#      something outside the handful of TLDs that public documentation, package
+#      registries and schema URLs actually use — AND some sign that the token is
+#      a host at all: a hyphen or a digit in one of its labels, a scheme or `@`
+#      in front of it, or a port behind it. Without that last condition the rule
+#      is drowned by dotted identifier chains, which have exactly the same shape:
+#      django.db.models, org.junit.jupiter, this.state.value, build.gradle.kts.
+#
+# Anything a regex reaches this way is a guess, which is why the finding is a
+# WARNING: it makes a human look at the name instead of failing the release.
+INTERNAL_SUFFIXES = {"internal", "corp", "local", "lan", "intranet"}
+
+# Deliberately short. Widening it hides internal hosts; the cost of a name that
+# is not on it is one warning a reviewer dismisses.
+PUBLIC_TLDS = {"com", "org", "net", "io", "dev", "app", "edu", "gov", "co", "uk",
+               "de", "fr", "ca", "au", "ai", "me", "info", "cloud", "sh", "xyz",
+               "ly", "tv", "us", "eu", "nl", "se", "ch", "jp", "in", "br",
+               "tech", "page", "site", "design"}
+
+# A dotted token whose last segment is a file extension is a filename, not a
+# host: settings.hooks.json, pipeline.config.example.sh, tsconfig.build.json.
+HOST_FILE_EXT = {e.lstrip(".") for e in TEXT_EXT if e} | {
+    "lock", "log", "bak", "tmp", "orig", "patch", "diff", "snap", "map", "d",
+    "gz", "tgz", "bz2", "zip", "tar", "xz", "png", "jpg", "jpeg", "gif", "svg",
+    "webp", "ico", "pdf", "woff", "woff2", "ttf", "eot", "mp4", "webm", "wasm",
+    "pem", "key", "crt", "cer", "p12", "pfx", "jks", "der", "pub", "dist",
+    "min", "test", "spec", "stories", "config", "sample", "template",
+    "bundle", "chunk", "types", "schema", "proto", "gradle", "kts", "properties"}
+
+# Roots of dotted identifier chains in the languages the packs carry code for.
+# Nothing that starts with one of these is a host name.
+CODE_ROOT_LABELS = {"self", "this", "cls", "super", "window", "document", "process",
+                    "module", "exports", "console", "globalthis", "navigator"}
+
+# Documentation stand-ins. A name containing one of these is teaching, not leaking.
+PLACEHOLDER_LABELS = {"example", "examples", "sample", "placeholder", "changeme",
+                      "your", "yourdomain", "yourcompany", "yourorg", "mycompany",
+                      "myproject", "mydomain", "acme", "foo", "bar", "baz", "qux",
+                      "todo", "tbd", "xxx", "somewhere", "somehost", "host",
+                      "hostname", "domain", "subdomain", "invalid", "test",
+                      "localhost", "project", "tenant", "customer"}
+
+# Lowercase only, on purpose: a real FQDN in a leaked config is lowercase, and
+# requiring it keeps Caddyfile.local and CHANGELOG.md out of the results.
+HOSTNAME_RE = re.compile(r"(?<![\w.\-])((?:[a-z0-9](?:[a-z0-9\-]*[a-z0-9])?\.)+[a-z][a-z0-9\-]*[a-z0-9])(?![\w\-])")
+
+def _inside_placeholder(line, start, end):
+    """True when the match sits inside {{...}}, <...> or ${...} — a template slot."""
+    for op, cl in (("{{", "}}"), ("<", ">"), ("${", "}")):
+        i = line.rfind(op, 0, start)
+        if i == -1:
+            continue
+        j = line.find(cl, i + len(op))
+        if j >= end:
+            return True
+    return False
+
+def _looks_like_host(labels, line, start, end):
+    """Separate a deep host name from a dotted identifier chain of the same shape.
+
+    Identifiers cannot contain a hyphen and rarely carry a digit, so a hyphen or
+    digit in any label but the last is strong evidence of a host. Failing that,
+    the surrounding text has to place it where only a host can go."""
+    if any("-" in l or any(c.isdigit() for c in l) for l in labels[:-1]):
+        return True
+    before = line[:start]
+    if before.endswith(("://", "//")):
+        return True
+    # `user@host`, not the `@pytest.mark.slow` and `@ohos.data.preferences` of
+    # decorators and module ids: an `@` only places a host when a user precedes it.
+    if re.search(r"[A-Za-z0-9_.\-]@$", before):
+        return True
+    return re.match(r":\d{2,5}(?!\d)", line[end:]) is not None
+
+def hostname_is_internal(m, line):
+    """Decide whether a dotted lowercase token is worth a reviewer's attention."""
+    host = m.group(1)
+    start, end = m.span(1)
+    if _inside_placeholder(line, start, end):
+        return False
+    # `os.path.join(` and `str.split(` are attribute chains, not hosts.
+    if end < len(line) and line[end] == "(":
+        return False
+    labels = host.split(".")
+    if len(host) > 253 or any(len(l) > 63 for l in labels):
+        return False
+    if all(l.isdigit() for l in labels):                           # 1.0.0, 2.11.4
+        return False
+    if labels[0] in CODE_ROOT_LABELS or any(l in PLACEHOLDER_LABELS for l in labels):
+        return False
+    # No top-level domain carries a digit; a trailing v1/x86/2 is a version or an id.
+    if any(c.isdigit() for c in labels[-1]):
+        return False
+    # A reserved private suffix is decisive on its own, whatever the depth.
+    if host.endswith(".home.arpa") or labels[-1] in INTERNAL_SUFFIXES:
+        return True
+    if labels[-1] in HOST_FILE_EXT:
+        return False
+    if len(labels) < 3 or labels[-1] in PUBLIC_TLDS:
+        return False
+    return _looks_like_host(labels, line, start, end)
+
+# A pattern may name a predicate here; a match it rejects is not a finding, and
+# the scan carries on to the remaining patterns for that line.
+VALIDATORS = {"infra.hostname": hostname_is_internal}
 
 # (id, severity, regex, label)  — severity: CRITICAL | WARNING
 PATTERNS = [
@@ -50,6 +168,7 @@ PATTERNS = [
     ("infra.pubip",    "CRITICAL", re.compile(r"(?<![/v\w.-])(?!(?:10|127|0)\.)(?!192\.0\.2\.)(?!198\.51\.100\.)(?!203\.0\.113\.)(?!93\.184\.216\.34)(?!255\.)(?!1\.1\.1\.1\b)(?!1\.0\.0\.1\b)(?!8\.8\.8\.8\b)(?!8\.8\.4\.4\b)(?!9\.9\.9\.9\b)(?!224\.0\.0\.)(?!239\.)(?!192\.168\.)(?!172\.(?:1[6-9]|2\d|3[01])\.)(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])(?:\.(?:\d{1,3})){3}(?![\w.-])(?<!\.0\.0\.0)"), "public IP address"),
     ("infra.ssh",      "CRITICAL", re.compile(r"\bssh\s+(-i\s+\S+\s+)?[a-z_][a-z0-9_-]*@[0-9A-Za-z.-]+"), "SSH connection string"),
     ("infra.pem",      "WARNING",  re.compile(r"\S+\.pem\b"), "key file reference"),
+    ("infra.hostname", "WARNING",  HOSTNAME_RE, "internal host name"),
     ("path.home",      "CRITICAL", re.compile(r"(/Users/(?!Shared/)[A-Za-z][A-Za-z0-9_-]*/|/home/(?!user/)[a-z][a-z0-9_-]*/|C:\\\\Users\\\\[A-Za-z])"), "host-specific home path"),
     ("path.secrets",   "CRITICAL", re.compile(r"(^|\s)~?/?\.secrets/"), "secrets directory reference"),
     ("cfg.entropy",    "WARNING",  re.compile(r"^[A-Z_]{4,}=[A-Za-z0-9+/=_-]{32,}$"), "high-entropy config value"),
@@ -109,10 +228,17 @@ def scan(root, allow):
                         if any(a.search(line) for a in allow):
                             continue
                         for pid, sev, rx, label in PATTERNS:
-                            m = rx.search(line)
-                            if m:
-                                findings.append((pid, sev, rel, n, label, truncate(m.group(0))))
-                                break
+                            check = VALIDATORS.get(pid)
+                            if check is None:
+                                m = rx.search(line)
+                            else:
+                                # every match on the line is offered to the predicate:
+                                # one rejected name must not hide a later real one
+                                m = next((x for x in rx.finditer(line) if check(x, line)), None)
+                            if m is None:
+                                continue
+                            findings.append((pid, sev, rel, n, label, truncate(m.group(0))))
+                            break
             except OSError:
                 pass
     return findings, files_scanned
@@ -121,7 +247,7 @@ def main():
     class _AP(argparse.ArgumentParser):
         def error(self, message):
             self.print_usage(sys.stderr); print(f"sanitize: error: {message}", file=sys.stderr); sys.exit(3)
-    ap = _AP()
+    ap = _AP(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dir")
     ap.add_argument("--report")
     ap.add_argument("--allow", action="append", default=[], help="regex; matching lines are ignored")

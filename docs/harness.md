@@ -16,14 +16,13 @@ harness/
 ├── config/test-config.env     one file switches the whole suite between environments
 ├── config/local.env           thin wrapper that selects the local environment
 ├── config/suites.manifest     the seed; the live copy is {{TESTING_DIR}}/suites.manifest (project-owned)
+├── lib/paths.sh               one resolution of suites, manifest, and results directory
 ├── lib/test-helpers.sh        HTTP, SQL, and optional auth helpers for suites
 ├── lib/test-framework.sh      suite scaffolding, summaries, progress
 ├── lib/verbose-test-framework.sh   full request/response/SQL transcripts
-├── runners/run-all-critical-tests.sh   regression runner, driven by the manifest
-├── runners/run-all-tests.sh   runs every suite on disk, listed or not
-├── runners/test-runner.sh     interactive runner over the same inventory
-├── scripts/run-behavioral-tests.sh   runs the manifest and writes an evidence report
-├── scripts/run-test-suite.sh  runs one suite, keeps its output
+├── runners/run-all-critical-tests.sh   the canonical runner, driven by the manifest
+├── runners/test-runner.sh     interactive: pick a suite, a tier, or hunt a flake
+├── scripts/run-behavioral-tests.sh   the same run, written out as a markdown report
 ├── scripts/calculate-coverage.js     how much of a verification document was executed
 ├── load/                      k6 capacity harness (see load/RUNBOOK.md)
 └── sql/rls-check.sql          parameterised Postgres row-level-security check
@@ -31,6 +30,30 @@ harness/
 
 Suites live in the project's `{{TESTING_DIR}}/suites/`. The runners find that
 directory automatically; `SUITES_DIR` overrides it.
+
+## Three entry points, and which one to use
+
+There is one runner to reach for and two specialisations of it. All three read
+the same manifest, and the canonical one's flags are the vocabulary the others
+speak.
+
+| Entry point | Use it when |
+|---|---|
+| `runners/run-all-critical-tests.sh` | **the default.** A regression, tier by tier, reported in the terminal |
+| `scripts/run-behavioral-tests.sh` | you need the run as a document — a dated markdown report to attach to a closeout |
+| `runners/test-runner.sh` | you are working by hand: one suite, one tier, or repeating a suite to catch a flake |
+
+`scripts/calculate-coverage.js` is not a runner. It runs nothing; it reads a
+verification document and reports how much of it was actually executed.
+
+### Where results go
+
+Everything any of them writes — reports, summaries, per-suite logs — goes to
+one directory: `{{TESTING_DIR}}/results/`. The installer creates it, and the
+drivers exclude it from the source fingerprint that binds evidence to the code
+it was produced against. A runner that wrote somewhere else would stale every
+recorded PASS the moment it ran. The resolution lives in `lib/paths.sh`;
+`TEST_RESULTS_DIR` overrides it.
 
 ## Configure once
 
@@ -95,10 +118,11 @@ or, before any run, `NOT EXECUTED — PLAN ONLY`.
 
 ## Regression tiers
 
-Add each suite to `{{TESTING_DIR}}/suites.manifest` as `tier|file|label` (created on
-install next to your suites and never overwritten; `harness/config/` edits such as
-`test-config.env` also survive reinstalls). The
-tiers, in the order the runner uses them:
+Add each suite to `{{TESTING_DIR}}/suites.manifest` as `tier|type|file|label`
+(created on install next to your suites and never overwritten; `harness/config/`
+edits such as `test-config.env` also survive reinstalls).
+
+**Tier** says how central the suite is — when it runs:
 
 | Tier | What belongs in it |
 |---|---|
@@ -111,20 +135,46 @@ tiers, in the order the runner uses them:
 | `infrastructure` | migrations, configuration, deployment shape |
 | `recent` | suites for work still settling, promoted later |
 
+**Type** says what kind of test it is, which is a different question. It is
+free-form, so a project can name its own; the conventional values are `unit`,
+`e2e`, `static`, `backend`, `ui`, `browser`, `api`. A security suite can be a
+`static` check or a `browser` one, and an `essential` suite can be either — the
+two axes do not collapse into one another.
+
+```
+essential|api|health-and-readiness.sh|Health & Readiness
+core|ui|signup-form.sh|Signup form renders and submits
+security|static|dependency-audit.sh|Dependency audit
+```
+
+The older three-field `tier|file|label` line still reads: it simply has no
+type, and `--type` never selects it. Nothing needs rewriting to keep working.
+
 ```bash
 harness/runners/run-all-critical-tests.sh --quick      # essential
 harness/runners/run-all-critical-tests.sh --standard   # essential + core + extended
 harness/runners/run-all-critical-tests.sh --full       # every tier
-harness/runners/run-all-critical-tests.sh --list       # what would run, and what is missing
+harness/runners/run-all-critical-tests.sh --list       # what would run, what is missing,
+                                                       # and what is present but unlisted
 harness/runners/run-all-critical-tests.sh --tier security
+harness/runners/run-all-critical-tests.sh --type unit            # one type, every tier
+harness/runners/run-all-critical-tests.sh --tier essential --type unit
 ```
 
 A listed suite whose file is missing is reported `SKIP`, never counted as a
-pass. For an evidence report in markdown rather than terminal output:
+pass. A suite file that no manifest row names never runs in a regression at
+all, which is why `--list` names those too.
+
+For the same run written out as an evidence document rather than terminal
+output — same manifest, same flags:
 
 ```bash
-harness/scripts/run-behavioral-tests.sh          # writes behavioral-test-report_<ts>.md
+harness/scripts/run-behavioral-tests.sh                       # standard tiers
+harness/scripts/run-behavioral-tests.sh --quick --type unit
 ```
+
+It writes `{{TESTING_DIR}}/results/behavioral-test-report_<ts>.md` and a
+`summary.txt` beside it.
 
 ## Load
 

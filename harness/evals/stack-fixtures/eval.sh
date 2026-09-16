@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # stack-fixtures — build one minimal fixture per stack, install the pipeline into
 # it, and assert what the install chose: rule sets, stack profile section, the
-# Stack line in CLAUDE.md, the run/test commands, and a clean doctor.
+# Stack line in AGENTS.md, the run/test commands, and a clean doctor.
 #
 # PIPELINE_ROOT and EVAL_TMP are set by bin/eval. Exit non-zero to fail.
 # Shortfalls in detection that do not (yet) justify failing are printed as
@@ -215,10 +215,10 @@ stack() {
   same "rule sets" "$want_rules" "$(ls "$FX/.claude/rules" 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')"
 
   local heading
-  heading="$(grep -m1 '^## Stack Rules — ' "$FX/CLAUDE.md" 2>/dev/null || true)"
+  heading="$(grep -m1 '^## Stack Rules — ' "$FX/AGENTS.md" 2>/dev/null || true)"
   same "stack profile" "$want_profile" "$heading"
 
-  same "Stack line" "$want_line" "$(grep -m1 '^- \*\*Stack:\*\*' "$FX/CLAUDE.md" 2>/dev/null || true)"
+  same "Stack line" "$want_line" "$(grep -m1 '^- \*\*Stack:\*\*' "$FX/AGENTS.md" 2>/dev/null || true)"
 
   local json; json="$("$ROOT/bin/detect-stack" "$FX" --json 2>/dev/null || echo '{}')"
   same "run command"  "$want_run"  "$(printf '%s' "$json" | cmd_of run)"

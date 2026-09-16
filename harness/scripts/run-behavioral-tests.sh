@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Behavioral test run → evidence report
+# Behavioral test run → markdown evidence report
 # ============================================================================
-# Runs the suites listed in harness/config/suites.manifest and writes a dated
-# markdown report in which every suite is stamped with what actually happened:
+# The manifest-driven run whose output is a document rather than a terminal
+# report. Same suites, same manifest and the same flags as the canonical runner
+# (../runners/run-all-critical-tests.sh); what differs is the artefact: a dated
+# markdown file in which every suite is stamped with what actually happened:
 #
 #   EXECUTED — PASS     the suite ran and exited 0
 #   EXECUTED — FAIL     the suite ran and exited non-zero (output included)
@@ -13,27 +15,31 @@
 # attach to a work order or bug closeout.
 #
 # Usage:
-#   ./run-behavioral-tests.sh [--tier <tier>] [--out <dir>]
+#   ./run-behavioral-tests.sh [--quick|--standard|--full] [--tier <tier>]
+#                             [--type <type>] [--out <dir>]
 #
-# Environment: ACTIVE_ENV, SUITES_DIR, SUITES_MANIFEST, and anything the suites
-# themselves read from config/test-config.env.
+#   --quick      essential tier only
+#   --standard   essential + core + extended (default)
+#   --full       every tier
+#   --tier X     one tier only; overrides the mode
+#   --type X     only suites of that type; composes with the mode and --tier
+#   --out DIR    write the report somewhere other than the results directory
+#
+# Environment: ACTIVE_ENV, SUITES_DIR, SUITES_MANIFEST, TEST_RESULTS_DIR, and
+# anything the suites themselves read from config/test-config.env.
 # ============================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${TEST_CONFIG:-$SCRIPT_DIR/../config/test-config.env}"
-MANIFEST="${SUITES_MANIFEST:-$( [ -f "$SUITES_DIR/../suites.manifest" ] && echo "$SUITES_DIR/../suites.manifest" || echo $SCRIPT_DIR/../config/suites.manifest)}"
 
-if [ -z "${SUITES_DIR:-}" ]; then
-  for candidate in \
-      "$SCRIPT_DIR/../../../{{TESTING_DIR}}/suites" \
-      "$SCRIPT_DIR/../../{{TESTING_DIR}}/suites" \
-      "$SCRIPT_DIR/../suites"; do
-    [ -d "$candidate" ] && { SUITES_DIR="$candidate"; break; }
-  done
-  SUITES_DIR="${SUITES_DIR:-$SCRIPT_DIR/../suites}"
-fi
+# Suites, manifest and results directory come from one shared resolver, which
+# also settles the order: the manifest cannot be resolved before the suites
+# directory it sits beside is known.
+# shellcheck source=../lib/paths.sh
+. "$SCRIPT_DIR/../lib/paths.sh"
+MANIFEST="$SUITES_MANIFEST"
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck disable=SC1090
@@ -41,16 +47,36 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 FILTER_TIER=""
-OUTPUT_DIR="${TEST_RESULTS_DIR:-$(dirname "$SUITES_DIR")/test-results}"
+FILTER_TYPE=""
+MODE="standard"
+OUTPUT_DIR="$TEST_RESULTS_DIR"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --quick)     MODE="quick"; shift;;
+    --standard)  MODE="standard"; shift;;
+    --full)      MODE="full"; shift;;
     --tier) FILTER_TIER="$(printf '%s' "${2:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"; shift 2;;
+    --type) FILTER_TYPE="$(printf '%s' "${2:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"; shift 2;;
     --out)  OUTPUT_DIR="${2:?--out needs a directory}"; shift 2;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
+
+# Which tiers a mode covers. --tier overrides it with a single tier.
+case "$MODE" in
+  quick)    MODE_TIERS="essential";;
+  full)     MODE_TIERS="essential core extended security integration performance infrastructure recent";;
+  *)        MODE_TIERS="essential core extended";;
+esac
+[ -n "$FILTER_TIER" ] && MODE_TIERS="$FILTER_TIER"
+
+tier_selected() {
+  local want="$1" t
+  for t in $MODE_TIERS; do [ "$t" = "$want" ] && return 0; done
+  return 1
+}
 
 mkdir -p "$OUTPUT_DIR"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
@@ -76,7 +102,8 @@ NOT_EXECUTED=0
   echo "**API:** ${API_BASE:-unset}  "
   [ -n "${DB_NAME:-}" ] && echo "**Database:** ${DB_USER:-}@${DB_HOST:-}:${DB_PORT:-}/${DB_NAME}  "
   echo "**Manifest:** $(basename "$MANIFEST")  "
-  [ -n "$FILTER_TIER" ] && echo "**Tier filter:** $FILTER_TIER  "
+  echo "**Mode:** $MODE (tiers: $MODE_TIERS)  "
+  [ -n "$FILTER_TYPE" ] && echo "**Type filter:** $FILTER_TYPE  "
   echo ""
   echo "---"
   echo ""
@@ -88,17 +115,18 @@ echo "Suites: $SUITES_DIR"
 echo ""
 
 if [ ! -f "$MANIFEST" ]; then
-  echo "No suite manifest at $MANIFEST — add tier|file|label lines." >&2
+  echo "No suite manifest at $MANIFEST — add tier|type|file|label lines." >&2
   exit 2
 fi
 
-while IFS='|' read -r tier file label; do
-  case "$tier" in ''|\#*) continue;; esac
-  tier="$(printf '%s' "$tier" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
-  [ -n "$file" ] || continue
-  [ -n "$FILTER_TIER" ] && [ "$tier" != "$FILTER_TIER" ] && continue
+while IFS= read -r line || [ -n "$line" ]; do
+  parse_manifest_line "$line" || continue
+  tier="$MF_TIER"; type="$MF_TYPE"; file="$MF_FILE"; label="$MF_LABEL"
+  tier_selected "$tier" || continue
+  # An untyped manifest row is never selected by --type: nothing says what
+  # kind of test it is.
+  [ -n "$FILTER_TYPE" ] && [ "$type" != "$FILTER_TYPE" ] && continue
 
-  label="${label:-$file}"
   path="$SUITES_DIR/$file"
   TOTAL=$((TOTAL + 1))
 
@@ -110,6 +138,7 @@ while IFS='|' read -r tier file label; do
       echo "### $label"
       echo ""
       echo "**Tier:** $tier  "
+      echo "**Type:** ${type:-untyped}  "
       echo "**Suite:** \`$file\`  "
       echo "**Status:** NOT EXECUTED — suite file not found"
       echo ""
@@ -139,6 +168,7 @@ while IFS='|' read -r tier file label; do
     echo "### $label"
     echo ""
     echo "**Tier:** $tier  "
+    echo "**Type:** ${type:-untyped}  "
     echo "**Suite:** \`$file\`  "
     echo "**Status:** $status  "
     echo "**Exit code:** $rc  "

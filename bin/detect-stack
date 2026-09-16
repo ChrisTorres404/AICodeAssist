@@ -6,11 +6,11 @@ detect-stack — inspect a project directory and report what it is built with.
 
 Prints languages, frameworks, package manager, and the run/test/build commands
 it could find. Used by bin/install.sh and bin/new-project to choose which rule
-sets to install and to fill in the project's CLAUDE.md. Read-only.
+sets to install and to fill in the project's AGENTS.md. Read-only.
 """
 import json, os, re, sys
 if any(a in ("-h", "--help") for a in sys.argv[1:]):
-    print("usage: detect-stack [project-dir] [--json] [--write [CLAUDE.md]]\n  Detects languages, frameworks, package manager, run/test/build/lint commands, and the rule sets to install.\n  --write refreshes the Stack / Run / Test / Build lines of the project's CLAUDE.md in place."); sys.exit(0)
+    print("usage: detect-stack [project-dir] [--json] [--write [AGENTS.md]]\n  Detects languages, frameworks, package manager, run/test/build/lint commands, and the rule sets to install.\n  --write refreshes the Stack / Run / Test / Build lines of the project's AGENTS.md (or CLAUDE.md) in place."); sys.exit(0)
 
 MARKERS = [  # (language, marker files, extensions)
     ("typescript", ["tsconfig.json", "tsconfig.base.json"], [".ts", ".tsx"]),
@@ -154,7 +154,7 @@ def main():
     if not os.path.isdir(root): print(f"detect-stack: {root} is not a directory", file=sys.stderr); return 3
     r = detect(root)
     if "--write" in sys.argv:
-        i = sys.argv.index("--write"); target = sys.argv[i + 1] if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith("--") else os.path.join(root, "CLAUDE.md")
+        i = sys.argv.index("--write"); target = sys.argv[i + 1] if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith("--") else next((os.path.join(root, n) for n in ("AGENTS.md", "CLAUDE.md") if os.path.exists(os.path.join(root, n))), os.path.join(root, "AGENTS.md"))
         if not os.path.exists(target): print(f"detect-stack: {target} not found", file=sys.stderr); return 1
         rules_dir = os.path.join(os.path.dirname(os.path.abspath(target)), ".claude", "rules")
         installed = sorted(set((os.listdir(rules_dir) if os.path.isdir(rules_dir) else [])) | set(r["rule_sets"]))

@@ -1,5 +1,75 @@
 # Changelog
 
+### 1.2.0 — enforcement that does not depend on the agent
+
+A paired trial under Codex showed the fifteen session hooks, ninety-five agents and
+one hundred sixty-two skills all inert, while the drivers, the templates and the one
+git hook did the work. So the rules now live where every tool can reach them, and
+the Claude Code layer is the early warning rather than the enforcement:
+
+- `acp check` runs the rule set over the staged changes, changes since a ref, an
+  explicit list of paths, or what a work order has changed since it opened; it
+  imports its rule tables from the hook scripts so the two cannot drift
+  (`portable-check`). Blocking under every profile: credentials, a modified lint,
+  format or strictness configuration, a closeout without an executed pass
+- `wo close` and `bug close` run it over the work's own changes, with or without
+  git, from a manifest taken at `wo new` (`no-git-lifecycle`)
+- install writes a git `pre-commit` hook that runs it on every commit, under any
+  agent; an existing hook is left alone, the minimal profile installs none, and
+  doctor reports it (`precommit-backstop`). `acp ci github` adds a workflow that
+  runs it on every pull request
+- standard and large work orders refuse to close without a filled-in review by
+  someone who did not implement them; `WO-####-REVIEW.md` is scaffolded at
+  `wo new`, and `ACP_SKIP_REVIEW=1` says so out loud (`review-required`)
+- the routed specialists are written into the work order's own prompt with the
+  path to each definition, so whatever tool does the work reads them; `acp agent`
+  and `acp agents --area` reach the catalog from a shell
+- install writes `AGENTS.md`, read by Codex, Cursor and most agents, and a short
+  `CLAUDE.md` that imports it; a project's own copies are never touched and
+  `detect-stack --write` refreshes whichever carries the stack lines
+  (`instructions-for-every-tool`)
+- `wo new --paths` binds a work order's evidence to part of a monorepo
+  (`wo-paths-scope`)
+- a project with no git gets the exact command that turns the backstop on, from
+  install and from doctor. The work-order tier holds without it
+
+Found by adopting the pipeline into a mature monorepo and migrating its record,
+twenty-nine findings; the defects each have a regression evaluation:
+
+- the fingerprint binds to file content whether or not git tracks the file yet, so
+  committing between verify and close no longer stales the evidence; the suite that
+  ran is bound on its own, so writing the next suite no longer stales the last pass
+  (`evidence-binding`)
+- exit 77 records `NOT EXECUTED — PRECONDITION FAILED`, never a failure, and the
+  count a runner printed is kept beside the verdict and shown by `wo list`
+  (`verify-results`)
+- `wo adopt` and `bug adopt` bring an existing record in as history with no
+  verification; `wo list`, `wo stats` and `bug list` read one definition of state;
+  adopted items stay out of cycle-time statistics; a bug's category lives in its
+  metadata (`adopt-existing-record`)
+- `wo suite --wrap` and `SUITE_COMMAND` keep the runner a project already has
+  (`suite-wrap`)
+- `wo promote` carries the suites the verification names into the pack and marks
+  references that did not travel; `pack lint` reports placeholder pitfalls
+  (`pack-carries-evidence`)
+- `acp baseline` runs the project's own tests once and records the first
+  measurement; doctor asks for it, opens every agent and skill it counts, notices a
+  repository with no commits and instructions pointing at a moved workspace; the
+  installer names a moved workspace instead of orphaning it and ends with lint
+  (`baseline-and-doctor`)
+- a credential-shaped test fixture commits with `acp:allow-secret` on its line; the
+  hooks skip the pipeline's own vendored source; a commit message may quote a
+  work order that does not exist with an `Acp-Allow-Reference` trailer
+  (`hook-secret-fixture-pragma`, `hooks-skip-vendored-pipeline`,
+  `wo-reference-allow-trailer`)
+- verification and closeout templates for UI work, a verification template of the
+  bug's own, one results directory for every runner, a type axis in the suite
+  manifest, the sanitizer notices internal hostnames, and a fresh install passes
+  its own linter (`verification-templates`, `harness-results-path`,
+  `manifest-suite-types`, `sanitize-hostname`, `install-lint-clean`)
+- the drivers resolve their roots physically, so a project under a symlinked
+  path fingerprints the same tree from every entry point
+
 ### 1.1.4 — first public release
 
 The 1.1.3 tree, prepared for a public repository:
